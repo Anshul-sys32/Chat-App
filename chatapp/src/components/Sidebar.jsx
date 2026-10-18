@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  FaUserFriends,
   FaUsers,
   FaLayerGroup,
   FaTimes,
@@ -10,7 +9,7 @@ import UserList from './UserList';
 import GroupList from './GroupList';
 
 const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
-  const [activeTab, setActiveTab] = useState('global');
+  const [activeTab, setActiveTab] = useState('users');
   const [search, setSearch] = useState('');
   let user = null;
   try {
@@ -22,10 +21,8 @@ const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'global':
-        return <UserList type="global" search={search} onStartChat={onSelectChat} />;
-      case 'local':
-        return <UserList type="local" search={search} onStartChat={onSelectChat} />;
+      case 'users':
+        return <UserList search={search} onStartChat={onSelectChat} />;
       case 'groups':
         return <GroupList search={search} onSelectGroup={onSelectChat} />;
       default:
@@ -72,16 +69,10 @@ const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
 
           <div className="mt-10 space-y-4">
             <IconButton
-              icon={<FaUserFriends />}
-              label="Global Users"
-              onClick={() => setActiveTab('global')}
-              active={activeTab === 'global'}
-            />
-            <IconButton
               icon={<FaUsers />}
-              label="Local Users"
-              onClick={() => setActiveTab('local')}
-              active={activeTab === 'local'}
+              label="Users"
+              onClick={() => setActiveTab('users')}
+              active={activeTab === 'users'}
             />
             <IconButton
               icon={<FaLayerGroup />}
@@ -115,7 +106,6 @@ const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
               onClick={() => {
                 localStorage.removeItem('user');
                 localStorage.removeItem('token');
-                localStorage.removeItem('localUsers');
                 window.location.reload();
               }}
               className="mt-2 text-sm bg-red-500 px-3 py-1 rounded hover:bg-red-600 w-full text-center"

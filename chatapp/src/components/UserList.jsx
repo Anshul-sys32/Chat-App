@@ -2,10 +2,9 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Socket from '../Socket';
 
-export default function UserList({ type = 'global', onStartChat, search = '' }) {
+export default function UserList({ onStartChat, search = '' }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
-  const [localUserIds, setLocalUserIds] = useState([]);
   const [onlineUserIds, setOnlineUserIds] = useState([]);
 
   useEffect(() => {
@@ -17,16 +16,6 @@ export default function UserList({ type = 'global', onStartChat, search = '' }) 
       }
     } catch {
       console.error("Invalid user data in localStorage");
-    }
-  }, []);
-
-  useEffect(() => {
-    // Load local chat history user IDs
-    try {
-      const stored = localStorage.getItem('localUsers');
-      setLocalUserIds(stored ? JSON.parse(stored) : []);
-    } catch {
-      setLocalUserIds([]);
     }
   }, []);
 
@@ -59,33 +48,21 @@ export default function UserList({ type = 'global', onStartChat, search = '' }) 
   }, []);
 
   const handleStartChat = (selectedUser) => {
-    const id = selectedUser._id;
-
-    if (!localUserIds.includes(id)) {
-      const updated = [...localUserIds, id];
-      setLocalUserIds(updated);
-      localStorage.setItem('localUsers', JSON.stringify(updated));
-    }
-
     if (onStartChat) onStartChat(selectedUser);
   };
 
-  const filteredUsers = currentUser
-    ? type === 'local'
-      ? allUsers.filter((u) => localUserIds.includes(u._id))
-      : allUsers.filter((u) => !localUserIds.includes(u._id))
-    : [];
+  const filteredUsers = currentUser ? allUsers : [];
   const visibleUsers = filteredUsers.filter((candidate) =>
     `${candidate.username} ${candidate.email}`.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
     <div className="text-white">
-      <h3 className="text-lg font-semibold mb-2 capitalize">{type} Users</h3>
+      <h3 className="text-lg font-semibold mb-2">Users</h3>
 
       <ul className="space-y-2 max-h-[calc(100vh-150px)] overflow-y-auto pr-1">
         {visibleUsers.length === 0 ? (
-          <p className="text-sm text-gray-400">No {type} users.</p>
+          <p className="text-sm text-gray-400">No users found.</p>
         ) : (
           visibleUsers.map((user) => {
             const isOnline = onlineUserIds.includes(String(user._id));

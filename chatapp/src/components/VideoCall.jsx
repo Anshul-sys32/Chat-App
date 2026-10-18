@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import Socket from "../Socket";
 
-export default function VideoCall({ to, isOpen, onClose }) {
+export default function VideoCall({ to, callType, isOpen, onClose }) {
   const localVideo = useRef();
   const remoteVideo = useRef();
+  const remoteAudio = useRef();
   const pc = useRef(null);
   const localStream = useRef(null);
   const pendingCandidates = useRef([]);
@@ -13,26 +14,40 @@ export default function VideoCall({ to, isOpen, onClose }) {
   const [error, setError] = useState("");
   const [calling, setCalling] = useState(false);
   const [incomingOffer, setIncomingOffer] = useState(null);
+  const [activeCallType, setActiveCallType] = useState(callType);
   const [visible, setVisible] = useState(isOpen);
 
   currentTo.current = to;
   onCloseRef.current = onClose;
   useEffect(() => setVisible(isOpen), [isOpen]);
+  useEffect(() => setActiveCallType(callType), [callType]);
 
-  const ensureLocalMedia = async () => {
+  const ensureLocalMedia = async (mediaType) => {
     if (!localStream.current) {
-      localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const mediaDevices = navigator.mediaDevices;
+      if (!mediaDevices?.getUserMedia) {
+        const message = window.isSecureContext
+          ? `This browser does not support ${mediaType === "audio" ? "microphone" : "camera and microphone"} access for calls.`
+          : "Calls require a secure HTTPS connection. Open this app over HTTPS and allow microphone access.";
+        throw new Error(message);
+      }
+      localStream.current = await mediaDevices.getUserMedia({
+        video: mediaType === "video",
+        audio: true,
+      });
     }
-    if (localVideo.current) localVideo.current.srcObject = localStream.current;
+    if (mediaType === "video" && localVideo.current) localVideo.current.srcObject = localStream.current;
     return localStream.current;
   };
 
   useEffect(() => {
-    const handleOffer = ({ offer, from }) => {
+    const handleOffer = ({ offer, from, callType: incomingCallType }) => {
       if (currentTo.current && String(currentTo.current) !== String(from)) return;
       if (pc.current) return;
+      const requestedType = incomingCallType === "audio" ? "audio" : "video";
       remoteUserId.current = from;
-      setIncomingOffer({ offer, from });
+      setIncomingOffer({ offer, from, callType: requestedType });
+      setActiveCallType(requestedType);
       setVisible(true);
       setError("");
     };
@@ -93,9 +108,10 @@ export default function VideoCall({ to, isOpen, onClose }) {
     pendingCandidates.current = [];
     if (localVideo.current) localVideo.current.srcObject = null;
     if (remoteVideo.current) remoteVideo.current.srcObject = null;
+    if (remoteAudio.current) remoteAudio.current.srcObject = null;
   };
 
-  const createPeerConnection = (targetId) => {
+  const createPeerConnection = (targetId, mediaType) => {
     const peer = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
@@ -107,7 +123,11 @@ export default function VideoCall({ to, isOpen, onClose }) {
     };
 
     peer.ontrack = (e) => {
-      if (remoteVideo.current) remoteVideo.current.srcObject = e.streams[0];
+      if (mediaType === "video" && remoteVideo.current) {
+        remoteVideo.current.srcObject = e.streams[0];
+      } else if (remoteAudio.current) {
+        remoteAudio.current.srcObject = e.streams[0];
+      }
     };
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === "connected") setCalling(false);
@@ -126,12 +146,12 @@ export default function VideoCall({ to, isOpen, onClose }) {
     setError("");
     remoteUserId.current = to;
     try {
-      const stream = await ensureLocalMedia();
-      pc.current = createPeerConnection(to);
+      const stream = await ensureLocalMedia(callType);
+      pc.current = createPeerConnection(to, callType);
       stream.getTracks().forEach((track) => pc.current.addTrack(track, stream));
       const offer = await pc.current.createOffer();
       await pc.current.setLocalDescription(offer);
-      Socket.emit("offer", { offer, to });
+      Socket.emit("offer", { offer, to, callType });
     } catch (callError) {
       setError(callError.message || "Could not start this call.");
       setCalling(false);
@@ -141,9 +161,9 @@ export default function VideoCall({ to, isOpen, onClose }) {
   const acceptCall = async () => {
     if (!incomingOffer) return;
     try {
-      const { offer, from } = incomingOffer;
-      const stream = await ensureLocalMedia();
-      pc.current = createPeerConnection(from);
+      const { offer, from, callType: incomingCallType } = incomingOffer;
+      const stream = await ensureLocalMedia(incomingCallType);
+      pc.current = createPeerConnection(from, incomingCallType);
       stream.getTracks().forEach((track) => pc.current.addTrack(track, stream));
       await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
       for (const candidate of pendingCandidates.current.splice(0)) {
@@ -177,7 +197,9 @@ export default function VideoCall({ to, isOpen, onClose }) {
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
       <section className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-5 text-gray-900 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{incomingOffer ? "Incoming video call" : "Video call"}</h2>
+          <h2 className="text-lg font-semibold">
+            {incomingOffer ? `Incoming ${incomingOffer.callType} call` : `${callType === "audio" ? "Audio" : "Video"} call`}
+          </h2>
           <button type="button" onClick={closeCall} className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100" aria-label="Close call">Close</button>
         </div>
         {incomingOffer ? (
@@ -190,10 +212,12 @@ export default function VideoCall({ to, isOpen, onClose }) {
           </div>
         ) : (
           <>
-            <div className="mb-3 grid grid-cols-2 gap-2">
-              <video ref={localVideo} autoPlay muted playsInline className="aspect-video w-full rounded-lg bg-black object-cover" />
-              <video ref={remoteVideo} autoPlay playsInline className="aspect-video w-full rounded-lg bg-black object-cover" />
-            </div>
+            {activeCallType === "video" && (
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <video ref={localVideo} autoPlay muted playsInline className="aspect-video w-full rounded-lg bg-black object-cover" />
+                <video ref={remoteVideo} autoPlay playsInline className="aspect-video w-full rounded-lg bg-black object-cover" />
+              </div>
+            )}
             {error && <p role="alert" className="mb-2 text-sm text-red-600">{error}</p>}
             <div className="flex justify-between">
               <button type="button" onClick={callUser} disabled={!to || calling} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50">{calling ? "Calling..." : "Start call"}</button>
@@ -201,6 +225,7 @@ export default function VideoCall({ to, isOpen, onClose }) {
             </div>
           </>
         )}
+        <audio ref={remoteAudio} autoPlay playsInline className="hidden" />
         {error && incomingOffer && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
       </section>
     </div>

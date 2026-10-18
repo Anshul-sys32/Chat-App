@@ -3,7 +3,7 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaUsers, FaVideo } from 'react-icons/fa';
+import { FaPhone, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 
 export default function Chat({ user, selectedChat, onSelectChat }) {
@@ -11,6 +11,7 @@ export default function Chat({ user, selectedChat, onSelectChat }) {
   const [messages, setMessages] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
+  const [callType, setCallType] = useState('video');
 
   useEffect(() => {
     connectAndRegisterUser(localStorage.getItem('token'));
@@ -138,15 +139,26 @@ export default function Chat({ user, selectedChat, onSelectChat }) {
               <p className="mt-0.5 text-xs text-teal-100/65">{selectedChat.members} members · {selectedChat.role}</p>
             )}
           </div>
-          <button
-            onClick={() => setIsVideoOpen(true)}
-            title="Start Video Call"
-            disabled={!selectedChat || selectedChat.type === 'group'}
-            aria-label="Start video call"
-            className="text-white text-xl transition hover:text-teal-200 disabled:opacity-30"
-          >
-            <FaVideo />
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
+              title="Start Audio Call"
+              disabled={!selectedChat || selectedChat.type === 'group'}
+              aria-label="Start audio call"
+              className="text-white text-xl transition hover:text-teal-200 disabled:opacity-30"
+            >
+              <FaPhone />
+            </button>
+            <button
+              onClick={() => { setCallType('video'); setIsVideoOpen(true); }}
+              title="Start Video Call"
+              disabled={!selectedChat || selectedChat.type === 'group'}
+              aria-label="Start video call"
+              className="text-white text-xl transition hover:text-teal-200 disabled:opacity-30"
+            >
+              <FaVideo />
+            </button>
+          </div>
         </header>
 
         {/* Main chat area */}
@@ -207,6 +219,7 @@ export default function Chat({ user, selectedChat, onSelectChat }) {
         {/* Video Call Modal */}
         <VideoCall
           to={selectedChat?.type === 'group' ? null : selectedChat?._id}
+          callType={callType}
           isOpen={isVideoOpen}
           onClose={() => setIsVideoOpen(false)}
         />
