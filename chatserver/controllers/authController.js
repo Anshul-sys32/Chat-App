@@ -1,13 +1,10 @@
 const User = require("../models/User");
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const generateToken = require("../utils/generateToken");
-
-const JWT_SECRET = "hzM48lH2sIo5lyt9RKYljQROmp9BRR3LTwfGooJhjg0IvaOktcufjG8P/gWJkxrx+YHO3afLEN0N/Woxufe7aw=="; // TEMP hardcoded
 
 exports.user = async (req, res) => {
   try {
-    const users = await User.find({}, "_id username email");
+    const users = await User.listPublic();
     res.json(users);
   } catch (err) {
     console.error("Fetch users error:", err);
@@ -17,26 +14,35 @@ exports.user = async (req, res) => {
 
 exports.register = async (req, res) => {
   try {
-    const { username, email, password, role } = req.body;
+    const { username, email, password } = req.body;
+    if (!username?.trim() || !email?.trim() || !password) {
+      return res.status(400).json({ message: "Username, email, and password are required." });
+    }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findByEmail(email.trim().toLowerCase());
     if (existingUser)
       return res.status(400).json({ message: "Email already registered." });
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const newUser = new User({
-      username,
-      email,
+    const newUser = await User.create({
+      username: username.trim(),
+      email: email.trim().toLowerCase(),
       password: hashedPassword,
-      role: role || "user",
-      status: "pending",
+      role: "user",
+    });
+    const token = generateToken(newUser);
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 24 * 60 * 60 * 1000,
     });
 
-    await newUser.save();
-
     res.status(201).json({
+      token,
       user: {
+        _id: newUser.id,
         username: newUser.username,
         email: newUser.email,
         role: newUser.role,
@@ -52,8 +58,11 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required." });
+    }
 
-    const user = await User.findOne({ email });
+    const user = await User.findByEmail(email?.trim().toLowerCase());
     if (!user)
       return res.status(400).json({ message: "Invalid email or password" });
 
@@ -67,19 +76,18 @@ exports.login = async (req, res) => {
         .json({ message: `Account ${user.status}. Please contact support.` });
     }
 
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, {
-      expiresIn: "1d",
-    });
+    const token = generateToken(user);
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: false, // You're in development
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 24 * 60 * 60 * 1000,
     });
 
     res.json({
       user: {
+        _id: user.id,
         email: user.email,
         username: user.username,
         role: user.role,

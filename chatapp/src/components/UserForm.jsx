@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { connectAndRegisterUser } from "../Socket";
 import {
@@ -10,9 +10,8 @@ import {
   FaEyeSlash,
 } from "react-icons/fa";
 
-const API_URL = import.meta.env.VITE_API_URL;
-const SERVER_URL = import.meta.env.VITE_SERVER_URL;
-function UserForm() {
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL;
+function UserForm({ onAuthenticated }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -21,15 +20,8 @@ function UserForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [focusedField, setFocusedField] = useState("");
-  const [role, setRole] = useState("");
 
   const navigate = useNavigate();
-  const location = useLocation();
-
-  useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
-    setRole(queryParams.get("role") || "user");
-  }, [location]);
 
   const toggleForm = () => {
     setIsSignUp((prev) => !prev);
@@ -55,14 +47,18 @@ function UserForm() {
       const { data } = await axios.post(`${API_URL}${endpoint}`, payload, {
         withCredentials: true,
       });
+      if (!data.user?._id || !data.token) {
+        throw new Error("The server returned an incomplete sign-in response.");
+      }
 
       localStorage.setItem("user", JSON.stringify(data.user));
+      localStorage.setItem("token", data.token);
+      onAuthenticated(data.user);
+      connectAndRegisterUser(data.token);
 
-      connectAndRegisterUser(data.user._id);
-
-      navigate("/chat");
+      navigate("/chat", { replace: true });
     } catch (err) {
-      setError(err.response?.data?.message || "Something went wrong");
+      setError(err.response?.data?.message || err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }

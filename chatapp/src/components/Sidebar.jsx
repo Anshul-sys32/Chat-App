@@ -9,18 +9,25 @@ import {
 import UserList from './UserList';
 import GroupList from './GroupList';
 
-const Sidebar = ({ isOpen, toggleSidebar }) => {
+const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
   const [activeTab, setActiveTab] = useState('global');
-  const user = JSON.parse(localStorage.getItem('user'));
+  const [search, setSearch] = useState('');
+  let user = null;
+  try {
+    user = JSON.parse(localStorage.getItem('user') || 'null');
+  } catch {
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+  }
 
   const renderContent = () => {
     switch (activeTab) {
       case 'global':
-        return <UserList type="global" />;
+        return <UserList type="global" search={search} onStartChat={onSelectChat} />;
       case 'local':
-        return <UserList type="local" />;
+        return <UserList type="local" search={search} onStartChat={onSelectChat} />;
       case 'groups':
-        return <GroupList />;
+        return <GroupList search={search} onSelectGroup={onSelectChat} />;
       default:
         return null;
     }
@@ -86,12 +93,14 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
         </div>
 
         {/* Dynamic Content Area */}
-        <div className="w-48 bg-gray-800 flex flex-col justify-between">
+        <div className="w-72 bg-gray-800 flex flex-col justify-between">
           {/* Search Input + List */}
           <div className="p-4 overflow-y-auto">
             <input
               type="text"
               placeholder="Search..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
               className="w-full mb-4 p-2 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring focus:ring-blue-400"
             />
             {renderContent()}
@@ -105,6 +114,8 @@ const Sidebar = ({ isOpen, toggleSidebar }) => {
             <button
               onClick={() => {
                 localStorage.removeItem('user');
+                localStorage.removeItem('token');
+                localStorage.removeItem('localUsers');
                 window.location.reload();
               }}
               className="mt-2 text-sm bg-red-500 px-3 py-1 rounded hover:bg-red-600 w-full text-center"

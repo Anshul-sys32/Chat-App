@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Socket from '../Socket';
 
-export default function UserList({ type = 'global', onStartChat }) {
+export default function UserList({ type = 'global', onStartChat, search = '' }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [localUserIds, setLocalUserIds] = useState([]);
@@ -12,18 +12,22 @@ export default function UserList({ type = 'global', onStartChat }) {
     // Safely parse current user
     try {
       const user = JSON.parse(localStorage.getItem('user'));
-      if (user && user._id) {
+      if (user && user._id && localStorage.getItem('token')) {
         setCurrentUser(user);
       }
-    } catch (e) {
+    } catch {
       console.error("Invalid user data in localStorage");
     }
   }, []);
 
   useEffect(() => {
     // Load local chat history user IDs
-    const stored = localStorage.getItem('localUsers');
-    setLocalUserIds(stored ? JSON.parse(stored) : []);
+    try {
+      const stored = localStorage.getItem('localUsers');
+      setLocalUserIds(stored ? JSON.parse(stored) : []);
+    } catch {
+      setLocalUserIds([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -32,6 +36,7 @@ export default function UserList({ type = 'global', onStartChat }) {
     const fetchUsers = async () => {
       try {
         const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/users`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           withCredentials: true,
         });
         const others = res.data.filter((u) => u._id !== currentUser._id);
@@ -53,8 +58,8 @@ export default function UserList({ type = 'global', onStartChat }) {
     return () => Socket.off('online-users', handleOnlineUsers);
   }, []);
 
-  const handleStartChat = (user) => {
-    const id = user._id;
+  const handleStartChat = (selectedUser) => {
+    const id = selectedUser._id;
 
     if (!localUserIds.includes(id)) {
       const updated = [...localUserIds, id];
@@ -62,7 +67,7 @@ export default function UserList({ type = 'global', onStartChat }) {
       localStorage.setItem('localUsers', JSON.stringify(updated));
     }
 
-    if (onStartChat) onStartChat(user);
+    if (onStartChat) onStartChat(selectedUser);
   };
 
   const filteredUsers = currentUser
@@ -70,17 +75,20 @@ export default function UserList({ type = 'global', onStartChat }) {
       ? allUsers.filter((u) => localUserIds.includes(u._id))
       : allUsers.filter((u) => !localUserIds.includes(u._id))
     : [];
+  const visibleUsers = filteredUsers.filter((candidate) =>
+    `${candidate.username} ${candidate.email}`.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="text-white">
       <h3 className="text-lg font-semibold mb-2 capitalize">{type} Users</h3>
 
       <ul className="space-y-2 max-h-[calc(100vh-150px)] overflow-y-auto pr-1">
-        {filteredUsers.length === 0 ? (
+        {visibleUsers.length === 0 ? (
           <p className="text-sm text-gray-400">No {type} users.</p>
         ) : (
-          filteredUsers.map((user) => {
-            const isOnline = onlineUserIds.includes(user._id);
+          visibleUsers.map((user) => {
+            const isOnline = onlineUserIds.includes(String(user._id));
 
             return (
               <li

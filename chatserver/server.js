@@ -3,8 +3,9 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const connectDB = require("./config/db");
+const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const { corsOrigin } = require("./utils/cors");
 
 const app = express();
 const server = http.createServer(app);
@@ -15,26 +16,19 @@ if (!process.env.CLIENT_URL) {
   console.warn("⚠️ Warning: CLIENT_URL is not set in .env. Using default http://localhost:5173");
 }
 
-// Connect to DB
-connectDB().catch((err) => {
-  console.error("❌ MongoDB connection failed:", err.message);
+// Initialize SQL tables before accepting requests.
+connectDB().then(() => {
+  server.listen(PORT, "0.0.0.0", () =>
+    console.log(`✅ Server running on http://0.0.0.0:${PORT}`)
+  );
+}).catch((err) => {
+  console.error("❌ MySQL connection failed:", err.message);
   process.exit(1);
 });
 
 // Middleware
-const allowedOrigins = [
-  process.env.CLIENT_LOCAL,
-  process.env.CLIENT_URL,
-];
-
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: corsOrigin,
   credentials: true,
 }));
 app.use(cookieParser());
@@ -45,9 +39,4 @@ app.use("/api", authRoutes);
 
 // ✅ Initialize Socket.IO (moved inside socket.js)
 const initSocket = require("./sockets/socket");
-initSocket(server); // Pass HTTP server here
-
-// Start server on local network
-server.listen(PORT, "0.0.0.0", () =>
-  console.log(`✅ Server running on http://0.0.0.0:${PORT}`)
-);
+app.set("io", initSocket(server));

@@ -1,19 +1,21 @@
-const mongoose = require("mongoose");
+const { pool } = require("../config/db");
 
-const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, trim: true },
-  email: { type: String, required: true, unique: true, lowercase: true },
-  password: { type: String, required: true },
-  role: {
-    type: String,
-    enum: ["user", "moderator", "admin", "guest"], // Add all applicable roles here
-    default: "user",
-  },
-  status: {
-    type: String,
-    enum: ["active", "pending", "inactive"],
-    default: "pending",
-  },
-}, { timestamps: true });
+const findByEmail = async (email) => {
+  const [rows] = await pool.execute("SELECT * FROM users WHERE email = ? LIMIT 1", [email]);
+  return rows[0] || null;
+};
 
-module.exports = mongoose.model("User", userSchema);
+const listPublic = async () => {
+  const [rows] = await pool.query("SELECT id AS _id, username, email FROM users ORDER BY username");
+  return rows;
+};
+
+const create = async ({ username, email, password, role }) => {
+  const [result] = await pool.execute(
+    "INSERT INTO users (username, email, password, role, status) VALUES (?, ?, ?, ?, 'active')",
+    [username, email, password, role]
+  );
+  return { id: result.insertId, username, email, role, status: "active" };
+};
+
+module.exports = { findByEmail, listPublic, create };
