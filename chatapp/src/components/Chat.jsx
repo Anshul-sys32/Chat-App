@@ -355,11 +355,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         className={`ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
       >
         {/* Header */}
-        <header className="theme-header relative z-30 flex shrink-0 items-center justify-between border-b px-4 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
+        <header className="theme-header relative z-30 flex shrink-0 items-center justify-between gap-2 border-b px-3 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="theme-text truncate text-lg font-semibold">
               {selectedChat?.name || selectedChat?.username || 'Choose a conversation'}
             </h1>
@@ -367,7 +367,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <p className="theme-muted mt-0.5 text-xs">{selectedChat.members} members · {selectedChat.role}</p>
             )}
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-4">
             <NotificationCenter />
             <button
               onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
@@ -499,7 +499,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               accept={ACCEPTED_FILE_TYPES}
               multiple
               onChange={selectFiles}
-              className="hidden"
+              className="sr-only"
               aria-label="Choose attachments"
             />
             <button
@@ -508,9 +508,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               aria-label="Attach files"
               onClick={() => fileInputRef.current?.click()}
               disabled={!selectedChat || isSending}
-              className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-30"
+              className="chat-action theme-text inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-teal-500 disabled:opacity-50"
             >
               <FaPaperclip />
+              <span>Attach</span>
             </button>
             <input
               value={msg}

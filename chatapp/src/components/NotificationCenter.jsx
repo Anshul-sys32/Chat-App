@@ -79,9 +79,10 @@ export default function NotificationCenter() {
         onClick={() => setIsOpen((open) => !open)}
         aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
         aria-expanded={isOpen}
-        className="chat-action theme-text relative grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500"
+        className="chat-action theme-text relative inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-teal-500"
       >
         <FaBell />
+        <span>Alerts</span>
         {unreadCount > 0 && (
           <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
             {unreadCount > 99 ? "99+" : unreadCount}
