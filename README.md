@@ -42,20 +42,20 @@ cd chatapp && npm run build
 cd ../chatserver && npm start
 ```
 
-Then open `http://[2405:201:6811:a82a:3aed:adb3:3ebd:d4b1]:5175`. Forward/allow inbound TCP port `5175` through the host firewall and router/ISP IPv6 firewall. This avoids a separate public route to Vite port `5174`. The address must be assigned to the host and globally reachable from the client network.
+Then open `http://[IPV6_ADDRESS]:5175`. Forward/allow inbound TCP port `5175` through the host firewall and router/ISP IPv6 firewall. This avoids a separate public route to Vite port `5174`. The address must be assigned to the host and globally reachable from the client network.
 
 These development servers use plain HTTP. Login and chat can work over IPv6 HTTP, but browsers require HTTPS for camera and microphone access, so audio/video calls need a TLS-enabled public origin (typically a reverse proxy with a valid certificate and DNS hostname). Do not expose the Vite development server as a production deployment.
 
 ### HTTPS with Caddy and DuckDNS
 
-The root `Caddyfile` configures Caddy to reverse-proxy `fameless.duckdns.org` to the app server on port `5175`. Build the frontend first, then make sure DuckDNS has an AAAA record pointing to this host's public IPv6 address. Caddy is installed as a system service on this machine and imports `/etc/caddy/conf.d/*`; install and activate the site with:
+The root `Caddyfile` configures Caddy to reverse-proxy `xyz.duckdns.org` to the app server on port `5175`. Build the frontend first, then make sure DuckDNS has an AAAA record pointing to this host's public IPv6 address. Caddy is installed as a system service on this machine and imports `/etc/caddy/conf.d/*`; install and activate the site with:
 
 ```sh
-sudo install -m 0644 Caddyfile /etc/caddy/conf.d/fameless.caddy
+sudo install -m 0644 Caddyfile /etc/caddy/conf.d/xyz.caddy
 sudo systemctl enable --now caddy
 ```
 
-Allow inbound TCP ports `80` and `443` through the host and router IPv6 firewalls. Caddy will obtain and renew a publicly trusted certificate when DNS resolves to this host and it can complete ACME validation. Then open `https://fameless.duckdns.org`. Keep the app server on port `5175`; Caddy terminates HTTPS and proxies API, page, and Socket.IO/WebRTC signaling traffic to it.
+Allow inbound TCP ports `80` and `443` through the host and router IPv6 firewalls. Caddy will obtain and renew a publicly trusted certificate when DNS resolves to this host and it can complete ACME validation. Then open `https://xyz.duckdns.org`. Keep the app server on port `5175`; Caddy terminates HTTPS and proxies API, page, and Socket.IO/WebRTC signaling traffic to it.
 
 ### Chat attachments
 
