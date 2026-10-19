@@ -47,7 +47,10 @@ export default function App() {
 
   const verifySession = useCallback(async () => {
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token) {
+      setUser(null);
+      return;
+    }
     try {
       const { data } = await axios.get(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -55,8 +58,9 @@ export default function App() {
         timeout: 10000,
       });
       if (localStorage.getItem("token") !== token) return;
-      setUser(data.user);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      const verifiedUser = { ...data.user, _id: data.user._id ?? data.user.id };
+      setUser(verifiedUser);
+      localStorage.setItem("user", JSON.stringify(verifiedUser));
     } catch (error) {
       if (error.response?.status === 401 || error.response?.status === 403) {
         if (localStorage.getItem("token") !== token) return;
@@ -73,12 +77,22 @@ export default function App() {
     const revalidateWhenAvailable = () => {
       if (document.visibilityState === "visible" && navigator.onLine) verifySession();
     };
+    const syncSessionAcrossTabs = (event) => {
+      if (event.key !== "token" && event.key !== "user") return;
+      if (!localStorage.getItem("token")) {
+        setUser(null);
+        return;
+      }
+      verifySession();
+    };
     verifySession();
     window.addEventListener("online", revalidateWhenAvailable);
     document.addEventListener("visibilitychange", revalidateWhenAvailable);
+    window.addEventListener("storage", syncSessionAcrossTabs);
     return () => {
       window.removeEventListener("online", revalidateWhenAvailable);
       document.removeEventListener("visibilitychange", revalidateWhenAvailable);
+      window.removeEventListener("storage", syncSessionAcrossTabs);
     };
   }, [verifySession]);
 

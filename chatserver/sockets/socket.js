@@ -3,8 +3,39 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
+const { existsSync } = require("node:fs");
+const path = require("node:path");
+const { uploadDirectory, allowedUploadTypes, maxFileSize } = require("../utils/uploads");
 
 const connectedUsers = new Map();
+
+const validateAttachments = (attachments, userId) => {
+  if (attachments === undefined) return [];
+  if (!Array.isArray(attachments) || attachments.length > 5) return null;
+  const userFilePrefix = `/uploads/${userId}-`;
+  const filenamePattern = /^[a-f0-9-]{36}\.[a-z0-9]{1,10}$/i;
+  const validated = [];
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment !== "object"
+      || typeof attachment.url !== "string"
+      || !attachment.url.startsWith(userFilePrefix)) return null;
+    const filename = attachment.url.slice("/uploads/".length);
+    if (!filenamePattern.test(filename.slice(String(userId).length + 1))
+      || !existsSync(path.join(uploadDirectory, filename))
+      || typeof attachment.name !== "string" || !attachment.name.trim()
+      || attachment.name.length > 255
+      || !allowedUploadTypes.has(attachment.mimeType)
+      || !Number.isSafeInteger(attachment.size)
+      || attachment.size < 1 || attachment.size > maxFileSize) return null;
+    validated.push({
+      url: attachment.url,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+    });
+  }
+  return validated;
+};
 
 const initSocket = (httpServer) => {
   const io = new Server(httpServer, {
@@ -57,10 +88,13 @@ const initSocket = (httpServer) => {
 
     socket.on("send-message", async (payload = {}) => {
       try {
-        const { receiver, content } = payload || {};
+        const messagePayload = payload || {};
+        const { receiver, content } = messagePayload;
+        const attachments = validateAttachments(messagePayload.attachments, socket.userId);
         const receiverId = Number(receiver);
         if (!Number.isSafeInteger(receiverId) || receiverId < 1
-          || typeof content !== "string" || !content.trim()) {
+          || attachments === null
+          || (typeof content !== "string" || !content.trim()) && !attachments.length) {
           return socket.emit("message-error", { message: "A recipient and message are required." });
         }
         const [recipients] = await pool.execute(
@@ -71,12 +105,12 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "That recipient is not available." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)",
-          [Number(socket.userId), receiverId, content.trim()]
+          "INSERT INTO messages (sender_id, receiver_id, content, attachments) VALUES (?, ?, ?, ?)",
+          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments)]
         );
         const [rows] = await pool.execute(
           `SELECT id AS _id, sender_id AS sender, receiver_id AS receiver, content,
-                  is_deleted AS isDeleted, created_at AS timestamp FROM messages WHERE id = ?`,
+                  attachments, is_deleted AS isDeleted, created_at AS timestamp FROM messages WHERE id = ?`,
           [result.insertId]
         );
         const message = rows[0];
@@ -108,9 +142,12 @@ const initSocket = (httpServer) => {
     });
 
     socket.on("group-message", async (payload = {}) => {
-      const { groupId, content } = payload || {};
+      const messagePayload = payload || {};
+      const { groupId, content } = messagePayload;
+      const attachments = validateAttachments(messagePayload.attachments, socket.userId);
       const id = Number(groupId);
-      if (!Number.isSafeInteger(id) || id < 1 || typeof content !== "string" || !content.trim()) {
+      if (!Number.isSafeInteger(id) || id < 1 || attachments === null
+        || (typeof content !== "string" || !content.trim()) && !attachments.length) {
         return socket.emit("message-error", { message: "A group and message are required." });
       }
       try {
@@ -122,12 +159,12 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "You are no longer a member of this group." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, sender_id, content) VALUES (?, ?, ?)",
-          [id, Number(socket.userId), content.trim()]
+          "INSERT INTO group_messages (group_id, sender_id, content, attachments) VALUES (?, ?, ?, ?)",
+          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments)]
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
-                  u.username AS senderName, gm.content, gm.is_deleted AS isDeleted,
+                  u.username AS senderName, gm.content, gm.attachments, gm.is_deleted AS isDeleted,
                   gm.created_at AS timestamp
            FROM group_messages gm JOIN users u ON u.id = gm.sender_id WHERE gm.id = ?`,
           [result.insertId]

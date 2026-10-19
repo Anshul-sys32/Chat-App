@@ -86,6 +86,7 @@ const connectDB = async () => {
         sender_id INT UNSIGNED NOT NULL,
         receiver_id INT UNSIGNED NOT NULL,
         content TEXT NOT NULL,
+        attachments JSON NULL,
         is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX messages_conversation (sender_id, receiver_id, created_at),
@@ -99,6 +100,13 @@ const connectDB = async () => {
     );
     if (!messageDeletedColumn[0].count) {
       await connection.query("ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE");
+    }
+    const [messageAttachmentsColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'messages' AND column_name = 'attachments'`
+    );
+    if (!messageAttachmentsColumn[0].count) {
+      await connection.query("ALTER TABLE messages ADD COLUMN attachments JSON NULL");
     }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS chat_groups (
@@ -139,6 +147,7 @@ const connectDB = async () => {
         group_id INT UNSIGNED NOT NULL,
         sender_id INT UNSIGNED NOT NULL,
         content TEXT NOT NULL,
+        attachments JSON NULL,
         is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX group_messages_history (group_id, created_at, id),
@@ -153,6 +162,30 @@ const connectDB = async () => {
     if (!groupMessageDeletedColumn[0].count) {
         await connection.query("ALTER TABLE group_messages ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE");
     }
+    const [groupMessageAttachmentsColumn] = await connection.execute(
+        `SELECT COUNT(*) AS count FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'group_messages' AND column_name = 'attachments'`
+    );
+    if (!groupMessageAttachmentsColumn[0].count) {
+        await connection.query("ALTER TABLE group_messages ADD COLUMN attachments JSON NULL");
+    }
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        batch_id CHAR(36) NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        sender_id INT UNSIGNED NULL,
+        title VARCHAR(120) NOT NULL,
+        body TEXT NOT NULL,
+        is_read BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX notifications_user_history (user_id, created_at, id),
+        INDEX notifications_user_unread (user_id, is_read),
+        INDEX notifications_batch (batch_id),
+        CONSTRAINT notifications_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT notifications_sender_fk FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB
+    `);
   } finally {
     connection.release();
   }

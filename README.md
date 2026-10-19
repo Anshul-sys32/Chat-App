@@ -57,6 +57,16 @@ sudo systemctl enable --now caddy
 
 Allow inbound TCP ports `80` and `443` through the host and router IPv6 firewalls. Caddy will obtain and renew a publicly trusted certificate when DNS resolves to this host and it can complete ACME validation. Then open `https://fameless.duckdns.org`. Keep the app server on port `5175`; Caddy terminates HTTPS and proxies API, page, and Socket.IO/WebRTC signaling traffic to it.
 
+### Chat attachments
+
+Direct and group chats support image, video, audio, and PDF attachments up to
+50 MB each (five files per message). The Express backend stores uploads in
+`chatserver/uploads` and serves them through the existing Caddy reverse proxy;
+back up this directory along with the MySQL database. Keep it on persistent
+storage, and share the same directory between app instances if you run more
+than one. Upload URLs are unguessable but publicly retrievable by anyone who
+has the URL.
+
 ## Run locally
 
 ```sh
@@ -104,6 +114,10 @@ OAuth-only accounts can set a password without one. Administrators can edit any
 account's username/email or set a replacement password from the Admin panel.
 Passwords are hashed before storage and are never returned by profile endpoints.
 
-On startup, the server migrates existing message tables to add `is_deleted`, makes
-usernames unique, converts legacy inactive accounts to suspended, and permits
-OAuth-only accounts without passwords.
+Administrators can send persistent notifications to all active users or selected
+users from the Administration page. Users receive them in the chat header's
+notification inbox; unread notifications remain available after reconnecting.
+
+On startup, the server migrates existing message tables to add `is_deleted` and
+attachment metadata columns, makes usernames unique, converts legacy inactive
+accounts to suspended, and permits OAuth-only accounts without passwords.

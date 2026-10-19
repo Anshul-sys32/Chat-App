@@ -12,6 +12,15 @@ const protect = require("../middleware/authMiddleware");
 const requireAdmin = require("../middleware/requireAdmin");
 const User = require("../models/User");
 const { pool } = require("../config/db");
+const fs = require("node:fs/promises");
+const { randomUUID } = require("node:crypto");
+const { upload } = require("../utils/uploads");
+
+const removeUploadedFiles = async (files) => Promise.all((files || []).map((file) =>
+	fs.unlink(file.path).catch((error) => {
+		if (error.code !== "ENOENT") console.error("Uploaded file cleanup error:", error);
+	})
+));
 
 const getGroupRole = async (groupId, userId) => {
 	const [rows] = await pool.execute(
@@ -40,7 +49,196 @@ router.post("/logout", (_req, res) => {
 	});
 	res.status(204).end();
 });
-router.get("/auth/me", protect, (req, res) => res.json({ user: req.user }));
+router.get("/auth/me", protect, (req, res) => res.json({
+	user: {
+		_id: req.user.id,
+		username: req.user.username,
+		email: req.user.email,
+		role: req.user.role,
+		status: req.user.status,
+	},
+}));
+router.get("/notifications", protect, async (req, res) => {
+	try {
+		const [[{ unreadCount }]] = await pool.execute(
+			"SELECT COUNT(*) AS unreadCount FROM notifications WHERE user_id = ? AND is_read = FALSE",
+			[req.user.id]
+		);
+		const [notifications] = await pool.execute(
+			`SELECT n.id AS _id, n.title, n.body, n.is_read AS isRead,
+			        n.created_at AS timestamp, u.username AS senderName
+			 FROM notifications n
+			 LEFT JOIN users u ON u.id = n.sender_id
+			 WHERE n.user_id = ?
+			 ORDER BY n.created_at DESC, n.id DESC
+			 LIMIT 50`,
+			[req.user.id]
+		);
+		res.json({ notifications, unreadCount });
+	} catch (error) {
+		console.error("Fetch notifications error:", error);
+		res.status(500).json({ message: "Failed to get notifications." });
+	}
+});
+router.patch("/notifications/read-all", protect, async (req, res) => {
+	try {
+		await pool.execute(
+			"UPDATE notifications SET is_read = TRUE WHERE user_id = ? AND is_read = FALSE",
+			[req.user.id]
+		);
+		res.status(204).end();
+	} catch (error) {
+		console.error("Mark notifications read error:", error);
+		res.status(500).json({ message: "Could not mark notifications as read." });
+	}
+});
+router.patch("/notifications/:notificationId/read", protect, async (req, res) => {
+	const notificationId = Number(req.params.notificationId);
+	if (!validId(notificationId)) return res.status(400).json({ message: "Invalid notification id." });
+	try {
+		const [result] = await pool.execute(
+			"UPDATE notifications SET is_read = TRUE WHERE id = ? AND user_id = ?",
+			[notificationId, req.user.id]
+		);
+		if (!result.affectedRows) {
+			const [rows] = await pool.execute(
+				"SELECT id FROM notifications WHERE id = ? AND user_id = ?",
+				[notificationId, req.user.id]
+			);
+			if (!rows.length) return res.status(404).json({ message: "Notification not found." });
+		}
+		res.status(204).end();
+	} catch (error) {
+		console.error("Mark notification read error:", error);
+		res.status(500).json({ message: "Could not mark notification as read." });
+	}
+});
+router.post("/admin/notifications", protect, requireAdmin, async (req, res) => {
+	const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+	const body = typeof req.body.body === "string" ? req.body.body.trim() : "";
+	const audience = req.body.audience;
+	const recipientIds = req.body.recipientIds;
+	if (!title || title.length > 120 || !body || body.length > 2000
+		|| !["all", "selected"].includes(audience)) {
+		return res.status(400).json({
+			message: "Provide a title (up to 120 characters), message (up to 2000 characters), and a valid audience.",
+		});
+	}
+	if (audience === "selected"
+		&& (!Array.isArray(recipientIds) || recipientIds.length < 1 || recipientIds.length > 500
+			|| recipientIds.some((id) => !validId(id)))) {
+		return res.status(400).json({ message: "Select between 1 and 500 valid recipients." });
+	}
+	try {
+		const [recipients] = audience === "all"
+			? await pool.execute("SELECT id FROM users WHERE status = 'active' ORDER BY id")
+			: await pool.query(
+				`SELECT id FROM users WHERE status = 'active' AND id IN (${recipientIds.map(() => "?").join(",")}) ORDER BY id`,
+				[...new Set(recipientIds.map(Number))]
+			);
+		if (!recipients.length) {
+			return res.status(400).json({ message: "There are no active recipients for this notification." });
+		}
+		if (audience === "selected" && recipients.length !== new Set(recipientIds.map(Number)).size) {
+			return res.status(400).json({ message: "One or more selected recipients are unavailable." });
+		}
+
+		const batchId = randomUUID();
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			for (let offset = 0; offset < recipients.length; offset += 500) {
+				const batch = recipients.slice(offset, offset + 500);
+				const valuePlaceholders = batch.map(() => "(?, ?, ?, ?, ?)").join(", ");
+				const values = batch.flatMap(({ id }) => [batchId, id, req.user.id, title, body]);
+				await connection.execute(
+					`INSERT INTO notifications (batch_id, user_id, sender_id, title, body)
+					 VALUES ${valuePlaceholders}`,
+					values
+				);
+			}
+			await connection.commit();
+		} catch (error) {
+			await connection.rollback();
+			throw error;
+		} finally {
+			connection.release();
+		}
+
+		const io = req.app.get("io");
+		if (io) {
+			const [savedNotifications] = await pool.execute(
+				`SELECT n.id AS _id, n.user_id AS userId, n.title, n.body,
+				        n.is_read AS isRead, n.created_at AS timestamp,
+				        u.username AS senderName
+				 FROM notifications n JOIN users u ON u.id = n.sender_id
+				 WHERE n.batch_id = ? ORDER BY n.id`,
+				[batchId]
+			);
+			for (const notification of savedNotifications) {
+				io.to(`user:${notification.userId}`).emit("notification", notification);
+			}
+		}
+		res.status(201).json({ sent: recipients.length });
+	} catch (error) {
+		console.error("Send notification error:", error);
+		res.status(500).json({ message: "Could not send the notification." });
+	}
+});
+router.post("/uploads", protect, (req, res, next) => {
+	upload.array("files", 5)(req, res, async (error) => {
+		if (error) {
+			await removeUploadedFiles(req.files);
+			const message = error.code === "LIMIT_FILE_SIZE"
+				? "Each file must be 50 MB or smaller."
+				: error.code === "LIMIT_FILE_COUNT"
+					? "You can send up to 5 files per message."
+					: error.message;
+			return res.status(400).json({ message });
+		}
+		return next();
+	});
+}, async (req, res) => {
+	const groupId = req.body.type === "group" ? Number(req.body.targetId) : null;
+	const receiverId = req.body.type === "direct" ? Number(req.body.targetId) : null;
+	const files = req.files || [];
+	if (!files.length || !["direct", "group"].includes(req.body.type)
+		|| !validId(req.body.targetId)) {
+		await removeUploadedFiles(files);
+		return res.status(400).json({ message: "Choose a conversation and at least one file." });
+	}
+	try {
+		if (groupId) {
+			const [memberships] = await pool.execute(
+				"SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
+				[groupId, req.user.id]
+			);
+			if (!memberships.length && req.user.role !== "admin") {
+				await removeUploadedFiles(files);
+				return res.status(403).json({ message: "You are not a member of this group." });
+			}
+		} else {
+			const [recipients] = await pool.execute(
+				"SELECT id FROM users WHERE id = ? AND status = 'active' LIMIT 1",
+				[receiverId]
+			);
+			if (!recipients.length || receiverId === Number(req.user.id)) {
+				await removeUploadedFiles(files);
+				return res.status(404).json({ message: "That recipient is not available." });
+			}
+		}
+		return res.status(201).json(files.map((file) => ({
+			url: `/uploads/${file.filename}`,
+			name: file.originalname.split(/[\\/]/).pop().slice(0, 255),
+			mimeType: file.mimetype,
+			size: file.size,
+		})));
+	} catch (error) {
+		console.error("File upload error:", error);
+		await removeUploadedFiles(files);
+		return res.status(500).json({ message: "Files could not be uploaded." });
+	}
+});
 router.patch("/users/me/profile", protect, updateOwnProfile);
 router.get("/users", protect, user);
 router.patch("/admin/users/:userId/profile", protect, requireAdmin, updateAdminProfile);
@@ -130,6 +328,7 @@ router.get("/messages/:userId", protect, async (req, res) => {
 		const [messages] = await pool.execute(
 			`SELECT id AS _id, sender_id AS sender, receiver_id AS receiver,
 							CASE WHEN is_deleted THEN 'This message was deleted' ELSE content END AS content,
+							CASE WHEN is_deleted THEN NULL ELSE attachments END AS attachments,
 							is_deleted AS isDeleted, created_at AS timestamp
 			 FROM messages
 			 WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
@@ -147,7 +346,7 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 	if (!validId(messageId)) return res.status(400).json({ message: "Invalid message id." });
 	try {
 		const [result] = await pool.execute(
-			`UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted'
+			`UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted', attachments = NULL
 			 WHERE id = ? AND sender_id = ? AND is_deleted = FALSE`,
 			[messageId, req.user.id]
 		);
@@ -159,7 +358,7 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 		}
 		const [rows] = await pool.execute(
 			`SELECT id AS _id, sender_id AS sender, receiver_id AS receiver,
-			        content, is_deleted AS isDeleted, created_at AS timestamp
+			        content, NULL AS attachments, is_deleted AS isDeleted, created_at AS timestamp
 			 FROM messages WHERE id = ?`,
 			[messageId]
 		);
@@ -372,6 +571,7 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
 					u.username AS senderName,
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
+					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
 			 WHERE gm.group_id = ? ORDER BY gm.created_at, gm.id`,
@@ -401,12 +601,12 @@ router.delete("/groups/:groupId/messages/:messageId", protect, async (req, res) 
 			return res.status(403).json({ message: "You can only delete your own messages." });
 		}
 		await pool.execute(
-			"UPDATE group_messages SET is_deleted = TRUE, content = 'This message was deleted' WHERE id = ? AND is_deleted = FALSE",
+			"UPDATE group_messages SET is_deleted = TRUE, content = 'This message was deleted', attachments = NULL WHERE id = ? AND is_deleted = FALSE",
 			[messageId]
 		);
 		const [rows] = await pool.execute(
 			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
-			        u.username AS senderName, gm.content, gm.is_deleted AS isDeleted,
+			        u.username AS senderName, gm.content, NULL AS attachments, gm.is_deleted AS isDeleted,
 			        gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id WHERE gm.id = ?`,
 			[messageId]

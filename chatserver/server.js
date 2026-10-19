@@ -5,6 +5,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const { uploadDirectory } = require("./utils/uploads");
 const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
@@ -32,6 +33,13 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.use(express.json());
+fs.mkdirSync(uploadDirectory, { recursive: true });
+app.use("/uploads", express.static(uploadDirectory, {
+  dotfiles: "deny",
+  index: false,
+  maxAge: "1d",
+  setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
+}));
 
 // Routes
 app.use("/api", authRoutes);

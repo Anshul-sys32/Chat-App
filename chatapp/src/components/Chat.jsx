@@ -3,14 +3,47 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaPhone, FaTrashAlt, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaPaperclip, FaPhone, FaTrashAlt, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
+import NotificationCenter from './NotificationCenter';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
+const MAX_FILES_PER_MESSAGE = 5;
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const ACCEPTED_FILE_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif',
+  'video/mp4', 'video/webm', 'video/quicktime',
+  'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+  'application/pdf',
+].join(',');
+
+const getAttachments = (message) => {
+  if (message.isDeleted) return [];
+  let attachments = message.attachments;
+  if (typeof attachments === 'string') {
+    try {
+      attachments = JSON.parse(attachments);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(attachments)
+    ? attachments.filter((attachment) => attachment && typeof attachment.url === 'string'
+      && attachment.url.startsWith('/uploads/') && typeof attachment.mimeType === 'string')
+    : [];
+};
+
+const formatFileSize = (size) => {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, theme, onToggleTheme }) {
   const [msg, setMsg] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [isSending, setIsSending] = useState(false);
+  const fileInputRef = React.useRef(null);
   const [messages, setMessages] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
@@ -24,6 +57,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
   useEffect(() => {
     setIsSidebarOpen(false);
+    setSelectedFiles([]);
   }, [selectedChat?._id]);
 
   useEffect(() => {
@@ -53,8 +87,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         connectAndRegisterUser(localStorage.getItem('token'));
       }
     };
+    const reconnectOnSessionChange = (event) => {
+      if (event.key === 'token') connectAndRegisterUser(localStorage.getItem('token'));
+    };
     window.addEventListener('online', reconnectOnResume);
     window.addEventListener('pageshow', reconnectOnResume);
+    window.addEventListener('storage', reconnectOnSessionChange);
     document.addEventListener('visibilitychange', reconnectOnResume);
     const handleReceive = (data) => {
       const selectedId = String(selectedChatRef.current?._id);
@@ -131,6 +169,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('disconnect', handleSocketDisconnect);
       window.removeEventListener('online', reconnectOnResume);
       window.removeEventListener('pageshow', reconnectOnResume);
+      window.removeEventListener('storage', reconnectOnSessionChange);
       document.removeEventListener('visibilitychange', reconnectOnResume);
     };
   }, [user?._id, onSelectChat]);
@@ -220,19 +259,59 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     };
   }, [selectedChat?._id, selectedChat?.type, messagesAttempt, user?._id]);
 
-  const sendMessage = (event) => {
+  const selectFiles = (event) => {
+    const incomingFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (selectedFiles.length + incomingFiles.length > MAX_FILES_PER_MESSAGE) {
+      window.alert(`You can send up to ${MAX_FILES_PER_MESSAGE} files per message.`);
+      return;
+    }
+    const oversizedFile = incomingFiles.find((file) => file.size > MAX_FILE_SIZE);
+    if (oversizedFile) {
+      window.alert(`${oversizedFile.name} is larger than the 50 MB limit.`);
+      return;
+    }
+    setSelectedFiles((current) => [...current, ...incomingFiles]);
+  };
+
+  const sendMessage = async (event) => {
     event.preventDefault();
-    if (!msg.trim() || !selectedChat?._id) return;
+    if ((!msg.trim() && !selectedFiles.length) || !selectedChat?._id || isSending) return;
     if (!Socket.connected) {
       setSocketConnected(false);
       return;
     }
-    if (selectedChat.type === 'group') {
-      Socket.emit('group-message', { groupId: selectedChat._id, content: msg.trim() });
-    } else {
-      Socket.emit('send-message', { receiver: selectedChat._id, content: msg.trim() });
+    const chat = selectedChat;
+    setIsSending(true);
+    try {
+      let attachments = [];
+      if (selectedFiles.length) {
+        const formData = new FormData();
+        formData.append('type', chat.type === 'group' ? 'group' : 'direct');
+        formData.append('targetId', chat._id);
+        selectedFiles.forEach((file) => formData.append('files', file));
+        const { data } = await axios.post(`${API_URL}/api/uploads`, formData, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+          withCredentials: true,
+        });
+        attachments = data;
+      }
+      const payload = {
+        content: msg.trim(),
+        ...(attachments.length ? { attachments } : {}),
+      };
+      if (chat.type === 'group') {
+        Socket.emit('group-message', { ...payload, groupId: chat._id });
+      } else {
+        Socket.emit('send-message', { ...payload, receiver: chat._id });
+      }
+      setMsg('');
+      setSelectedFiles([]);
+    } catch (error) {
+      window.alert(error.response?.data?.message || 'Could not upload the selected files.');
+    } finally {
+      setIsSending(false);
     }
-    setMsg('');
   };
 
   const deleteMessage = async (message) => {
@@ -276,7 +355,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         className={`ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
       >
         {/* Header */}
-        <header className="theme-header flex shrink-0 items-center justify-between border-b px-4 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
+        <header className="theme-header relative z-30 flex shrink-0 items-center justify-between border-b px-4 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
@@ -289,6 +368,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             )}
           </div>
           <div className="flex items-center gap-4">
+            <NotificationCenter />
             <button
               onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
               title="Start Audio Call"
@@ -347,7 +427,41 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id)) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) ? 'text-teal-100' : 'text-teal-800'}`}>
                     {String(m.sender) === String(user?._id) ? 'You' : m.senderName || selectedChat.username}
                   </p>}
-                  <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
+                  {m.content && (
+                    <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
+                  )}
+                  {!m.isDeleted && getAttachments(m).map((attachment) => (
+                    <div key={attachment.url} className="mt-2 max-w-full">
+                      {attachment.mimeType.startsWith('image/') ? (
+                        <a href={`${API_URL}${attachment.url}`} target="_blank" rel="noreferrer">
+                          <img
+                            src={`${API_URL}${attachment.url}`}
+                            alt={attachment.name}
+                            className="max-h-72 max-w-full rounded-lg object-contain"
+                          />
+                        </a>
+                      ) : attachment.mimeType.startsWith('video/') ? (
+                        <video controls preload="metadata" className="max-h-72 max-w-full rounded-lg">
+                          <source src={`${API_URL}${attachment.url}`} type={attachment.mimeType} />
+                          Your browser cannot play this video.
+                        </video>
+                      ) : attachment.mimeType.startsWith('audio/') ? (
+                        <audio controls preload="metadata" className="max-w-full">
+                          <source src={`${API_URL}${attachment.url}`} type={attachment.mimeType} />
+                          Your browser cannot play this audio.
+                        </audio>
+                      ) : (
+                        <a
+                          href={`${API_URL}${attachment.url}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block break-all underline"
+                        >
+                          {attachment.name} ({formatFileSize(attachment.size)})
+                        </a>
+                      )}
+                    </div>
+                  ))}
                   <span className={`mt-1 block text-right text-[10px] ${String(m.sender) === String(user?._id) ? 'text-teal-100/70' : 'text-gray-500'}`}>
                     {new Date(m.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
@@ -380,20 +494,57 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           )}
           <form onSubmit={sendMessage} className="theme-composer mx-auto flex max-w-4xl items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
             <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_FILE_TYPES}
+              multiple
+              onChange={selectFiles}
+              className="hidden"
+              aria-label="Choose attachments"
+            />
+            <button
+              type="button"
+              title="Attach images, audio, video, or PDF files (up to 50 MB each)"
+              aria-label="Attach files"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!selectedChat || isSending}
+              className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-30"
+            >
+              <FaPaperclip />
+            </button>
+            <input
               value={msg}
               onChange={(e) => setMsg(e.target.value)}
               className="theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-3 text-base outline-none placeholder:opacity-60 sm:text-sm"
               placeholder={selectedChat ? `Message ${selectedChat.name || selectedChat.username}...` : 'Choose a conversation first'}
-              disabled={!selectedChat}
+              disabled={!selectedChat || isSending}
             />
             <button
               className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"
-              disabled={!selectedChat || !msg.trim() || !socketConnected}
+              disabled={!selectedChat || (!msg.trim() && !selectedFiles.length) || !socketConnected || isSending}
             >
-              Send
+              {isSending ? 'Sending…' : 'Send'}
             </button>
           </form>
+          {selectedFiles.length > 0 && (
+            <ul className="mx-auto mt-2 flex max-w-4xl flex-wrap gap-2" aria-label="Selected attachments">
+              {selectedFiles.map((file, index) => (
+                <li key={`${file.name}-${file.lastModified}-${index}`} className="theme-muted flex items-center gap-2 rounded-lg border border-white/10 px-2 py-1 text-xs">
+                  <span className="max-w-48 truncate">{file.name} · {formatFileSize(file.size)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                    disabled={isSending}
+                    aria-label={`Remove ${file.name}`}
+                    className="font-semibold hover:text-rose-400 disabled:opacity-50"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </footer>
 
         {/* Video Call Modal */}

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { FaCheck, FaEdit, FaTrash } from "react-icons/fa";
 import GroupList from "./GroupList";
 import ProfileEditor from "./ProfileEditor";
+import NotificationCenter from "./NotificationCenter";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const authConfig = () => ({
@@ -17,6 +18,12 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState(null);
+  const [notificationTitle, setNotificationTitle] = useState("");
+  const [notificationBody, setNotificationBody] = useState("");
+  const [notificationAudience, setNotificationAudience] = useState("all");
+  const [notificationRecipients, setNotificationRecipients] = useState([]);
+  const [sendingNotification, setSendingNotification] = useState(false);
+  const [notificationSuccess, setNotificationSuccess] = useState("");
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -61,19 +68,118 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
     }
   };
 
+  const sendNotification = async (event) => {
+    event.preventDefault();
+    setError("");
+    setNotificationSuccess("");
+    setSendingNotification(true);
+    try {
+      const { data } = await axios.post(
+        `${API_URL}/api/admin/notifications`,
+        {
+          title: notificationTitle,
+          body: notificationBody,
+          audience: notificationAudience,
+          ...(notificationAudience === "selected" ? { recipientIds: notificationRecipients } : {}),
+        },
+        authConfig()
+      );
+      setNotificationSuccess(`Notification sent to ${data.sent} user${data.sent === 1 ? "" : "s"}.`);
+      setNotificationTitle("");
+      setNotificationBody("");
+      setNotificationRecipients([]);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not send the notification.");
+    } finally {
+      setSendingNotification(false);
+    }
+  };
+
   return (
     <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 text-white sm:px-8">
       <div className="glass-panel mx-auto max-w-5xl rounded-2xl p-4 sm:p-6">
-        <div className="flex items-center justify-between gap-4">
+        <div className="relative z-30 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">Administration</h1>
             <p className="mt-1 text-sm text-white/60">Approve accounts and manage user access and roles.</p>
           </div>
-          <button type="button" onClick={onBack || (() => navigate("/chat"))} className="rounded-lg border border-white/15 px-3 py-2 text-sm hover:bg-white/10">
-            Back to chat
-          </button>
+          <div className="flex items-center gap-3">
+            <NotificationCenter />
+            <button type="button" onClick={onBack || (() => navigate("/chat"))} className="rounded-lg border border-white/15 px-3 py-2 text-sm hover:bg-white/10">
+              Back to chat
+            </button>
+          </div>
         </div>
         {error && <p role="alert" className="mt-4 rounded-lg bg-rose-950/70 px-4 py-3 text-sm text-rose-200">{error}</p>}
+        <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
+          <h2 className="text-lg font-semibold">Send a notification</h2>
+          <p className="mt-1 text-sm text-white/60">Notify all active users or choose specific recipients.</p>
+          {notificationSuccess && (
+            <p role="status" className="mt-3 rounded-lg bg-emerald-950/50 px-3 py-2 text-sm text-emerald-200">
+              {notificationSuccess}
+            </p>
+          )}
+          <form onSubmit={sendNotification} className="mt-4 space-y-3">
+            <label className="block text-sm">
+              <span className="mb-1 block text-white/70">Title</span>
+              <input
+                value={notificationTitle}
+                onChange={(event) => setNotificationTitle(event.target.value)}
+                maxLength={120}
+                required
+                className="w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-white/70">Message</span>
+              <textarea
+                value={notificationBody}
+                onChange={(event) => setNotificationBody(event.target.value)}
+                maxLength={2000}
+                rows={3}
+                required
+                className="w-full resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-white/70">Recipients</span>
+              <select
+                value={notificationAudience}
+                onChange={(event) => setNotificationAudience(event.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white"
+              >
+                <option value="all">Everyone (active users)</option>
+                <option value="selected">Specific users</option>
+              </select>
+            </label>
+            {notificationAudience === "selected" && (
+              <label className="block text-sm">
+                <span className="mb-1 block text-white/70">Choose users (Ctrl/Cmd-click to select multiple)</span>
+                <select
+                  multiple
+                  value={notificationRecipients}
+                  onChange={(event) => setNotificationRecipients(
+                    Array.from(event.target.selectedOptions, (option) => option.value)
+                  )}
+                  className="max-h-48 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white"
+                >
+                  {users.filter((candidate) => candidate.status === "active").map((candidate) => (
+                    <option key={candidate._id} value={candidate._id}>
+                      {candidate.username} ({candidate.email})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              type="submit"
+              disabled={sendingNotification || (notificationAudience === "selected" && !notificationRecipients.length)}
+              className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sendingNotification ? "Sending…" : "Send notification"}
+            </button>
+          </form>
+        </section>
         {loading ? <p className="mt-6 text-sm text-white/60">Loading users…</p> : (
           <div className="mt-6 space-y-3">
             {users.map((candidate) => {
