@@ -24,7 +24,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
   const handleSelectChat = (chat) => {
     onSelectChat(chat);
     setIsProfileOpen(false);
-    if (window.matchMedia('(max-width: 639px)').matches) onCloseSidebar();
+    onCloseSidebar();
   };
 
   const renderContent = () => {
@@ -58,10 +58,11 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
 
       {/* Sidebar Container */}
       <div
-        style={{ height: 'var(--app-height, 100dvh)' }}
-        className={`theme-sidebar fixed left-0 top-0 z-40 flex min-h-0 transform shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-in-out ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        style={{
+          height: 'var(--app-height, 100dvh)',
+          transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
+        }}
+        className="theme-sidebar fixed left-0 top-0 z-40 flex min-h-0 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-in-out"
       >
         {/* Left Nav Icons */}
         <div className="glass-rail relative z-20 flex w-16 flex-col items-center space-y-4 py-10">

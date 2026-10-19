@@ -23,6 +23,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const messagesRequestId = React.useRef(0);
 
   useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [selectedChat?._id]);
+
+  useEffect(() => {
     const updateAppHeight = () => {
       const height = window.visualViewport?.height || window.innerHeight;
       document.documentElement.style.setProperty('--app-height', `${height}px`);
