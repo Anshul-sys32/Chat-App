@@ -19,8 +19,19 @@ const initSocket = (httpServer) => {
       const token = socket.handshake.auth?.token;
       if (!token || !process.env.JWT_SECRET) return next(new Error("Unauthorized"));
       const user = jwt.verify(token, process.env.JWT_SECRET);
-      socket.userId = String(user.id);
-      next();
+      socket.data.authExpiresAt = user.exp * 1000;
+      pool.execute(
+        "SELECT id, role, status FROM users WHERE id = ? AND status = 'active' LIMIT 1",
+        [user.id]
+      ).then(([users]) => {
+        if (!users[0]) return next(new Error("Unauthorized"));
+        socket.userId = String(users[0].id);
+        socket.userRole = users[0].role;
+        return next();
+      }).catch((error) => {
+        console.error("Socket authentication database error:", error.message);
+        return next(new Error("Authentication unavailable"));
+      });
     } catch {
       next(new Error("Unauthorized"));
     }
@@ -28,6 +39,13 @@ const initSocket = (httpServer) => {
 
   io.on("connection", (socket) => {
     console.log("🔌 New socket connected:", socket.id);
+
+    const tokenLifetime = socket.data.authExpiresAt - Date.now();
+    if (tokenLifetime <= 0) {
+      socket.disconnect(true);
+      return;
+    }
+    socket.authExpirationTimer = setTimeout(() => socket.disconnect(true), tokenLifetime);
 
     const userSockets = connectedUsers.get(socket.userId) || new Set();
     userSockets.add(socket.id);
@@ -37,11 +55,20 @@ const initSocket = (httpServer) => {
     io.emit("online-users", onlineUsers);
     socket.emit("online-users", onlineUsers);
 
-    socket.on("send-message", async ({ receiver, content } = {}) => {
+    socket.on("send-message", async (payload = {}) => {
       try {
+        const { receiver, content } = payload || {};
         const receiverId = Number(receiver);
-        if (!Number.isSafeInteger(receiverId) || receiverId < 1 || !content?.trim()) {
+        if (!Number.isSafeInteger(receiverId) || receiverId < 1
+          || typeof content !== "string" || !content.trim()) {
           return socket.emit("message-error", { message: "A recipient and message are required." });
+        }
+        const [recipients] = await pool.execute(
+          "SELECT id FROM users WHERE id = ? AND status = 'active' LIMIT 1",
+          [receiverId]
+        );
+        if (!recipients.length) {
+          return socket.emit("message-error", { message: "That recipient is not available." });
         }
         const [result] = await pool.execute(
           "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)",
@@ -49,7 +76,7 @@ const initSocket = (httpServer) => {
         );
         const [rows] = await pool.execute(
           `SELECT id AS _id, sender_id AS sender, receiver_id AS receiver, content,
-                  created_at AS timestamp FROM messages WHERE id = ?`,
+                  is_deleted AS isDeleted, created_at AS timestamp FROM messages WHERE id = ?`,
           [result.insertId]
         );
         const message = rows[0];
@@ -63,7 +90,8 @@ const initSocket = (httpServer) => {
       }
     });
 
-    socket.on("join-group", async ({ groupId } = {}) => {
+    socket.on("join-group", async (payload = {}) => {
+      const { groupId } = payload || {};
       const id = Number(groupId);
       if (!Number.isSafeInteger(id) || id < 1) return;
       try {
@@ -71,7 +99,7 @@ const initSocket = (httpServer) => {
           "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
           [id, Number(socket.userId)]
         );
-        if (memberships.length) socket.join(`group:${id}`);
+        if (memberships.length || socket.userRole === "admin") socket.join(`group:${id}`);
         else socket.emit("message-error", { message: "You are not a member of this group." });
       } catch (error) {
         console.error("Group join DB error:", error.message);
@@ -79,9 +107,10 @@ const initSocket = (httpServer) => {
       }
     });
 
-    socket.on("group-message", async ({ groupId, content } = {}) => {
+    socket.on("group-message", async (payload = {}) => {
+      const { groupId, content } = payload || {};
       const id = Number(groupId);
-      if (!Number.isSafeInteger(id) || id < 1 || !content?.trim()) {
+      if (!Number.isSafeInteger(id) || id < 1 || typeof content !== "string" || !content.trim()) {
         return socket.emit("message-error", { message: "A group and message are required." });
       }
       try {
@@ -89,7 +118,7 @@ const initSocket = (httpServer) => {
           "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
           [id, Number(socket.userId)]
         );
-        if (!memberships.length) {
+        if (!memberships.length && socket.userRole !== "admin") {
           return socket.emit("message-error", { message: "You are no longer a member of this group." });
         }
         const [result] = await pool.execute(
@@ -98,7 +127,8 @@ const initSocket = (httpServer) => {
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
-                  u.username AS senderName, gm.content, gm.created_at AS timestamp
+                  u.username AS senderName, gm.content, gm.is_deleted AS isDeleted,
+                  gm.created_at AS timestamp
            FROM group_messages gm JOIN users u ON u.id = gm.sender_id WHERE gm.id = ?`,
           [result.insertId]
         );
@@ -124,6 +154,7 @@ const initSocket = (httpServer) => {
     // Step 4: Handle disconnect
     socket.on("disconnect", () => {
       console.log(`❌ Socket disconnected: ${socket.id}`);
+      clearTimeout(socket.authExpirationTimer);
 
       if (socket.userId) {
         const userSockets = connectedUsers.get(socket.userId);

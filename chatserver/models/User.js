@@ -1,21 +1,80 @@
 const { pool } = require("../config/db");
 
 const findByEmail = async (email) => {
-  const [rows] = await pool.execute("SELECT * FROM users WHERE email = ? LIMIT 1", [email]);
+  const [rows] = await pool.execute(
+    `SELECT id, username, email, password, google_sub AS googleSub, role, status
+     FROM users WHERE email = ? LIMIT 1`,
+    [email]
+  );
+  return rows[0] || null;
+};
+
+const findByGoogleSub = async (googleSub) => {
+  const [rows] = await pool.execute(
+    `SELECT id, username, email, password, google_sub AS googleSub, role, status
+     FROM users WHERE google_sub = ? LIMIT 1`,
+    [googleSub]
+  );
+  return rows[0] || null;
+};
+
+const findByUsername = async (username) => {
+  const [rows] = await pool.execute(
+    "SELECT id FROM users WHERE username = ? LIMIT 1",
+    [username]
+  );
   return rows[0] || null;
 };
 
 const listPublic = async () => {
-  const [rows] = await pool.query("SELECT id AS _id, username, email FROM users ORDER BY username");
+  const [rows] = await pool.query(
+    "SELECT id AS _id, username, email FROM users WHERE status = 'active' ORDER BY username"
+  );
   return rows;
 };
 
-const create = async ({ username, email, password, role }) => {
-  const [result] = await pool.execute(
-    "INSERT INTO users (username, email, password, role, status) VALUES (?, ?, ?, ?, 'active')",
-    [username, email, password, role]
+const listAdmin = async () => {
+  const [rows] = await pool.query(
+    `SELECT id AS _id, username, email, role, status, created_at AS createdAt
+     FROM users ORDER BY created_at DESC, id DESC`
   );
-  return { id: result.insertId, username, email, role, status: "active" };
+  return rows;
 };
 
-module.exports = { findByEmail, listPublic, create };
+const create = async ({
+  username,
+  email,
+  password = null,
+  googleSub = null,
+  googleName = null,
+  googlePicture = null,
+  role = "user",
+  status = "pending",
+}) => {
+  const [result] = await pool.execute(
+    `INSERT INTO users
+     (username, email, password, google_sub, google_name, google_picture, role, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [username, email, password, googleSub, googleName, googlePicture, role, status]
+  );
+  return { id: result.insertId, username, email, googleSub, googleName, googlePicture, role, status };
+};
+
+const updateGoogleProfile = async (userId, { email, googleSub, googleName, googlePicture }) => {
+  await pool.execute(
+    `UPDATE users
+     SET email = ?, google_sub = ?, google_name = ?, google_picture = ?
+     WHERE id = ?`,
+    [email, googleSub, googleName, googlePicture, userId]
+  );
+};
+
+module.exports = {
+  findByEmail,
+  findByGoogleSub,
+  findByUsername,
+  listPublic,
+  listAdmin,
+  create,
+  updateGoogleProfile,
+};

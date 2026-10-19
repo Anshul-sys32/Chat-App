@@ -15,17 +15,43 @@ Set `chatapp/.env` to the server URL for `VITE_API_URL`, `VITE_SERVER_URL`, and 
 
 ### Test from Android with VS Code port forwarding
 
-Forward both the Vite port (`5173`) and API server port (`5000`) in VS Code. Use the HTTPS forwarded address for port `5000` in the frontend configuration:
+Forward both the Vite port (`5174`) and API server port (`5175`) in VS Code. Use the HTTPS forwarded address for port `5175` in the frontend configuration:
 
 ```dotenv
-VITE_API_URL=https://<your-5000-forwarded-address>
-VITE_SERVER_URL=https://<your-5000-forwarded-address>
-VITE_SOCKET_URL=https://<your-5000-forwarded-address>
+VITE_API_URL=https://<your-5175-forwarded-address>
+VITE_SERVER_URL=https://<your-5175-forwarded-address>
+VITE_SOCKET_URL=https://<your-5175-forwarded-address>
 ```
 
-For example, if VS Code gives port `5000` the address `https://example-5000.inc1.devtunnels.ms`, use that address for all three values. Restart Vite after changing its environment file. Ensure both forwarded ports are accessible from the phone. The backend tunnel is needed for API requests and Socket.IO; forwarding only port `5173` is not enough. The server currently accepts requests from all origins; because credentialed browser requests cannot use the literal `*` CORS header, it reflects each request's origin.
+For example, if VS Code gives port `5175` the address `https://example-5175.inc1.devtunnels.ms`, use that address for all three values. Restart Vite after changing its environment file. Ensure both forwarded ports are accessible from the phone. The backend tunnel is needed for API requests and Socket.IO; forwarding only port `5174` is not enough. The server currently accepts requests from all origins; because credentialed browser requests cannot use the literal `*` CORS header, it reflects each request's origin.
 
 Video calls require a secure browser context. Use HTTPS when opening the app on Android or another device; an HTTP LAN address (such as `http://192.168...`) does not allow camera and microphone access. Localhost is permitted for development. The browser must also be granted camera and microphone permissions.
+
+### Host on an IPv6 address
+
+The development servers can bind to IPv6 using the settings in `chatapp/.env` and `chatserver/.env`. IPv6 literals in URLs must be enclosed in square brackets. Vite's development server is for development only; it may serve the page but does not ensure the app's API and Socket.IO connections work externally.
+
+For external hosting, build the frontend and serve it from the API server so the app, API, and Socket.IO share one origin and port:
+
+```sh
+cd chatapp && npm run build
+cd ../chatserver && npm start
+```
+
+Then open `http://[2405:201:6811:a82a:3aed:adb3:3ebd:d4b1]:5175`. Forward/allow inbound TCP port `5175` through the host firewall and router/ISP IPv6 firewall. This avoids a separate public route to Vite port `5174`. The address must be assigned to the host and globally reachable from the client network.
+
+These development servers use plain HTTP. Login and chat can work over IPv6 HTTP, but browsers require HTTPS for camera and microphone access, so audio/video calls need a TLS-enabled public origin (typically a reverse proxy with a valid certificate and DNS hostname). Do not expose the Vite development server as a production deployment.
+
+### HTTPS with Caddy and DuckDNS
+
+The root `Caddyfile` configures Caddy to reverse-proxy `fameless.duckdns.org` to the app server on port `5175`. Build the frontend first, then make sure DuckDNS has an AAAA record pointing to this host's public IPv6 address. Caddy is installed as a system service on this machine and imports `/etc/caddy/conf.d/*`; install and activate the site with:
+
+```sh
+sudo install -m 0644 Caddyfile /etc/caddy/conf.d/fameless.caddy
+sudo systemctl enable --now caddy
+```
+
+Allow inbound TCP ports `80` and `443` through the host and router IPv6 firewalls. Caddy will obtain and renew a publicly trusted certificate when DNS resolves to this host and it can complete ACME validation. Then open `https://fameless.duckdns.org`. Keep the app server on port `5175`; Caddy terminates HTTPS and proxies API, page, and Socket.IO/WebRTC signaling traffic to it.
 
 ## Run locally
 
@@ -33,3 +59,41 @@ Video calls require a secure browser context. Use HTTPS when opening the app on 
 cd chatserver && npm install && npm run dev
 cd chatapp && npm install && npm run dev
 ```
+
+## Authentication and account administration
+
+Set a private signing key and a Google OAuth 2.0 Web client ID in `chatserver/.env`:
+
+```dotenv
+JWT_SECRET=<long-random-secret>
+GOOGLE_CLIENT_ID=<google-web-client-id>
+```
+
+In Google Cloud, configure the OAuth client as a Web application and add the app's
+origins (for example, `http://localhost:5174` and the production HTTPS origin) to
+its authorized JavaScript origins. The login page fetches the public client ID from
+the server at runtime, so a frontend rebuild is not needed when configuring it.
+The server verifies Google's signed credential before issuing the app's JWT. It
+stores the verified Google subject, email, display name, and profile image URL on
+the corresponding user row. Existing accounts with the same verified email are
+linked; subsequent sign-ins resolve by Google's stable subject identifier.
+
+New password and Google accounts are created with `pending` status and cannot sign
+in until an administrator approves them. To bootstrap the first administrator,
+register the account, then run this statement in the configured MySQL database:
+
+```sql
+UPDATE users
+SET role = 'admin', status = 'active'
+WHERE email = 'admin@example.com';
+```
+
+After signing in, administrators can approve, suspend, reactivate, change roles,
+or delete accounts from the Admin panel. They can also manage group memberships
+and group-level roles from the Admin panel or Groups sidebar. Server-side JWT verification and
+current account/role checks protect the API; client-side route restrictions are
+only a navigation aid.
+
+On startup, the server migrates existing message tables to add `is_deleted`, makes
+usernames unique, converts legacy inactive accounts to suspended, and permits
+OAuth-only accounts without passwords.

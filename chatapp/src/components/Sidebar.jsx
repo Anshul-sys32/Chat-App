@@ -1,14 +1,19 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 import {
   FaUsers,
   FaLayerGroup,
   FaTimes,
-  FaBars
+  FaBars,
+  FaShieldAlt
 } from 'react-icons/fa';
 import UserList from './UserList';
 import GroupList from './GroupList';
+import Socket from '../Socket';
 
-const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
+
+const Sidebar = ({ isOpen, toggleSidebar, onSelectChat, onOpenAdmin }) => {
   const [activeTab, setActiveTab] = useState('users');
   const [search, setSearch] = useState('');
   let user = null;
@@ -50,7 +55,8 @@ const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
 
       {/* Sidebar Container */}
       <div
-        className={`fixed top-0 left-0 h-full z-40 transform transition-transform duration-300 ease-in-out flex bg-gray-900 text-white ${
+        style={{ height: 'var(--app-height, 100dvh)' }}
+        className={`fixed left-0 top-0 z-40 flex min-h-0 transform bg-gray-900 text-white transition-transform duration-300 ease-in-out ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -80,13 +86,19 @@ const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
               onClick={() => setActiveTab('groups')}
               active={activeTab === 'groups'}
             />
+            {user?.role === 'admin' && <IconButton
+              icon={<FaShieldAlt />}
+              label="Admin"
+              onClick={onOpenAdmin}
+              active={false}
+            />}
           </div>
         </div>
 
         {/* Dynamic Content Area */}
-        <div className="w-72 bg-gray-800 flex flex-col justify-between">
+        <div className="flex h-full min-h-0 w-[calc(100vw-4rem)] flex-col overflow-hidden bg-gray-800 sm:w-72">
           {/* Search Input + List */}
-          <div className="p-4 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             <input
               type="text"
               placeholder="Search..."
@@ -98,14 +110,21 @@ const Sidebar = ({ isOpen, toggleSidebar, onSelectChat }) => {
           </div>
 
           {/* Footer */}
-          <div className="p-4 border-t border-gray-700 flex flex-col items-center">
+          <div className="shrink-0 border-t border-gray-700 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 flex flex-col items-center">
             <p className="text-sm font-semibold truncate">
               {user?.username || 'Guest'}
             </p>
             <button
-              onClick={() => {
+              onClick={async () => {
+                try {
+                  await axios.post(`${API_URL}/api/logout`, {}, { withCredentials: true });
+                } catch (error) {
+                  console.error('Could not clear the server session:', error);
+                }
                 localStorage.removeItem('user');
                 localStorage.removeItem('token');
+                localStorage.removeItem('selectedChat');
+                Socket.disconnect();
                 window.location.reload();
               }}
               className="mt-2 text-sm bg-red-500 px-3 py-1 rounded hover:bg-red-600 w-full text-center"

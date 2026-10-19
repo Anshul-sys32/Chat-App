@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { connectAndRegisterUser } from "../Socket";
@@ -10,7 +10,7 @@ import {
   FaEyeSlash,
 } from "react-icons/fa";
 
-const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL;
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 function UserForm({ onAuthenticated }) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [username, setUsername] = useState("");
@@ -20,12 +20,17 @@ function UserForm({ onAuthenticated }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [focusedField, setFocusedField] = useState("");
+  const [notice, setNotice] = useState("");
+  const [googleClientId, setGoogleClientId] = useState("");
+  const [googleStatus, setGoogleStatus] = useState("loading");
+  const googleButton = useRef(null);
 
   const navigate = useNavigate();
 
   const toggleForm = () => {
     setIsSignUp((prev) => !prev);
     setError("");
+    setNotice("");
     setUsername("");
     setEmail("");
     setPassword("");
@@ -33,10 +38,80 @@ function UserForm({ onAuthenticated }) {
     setShowPass(false);
   };
 
+  useEffect(() => {
+    let active = true;
+    let googleScript;
+    axios.get(`${API_URL}/api/oauth/config`, { timeout: 10000 })
+      .then(({ data }) => {
+        if (!active) return;
+        if (typeof data.googleClientId !== "string" || !data.googleClientId) {
+          setGoogleStatus("unconfigured");
+          return;
+        }
+        setGoogleClientId(data.googleClientId);
+        googleScript = document.createElement("script");
+        googleScript.src = "https://accounts.google.com/gsi/client";
+        googleScript.async = true;
+        googleScript.defer = true;
+        googleScript.onload = () => {
+          if (!active) return;
+          if (!window.google?.accounts?.id || !googleButton.current) {
+            setGoogleStatus("error");
+            return;
+          }
+          window.google.accounts.id.initialize({
+            client_id: data.googleClientId,
+            callback: async ({ credential }) => {
+              setLoading(true);
+              setError("");
+              setNotice("");
+              try {
+                const response = await axios.post(`${API_URL}/api/oauth/google`, { credential }, {
+                  withCredentials: true,
+                });
+                if (!response.data.user?._id || !response.data.token) {
+                  throw new Error("The server returned an incomplete sign-in response.");
+                }
+                localStorage.setItem("user", JSON.stringify(response.data.user));
+                localStorage.setItem("token", response.data.token);
+                onAuthenticated(response.data.user);
+                connectAndRegisterUser(response.data.token);
+                navigate("/chat", { replace: true });
+              } catch (requestError) {
+                setError(requestError.response?.data?.message || requestError.message || "Google sign-in failed.");
+              } finally {
+                setLoading(false);
+              }
+            },
+          });
+          window.google.accounts.id.renderButton(googleButton.current, {
+            theme: "filled_black",
+            size: "large",
+            shape: "pill",
+            text: "continue_with",
+            width: Math.min(280, googleButton.current.clientWidth || 280),
+          });
+          setGoogleStatus("ready");
+        };
+        googleScript.onerror = () => {
+          if (active) setGoogleStatus("error");
+        };
+        document.head.appendChild(googleScript);
+      })
+      .catch(() => {
+        if (active) setGoogleStatus("unavailable");
+      });
+    return () => {
+      active = false;
+      googleScript?.remove();
+    };
+  }, [navigate, onAuthenticated]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setNotice("");
 
     try {
       const endpoint = isSignUp ? "/api/register" : "/api/login";
@@ -47,6 +122,12 @@ function UserForm({ onAuthenticated }) {
       const { data } = await axios.post(`${API_URL}${endpoint}`, payload, {
         withCredentials: true,
       });
+      if (isSignUp) {
+        setNotice(data.message || "Your account is awaiting administrator approval.");
+        setIsSignUp(false);
+        setPassword("");
+        return;
+      }
       if (!data.user?._id || !data.token) {
         throw new Error("The server returned an incomplete sign-in response.");
       }
@@ -77,19 +158,20 @@ function UserForm({ onAuthenticated }) {
     
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-r from-[#200122] to-[#6f0000] px-4">
       <div
-        className="relative overflow-hidden rounded-3xl max-w-md w-full shadow-2xl bg-white/10 backdrop-blur p-6 transition-all duration-[600ms]"
-        style={{ height: isSignUp ? 470 : 440 }}
+        className="relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-x-hidden overflow-y-auto rounded-3xl bg-white/10 p-6 shadow-2xl backdrop-blur transition-all duration-[600ms]"
+        style={{ height: isSignUp ? 470 : 500 }}
       >
         <div
-          className={`flex w-[200%] h-full transition-transform duration-500 ease-in-out ${
-            isSignUp ? "-translate-x-1/2" : "translate-x-0"
-          }`}
-          style={{ minWidth: "800px", maxWidth: "100%" }}
+          className="grid h-full grid-cols-2 gap-4 transition-transform duration-500 ease-in-out"
+          style={{
+            width: "calc(200% + 1rem)",
+            transform: isSignUp ? "translateX(calc(-50% - 0.5rem))" : "translateX(0)",
+          }}
         >
           {/* Sign In Form */}
           <form
             onSubmit={handleSubmit}
-            className="w-1/2 px-6 flex flex-col justify-center space-y-6 text-white min-w-[400px] sm:min-w-0"
+            className="flex min-w-0 flex-col justify-center space-y-4 px-3 text-white sm:px-6"
           >
             <h1 className="text-3xl font-bold text-center underline text-blue-200">
               Sign In
@@ -157,6 +239,7 @@ function UserForm({ onAuthenticated }) {
             {error && (
               <p className="text-sm text-red-300 text-center">{error}</p>
             )}
+            {notice && <p role="status" className="text-sm text-emerald-200 text-center">{notice}</p>}
 
             <button
               type="submit"
@@ -176,12 +259,40 @@ function UserForm({ onAuthenticated }) {
                 Sign Up
               </button>
             </p>
+            <div className="w-full">
+              {googleClientId ? (
+                <div ref={googleButton} className="flex min-h-10 justify-center" />
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  className="flex min-h-10 w-full items-center justify-center rounded-full border border-white/25 bg-white px-4 text-sm font-semibold text-gray-800 disabled:cursor-not-allowed disabled:opacity-90"
+                >
+                  Continue with Google
+                </button>
+              )}
+              {googleStatus === "unconfigured" && (
+                <p className="mt-1 text-center text-xs text-amber-100">
+                  Google sign-in needs GOOGLE_CLIENT_ID configured on the server.
+                </p>
+              )}
+              {googleStatus === "unavailable" && (
+                <p className="mt-1 text-center text-xs text-amber-100">
+                  Google sign-in configuration could not be loaded.
+                </p>
+              )}
+              {googleStatus === "error" && (
+                <p role="alert" className="mt-1 text-center text-xs text-rose-200">
+                  Could not load Google sign-in. Check the browser’s connection and Google OAuth origin settings.
+                </p>
+              )}
+            </div>
           </form>
 
           {/* Sign Up Form */}
           <form
             onSubmit={handleSubmit}
-            className="w-1/2 px-6 flex flex-col justify-center space-y-6 text-white min-w-[400px] sm:min-w-0"
+            className="flex min-w-0 flex-col justify-center space-y-6 px-3 text-white sm:px-6"
           >
             <h1 className="text-3xl font-bold text-center underline text-blue-200">
               Sign Up

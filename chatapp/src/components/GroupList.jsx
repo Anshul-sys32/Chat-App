@@ -3,7 +3,7 @@ import axios from 'axios';
 import { FaChevronDown, FaChevronUp, FaCrown, FaPlus, FaUserMinus, FaUsers } from 'react-icons/fa';
 import Socket from '../Socket';
 
-const apiUrl = import.meta.env.VITE_API_URL;
+const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const authConfig = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
 });
@@ -53,9 +53,9 @@ export default function GroupList({ search = '', onSelectGroup }) {
         ? { ...group, members: memberCount }
         : group));
       if (String(activeGroup?._id) === String(groupId)) {
-        setMembers((previous) => previous.some((current) => String(current._id) === String(member._id)
+        setMembers((previous) => previous.some((current) => String(current._id) === String(member._id))
           ? previous
-          : [...previous, member]));
+          : [...previous, member]);
         setUsers((previous) => previous.filter((candidate) => String(candidate._id) !== String(member._id)));
       } else if (!groups.some((group) => String(group._id) === String(groupId))
         && String(member._id) === String(currentUser?._id)) {

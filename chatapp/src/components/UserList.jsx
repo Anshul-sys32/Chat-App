@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Socket from '../Socket';
 
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
+
 export default function UserList({ onStartChat, search = '' }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
@@ -24,11 +26,11 @@ export default function UserList({ onStartChat, search = '' }) {
 
     const fetchUsers = async () => {
       try {
-        const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/users`, {
+        const res = await axios.get(`${API_URL}/api/users`, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
           withCredentials: true,
         });
-        const others = res.data.filter((u) => u._id !== currentUser._id);
+        const others = res.data.filter((u) => String(u._id) !== String(currentUser._id));
         setAllUsers(others);
       } catch (err) {
         console.error("Failed to fetch users:", err);

@@ -1,26 +1,52 @@
 import { useEffect, useRef, useState } from "react";
+import { FaExpand, FaPhone, FaPhoneSlash, FaWindowMinimize } from "react-icons/fa";
 import Socket from "../Socket";
 
-export default function VideoCall({ to, callType, isOpen, onClose }) {
+export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const localVideo = useRef();
   const remoteVideo = useRef();
   const remoteAudio = useRef();
   const pc = useRef(null);
   const localStream = useRef(null);
+  const remoteStream = useRef(null);
   const pendingCandidates = useRef([]);
   const remoteUserId = useRef(null);
   const currentTo = useRef(to);
+  const currentPeerName = useRef(peerName);
   const onCloseRef = useRef(onClose);
   const [error, setError] = useState("");
   const [calling, setCalling] = useState(false);
+  const [callStatus, setCallStatus] = useState("Ready to call");
   const [incomingOffer, setIncomingOffer] = useState(null);
   const [activeCallType, setActiveCallType] = useState(callType);
+  const [callPeerName, setCallPeerName] = useState(peerName);
   const [visible, setVisible] = useState(isOpen);
+  const [minimized, setMinimized] = useState(false);
+  const [hasLocalMedia, setHasLocalMedia] = useState(false);
+  const [hasRemoteMedia, setHasRemoteMedia] = useState(false);
+  const [selfViewPosition, setSelfViewPosition] = useState(null);
 
   currentTo.current = to;
+  currentPeerName.current = peerName;
   onCloseRef.current = onClose;
+  const displayPeerName = callPeerName || peerName || "Private call";
   useEffect(() => setVisible(isOpen), [isOpen]);
-  useEffect(() => setActiveCallType(callType), [callType]);
+  useEffect(() => {
+    if (!pc.current && !incomingOffer) setActiveCallType(callType);
+  }, [callType, incomingOffer]);
+  useEffect(() => {
+    if (activeCallType === "video" && localVideo.current && localStream.current) {
+      localVideo.current.srcObject = localStream.current;
+    }
+  }, [activeCallType, hasLocalMedia, visible]);
+  useEffect(() => {
+    if (remoteVideo.current && remoteStream.current) {
+      remoteVideo.current.srcObject = remoteStream.current;
+    }
+    if (activeCallType === "audio" && remoteAudio.current && remoteStream.current) {
+      remoteAudio.current.srcObject = remoteStream.current;
+    }
+  }, [activeCallType, hasRemoteMedia, incomingOffer, visible]);
 
   const ensureLocalMedia = async (mediaType) => {
     if (!localStream.current) {
@@ -36,8 +62,47 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
         audio: true,
       });
     }
+    setHasLocalMedia(true);
     if (mediaType === "video" && localVideo.current) localVideo.current.srcObject = localStream.current;
     return localStream.current;
+  };
+
+  useEffect(() => {
+    const positionSelfView = () => {
+      const width = Math.min(280, Math.max(110, window.innerWidth * 0.17));
+      const height = width * 9 / 16;
+      setSelfViewPosition((position) => {
+        const maxX = Math.max(8, window.innerWidth - width - 8);
+        const maxY = Math.max(8, window.innerHeight - height - 8);
+        return position
+          ? { x: Math.min(position.x, maxX), y: Math.min(position.y, maxY) }
+          : { x: Math.max(16, maxX - 12), y: Math.max(80, maxY - 104) };
+      });
+    };
+    positionSelfView();
+    window.addEventListener("resize", positionSelfView);
+    return () => window.removeEventListener("resize", positionSelfView);
+  }, []);
+
+  const moveSelfView = (event) => {
+    const card = event.currentTarget.closest("[data-self-view]");
+    if (!card) return;
+    const width = card.offsetWidth;
+    const height = card.offsetHeight;
+    setSelfViewPosition({
+      x: Math.min(Math.max(8, event.clientX - dragOffset.current.x), window.innerWidth - width - 8),
+      y: Math.min(Math.max(8, event.clientY - dragOffset.current.y), window.innerHeight - height - 8),
+    });
+  };
+
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const startSelfViewDrag = (event) => {
+    const card = event.currentTarget.closest("[data-self-view]");
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    dragOffset.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
   };
 
   useEffect(() => {
@@ -46,8 +111,10 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
       if (pc.current) return;
       const requestedType = incomingCallType === "audio" ? "audio" : "video";
       remoteUserId.current = from;
+      setCallPeerName(currentPeerName.current);
       setIncomingOffer({ offer, from, callType: requestedType });
       setActiveCallType(requestedType);
+      setMinimized(false);
       setVisible(true);
       setError("");
     };
@@ -56,6 +123,7 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
       if (String(from) !== String(remoteUserId.current)) return;
       try {
         await pc.current?.setRemoteDescription(new RTCSessionDescription(answer));
+        setCallStatus("Connecting");
         for (const candidate of pendingCandidates.current.splice(0)) {
           await pc.current?.addIceCandidate(new RTCIceCandidate(candidate));
         }
@@ -82,6 +150,8 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
       cleanupCall();
       setIncomingOffer(null);
       setCalling(false);
+      setCallStatus("Call ended");
+      setMinimized(false);
       setVisible(false);
       onCloseRef.current?.();
     };
@@ -105,6 +175,9 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
     pc.current = null;
     localStream.current?.getTracks().forEach((track) => track.stop());
     localStream.current = null;
+    remoteStream.current = null;
+    setHasLocalMedia(false);
+    setHasRemoteMedia(false);
     pendingCandidates.current = [];
     if (localVideo.current) localVideo.current.srcObject = null;
     if (remoteVideo.current) remoteVideo.current.srcObject = null;
@@ -123,15 +196,18 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
     };
 
     peer.ontrack = (e) => {
-      if (mediaType === "video" && remoteVideo.current) {
-        remoteVideo.current.srcObject = e.streams[0];
-      } else if (remoteAudio.current) {
-        remoteAudio.current.srcObject = e.streams[0];
-      }
+      remoteStream.current = e.streams[0];
+      setHasRemoteMedia(true);
+      if (mediaType === "video" && remoteVideo.current) remoteVideo.current.srcObject = remoteStream.current;
+      if (mediaType === "audio" && remoteAudio.current) remoteAudio.current.srcObject = remoteStream.current;
     };
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === "connected") setCalling(false);
-      if (peer.connectionState === "failed") setError("Call connection failed. Check your network and try again.");
+      if (peer.connectionState === "connected") setCallStatus("Connected");
+      if (peer.connectionState === "failed") {
+        setCallStatus("Connection failed");
+        setError("Call connection failed. Check your network and try again.");
+      }
     };
 
     return peer;
@@ -144,6 +220,10 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
     }
     setCalling(true);
     setError("");
+    setActiveCallType(callType);
+    setCallPeerName(peerName);
+    setMinimized(false);
+    setCallStatus("Calling");
     remoteUserId.current = to;
     try {
       const stream = await ensureLocalMedia(callType);
@@ -155,6 +235,7 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
     } catch (callError) {
       setError(callError.message || "Could not start this call.");
       setCalling(false);
+      setCallStatus("Ready to call");
     }
   };
 
@@ -173,7 +254,9 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
       await pc.current.setLocalDescription(answer);
       Socket.emit("answer", { answer, to: from });
       setIncomingOffer(null);
+      setMinimized(false);
       setCalling(true);
+      setCallStatus("Connecting");
       setError("");
     } catch (callError) {
       setError(callError.message || "Could not answer this call.");
@@ -187,6 +270,8 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
     cleanupCall();
     setIncomingOffer(null);
     setCalling(false);
+    setCallStatus("Call ended");
+    setMinimized(false);
     setVisible(false);
     onCloseRef.current?.();
   };
@@ -194,39 +279,181 @@ export default function VideoCall({ to, callType, isOpen, onClose }) {
   if (!visible && !incomingOffer) return null;
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/65 p-4">
-      <section className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-5 text-gray-900 shadow-2xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            {incomingOffer ? `Incoming ${incomingOffer.callType} call` : `${callType === "audio" ? "Audio" : "Video"} call`}
-          </h2>
-          <button type="button" onClick={closeCall} className="rounded-md px-2 py-1 text-sm text-gray-500 hover:bg-gray-100" aria-label="Close call">Close</button>
-        </div>
-        {incomingOffer ? (
-          <div className="flex items-center justify-between gap-4 rounded-lg bg-teal-50 p-4">
-            <p className="text-sm text-gray-700">A contact is calling you.</p>
-            <div className="flex gap-2">
-              <button type="button" onClick={closeCall} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">Decline</button>
-              <button type="button" onClick={acceptCall} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Answer</button>
-            </div>
-          </div>
-        ) : (
+    <div
+      style={minimized ? undefined : { height: "var(--app-height, 100dvh)" }}
+      className={`fixed z-[100] overflow-hidden bg-[#071315] text-white ${minimized
+        ? "inset-auto bottom-4 right-4 h-36 w-72 rounded-2xl border border-white/20 shadow-2xl"
+        : "inset-0 w-screen"}`}
+    >
+      <section className="relative h-full w-full overflow-hidden" role="dialog" aria-modal={!minimized} aria-label={`${activeCallType} call`}>
+        {activeCallType === "video" ? (
           <>
-            {activeCallType === "video" && (
-              <div className="mb-3 grid grid-cols-2 gap-2">
-                <video ref={localVideo} autoPlay muted playsInline className="aspect-video w-full rounded-lg bg-black object-cover" />
-                <video ref={remoteVideo} autoPlay playsInline className="aspect-video w-full rounded-lg bg-black object-cover" />
+            <video
+              ref={remoteVideo}
+              autoPlay
+              playsInline
+              className="absolute inset-0 h-full w-full bg-[#071315] object-cover"
+            />
+            {!hasRemoteMedia && !incomingOffer && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
+                <div className="grid h-28 w-28 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl ring-8 ring-white/5 sm:h-40 sm:w-40 sm:text-5xl">
+                  {displayPeerName.slice(0, 1).toUpperCase()}
+                </div>
+                <p className="text-sm text-white/75">{callStatus === "Ready to call" ? "Ready when you are" : callStatus}</p>
               </div>
             )}
-            {error && <p role="alert" className="mb-2 text-sm text-red-600">{error}</p>}
-            <div className="flex justify-between">
-              <button type="button" onClick={callUser} disabled={!to || calling} className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50">{calling ? "Calling..." : "Start call"}</button>
-              <button type="button" onClick={closeCall} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">End call</button>
-            </div>
           </>
+        ) : (
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-teal-900/60 via-[#102426] to-[#050b0c]" />
         )}
-        <audio ref={remoteAudio} autoPlay playsInline className="hidden" />
-        {error && incomingOffer && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+        {!minimized && <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/55 via-transparent to-black/70" />}
+
+        {minimized ? (
+          <header className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 bg-black/75 p-2.5 backdrop-blur">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold">{displayPeerName}</p>
+              <p className="truncate text-[10px] text-white/70">{callStatus}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button type="button" onClick={() => setMinimized(false)} aria-label="Restore call" title="Restore call" className="grid h-8 w-8 place-items-center rounded-full bg-white/15 hover:bg-white/25">
+                <FaExpand size={12} />
+              </button>
+              <button type="button" onClick={closeCall} aria-label="End call" title="End call" className="grid h-8 w-8 place-items-center rounded-full bg-rose-500 hover:bg-rose-400">
+                <FaPhoneSlash size={12} />
+              </button>
+            </div>
+          </header>
+        ) : <header className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-5 pb-8 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold sm:text-lg">{displayPeerName}</p>
+            <p className="mt-1 flex items-center gap-2 text-xs text-white/70 sm:text-sm">
+              <span className={`h-2 w-2 rounded-full ${callStatus === "Connected" ? "bg-emerald-400" : "bg-amber-300"}`} />
+              {incomingOffer ? `Incoming ${incomingOffer.callType} call` : callStatus}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMinimized(true)}
+              aria-label="Minimize call"
+              className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15"
+            >
+              <FaWindowMinimize />
+            </button>
+            <button
+              type="button"
+              onClick={closeCall}
+              aria-label="End call"
+              className="rounded-full border border-white/20 bg-black/30 px-4 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15"
+            >
+              End
+            </button>
+          </div>
+        </header>
+        }
+
+        {!minimized && activeCallType === "audio" && !incomingOffer && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
+            <div className="grid h-36 w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-5xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5 sm:h-48 sm:w-48 sm:text-6xl">
+              {displayPeerName.slice(0, 1).toUpperCase()}
+            </div>
+            <p className="text-sm text-white/70">Audio call</p>
+          </div>
+        )}
+
+        {!minimized && activeCallType === "video" && hasLocalMedia && !incomingOffer && (
+          <div
+            data-self-view
+            className="absolute z-20 aspect-video overflow-hidden rounded-2xl border border-white/30 bg-black shadow-2xl shadow-black/50 ring-1 ring-black/20"
+            style={{
+              width: "clamp(110px, 17vw, 280px)",
+              left: selfViewPosition?.x ?? 16,
+              top: selfViewPosition?.y ?? 80,
+            }}
+          >
+            <video ref={localVideo} autoPlay muted playsInline className="h-full w-full object-cover" />
+            <button
+              type="button"
+              onPointerDown={startSelfViewDrag}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) moveSelfView(event);
+              }}
+              onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+              onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+              className="absolute inset-x-0 top-0 flex cursor-grab touch-none items-center justify-center bg-gradient-to-b from-black/60 to-transparent px-2 pb-3 pt-2 text-[10px] font-medium text-white/90 active:cursor-grabbing sm:text-xs"
+              aria-label="Drag your video preview"
+            >
+              Your camera · drag to move
+            </button>
+          </div>
+        )}
+
+        {!minimized && incomingOffer && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 px-5 backdrop-blur-sm">
+            <div className="w-full max-w-sm rounded-3xl border border-white/15 bg-[#102426]/90 p-7 text-center shadow-2xl">
+              <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-full bg-teal-400/15 text-3xl font-semibold text-teal-100 ring-8 ring-teal-300/5">
+                {displayPeerName.slice(0, 1).toUpperCase()}
+              </div>
+              <p className="text-xl font-semibold">{displayPeerName} is calling</p>
+              <p className="mt-2 text-sm capitalize text-white/60">{incomingOffer.callType} call</p>
+              {error && <p role="alert" className="mt-4 text-sm text-rose-200">{error}</p>}
+              <div className="mt-8 flex justify-center gap-8">
+                <button
+                  type="button"
+                  onClick={closeCall}
+                  className="grid h-14 w-14 place-items-center rounded-full bg-rose-500 text-xl shadow-lg shadow-rose-950/40 transition hover:bg-rose-400"
+                  aria-label="Decline call"
+                  title="Decline"
+                >
+                  <FaPhoneSlash />
+                </button>
+                <button
+                  type="button"
+                  onClick={acceptCall}
+                  className="grid h-14 w-14 place-items-center rounded-full bg-emerald-500 text-xl shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-400"
+                  aria-label="Answer call"
+                  title="Answer"
+                >
+                  <FaPhone />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!minimized && !incomingOffer && (
+          <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-4 px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-16">
+            {error && (
+              <p role="alert" className="max-w-lg rounded-xl border border-rose-200/20 bg-rose-950/70 px-4 py-3 text-center text-sm text-rose-100 backdrop-blur">
+                {error}
+              </p>
+            )}
+            <div className="flex items-center gap-5 rounded-full border border-white/15 bg-black/45 px-5 py-4 shadow-2xl backdrop-blur-xl">
+              {!calling && !["Connected", "Connecting", "Calling"].includes(callStatus) && (
+                <button
+                  type="button"
+                  onClick={callUser}
+                  disabled={!to}
+                  className="rounded-full bg-emerald-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Start call
+                </button>
+              )}
+              {calling && <span className="px-2 text-sm text-white/80">Calling…</span>}
+              <button
+                type="button"
+                onClick={closeCall}
+                className="grid h-14 w-14 place-items-center rounded-full bg-rose-500 text-xl shadow-lg shadow-rose-950/40 transition hover:bg-rose-400"
+                aria-label="End call"
+                title="End call"
+              >
+                <FaPhoneSlash />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeCallType === "audio" && <audio ref={remoteAudio} autoPlay playsInline className="hidden" />}
       </section>
     </div>
   );
