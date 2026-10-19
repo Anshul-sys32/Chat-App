@@ -27,6 +27,10 @@ For example, if VS Code gives port `5175` the address `https://example-5175.inc1
 
 Video calls require a secure browser context. Use HTTPS when opening the app on Android or another device; an HTTP LAN address (such as `http://192.168...`) does not allow camera and microphone access. Localhost is permitted for development. The browser must also be granted camera and microphone permissions.
 
+The app provides matching dark and light themes. Switch themes from the sun/moon
+button in the chat sidebar; the selection is saved in the browser and also applies
+to the sign-in and administration pages.
+
 ### Host on an IPv6 address
 
 The development servers can bind to IPv6 using the settings in `chatapp/.env` and `chatserver/.env`. IPv6 literals in URLs must be enclosed in square brackets. Vite's development server is for development only; it may serve the page but does not ensure the app's API and Socket.IO connections work externally.
@@ -93,6 +97,12 @@ or delete accounts from the Admin panel. They can also manage group memberships
 and group-level roles from the Admin panel or Groups sidebar. Server-side JWT verification and
 current account/role checks protect the API; client-side route restrictions are
 only a navigation aid.
+
+Users can edit their username and email from the profile button at the bottom of
+the chat sidebar. Changing an existing password requires the current password;
+OAuth-only accounts can set a password without one. Administrators can edit any
+account's username/email or set a replacement password from the Admin panel.
+Passwords are hashed before storage and are never returned by profile endpoints.
 
 On startup, the server migrates existing message tables to add `is_deleted`, makes
 usernames unique, converts legacy inactive accounts to suspended, and permits

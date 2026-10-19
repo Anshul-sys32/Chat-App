@@ -172,7 +172,7 @@ export default function GroupList({ search = '', onSelectGroup }) {
       <ul className="space-y-1.5">
         {!loading && visibleGroups.length === 0 && <li className="rounded-md border border-dashed border-gray-700 px-3 py-4 text-center text-xs text-gray-400">No groups found</li>}
         {visibleGroups.map((group) => (
-          <li key={group._id} className={`rounded-md border transition ${activeGroup?._id === group._id ? 'border-cyan-500/60 bg-gray-700' : 'border-transparent bg-gray-700/60 hover:bg-gray-700'}`}>
+          <li key={group._id} className={`rounded-xl border transition ${activeGroup?._id === group._id ? 'border-teal-200/30 bg-teal-300/[0.1]' : 'border-white/[0.07] bg-white/[0.045] hover:bg-white/[0.08]'}`}>
             <div className="flex items-center gap-2 px-2.5 py-2">
               <button
                 type="button"
@@ -181,7 +181,7 @@ export default function GroupList({ search = '', onSelectGroup }) {
                 title={`Open ${group.name}`}
               >
                 <span className="block truncate text-sm font-semibold">{group.name}</span>
-                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-300">
+                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-white/55">
                   <FaUsers size={10} /> {group.members} · {group.role}
                 </span>
               </button>

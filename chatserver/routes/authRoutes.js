@@ -1,6 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const { register, login, googleLogin, user } = require("../controllers/authController");
+const {
+	register,
+	login,
+	googleLogin,
+	updateOwnProfile,
+	updateAdminProfile,
+	user,
+} = require("../controllers/authController");
 const protect = require("../middleware/authMiddleware");
 const requireAdmin = require("../middleware/requireAdmin");
 const User = require("../models/User");
@@ -34,7 +41,9 @@ router.post("/logout", (_req, res) => {
 	res.status(204).end();
 });
 router.get("/auth/me", protect, (req, res) => res.json({ user: req.user }));
+router.patch("/users/me/profile", protect, updateOwnProfile);
 router.get("/users", protect, user);
+router.patch("/admin/users/:userId/profile", protect, requireAdmin, updateAdminProfile);
 router.get("/admin/users", protect, requireAdmin, async (_req, res) => {
 	try {
 		res.json(await User.listAdmin());

@@ -35,6 +35,80 @@ exports.user = async (req, res) => {
   }
 };
 
+exports.updateOwnProfile = async (req, res) => {
+  const username = typeof req.body.username === "string" ? req.body.username.trim() : "";
+  const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const newPassword = req.body.newPassword;
+  const currentPassword = req.body.currentPassword;
+  if (!/^[a-zA-Z0-9_.-]{2,100}$/.test(username)) {
+    return res.status(400).json({ message: "Username must be 2-100 letters, numbers, dots, dashes, or underscores." });
+  }
+  if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: "Enter a valid email address." });
+  }
+  if (newPassword !== undefined && (typeof newPassword !== "string" || newPassword.length < 8)) {
+    return res.status(400).json({ message: "New password must be at least 8 characters." });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (newPassword && user.password && (
+      typeof currentPassword !== "string" || !await bcrypt.compare(currentPassword, user.password)
+    )) {
+      return res.status(403).json({ message: "Current password is incorrect." });
+    }
+    const hashedPassword = newPassword ? await bcrypt.hash(newPassword, 12) : undefined;
+    await User.updateProfile(req.user.id, { username, email, password: hashedPassword });
+    return res.json({
+      user: { _id: req.user.id, username, email, role: user.role, status: user.status },
+    });
+  } catch (error) {
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ message: "That username or email is already in use." });
+    }
+    console.error("Update own profile error:", error);
+    return res.status(500).json({ message: "Failed to update profile." });
+  }
+};
+
+exports.updateAdminProfile = async (req, res) => {
+  const userId = Number(req.params.userId);
+  const username = typeof req.body.username === "string" ? req.body.username.trim() : "";
+  const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const newPassword = req.body.newPassword;
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    return res.status(400).json({ message: "Invalid user id." });
+  }
+  if (!/^[a-zA-Z0-9_.-]{2,100}$/.test(username)) {
+    return res.status(400).json({ message: "Username must be 2-100 letters, numbers, dots, dashes, or underscores." });
+  }
+  if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: "Enter a valid email address." });
+  }
+  if (newPassword !== undefined && (typeof newPassword !== "string" || newPassword.length < 8)) {
+    return res.status(400).json({ message: "Replacement password must be at least 8 characters." });
+  }
+  try {
+    const target = await User.findById(userId);
+    if (!target) return res.status(404).json({ message: "User not found." });
+    const hashedPassword = newPassword ? await bcrypt.hash(newPassword, 12) : undefined;
+    await User.updateProfile(userId, { username, email, password: hashedPassword });
+    const io = req.app.get("io");
+    io?.in(`user:${userId}`).emit("account-profile-updated", { username, email });
+    if (hashedPassword) io?.in(`user:${userId}`).disconnectSockets(true);
+    return res.json({
+      user: { _id: userId, username, email, role: target.role, status: target.status },
+    });
+  } catch (error) {
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ message: "That username or email is already in use." });
+    }
+    console.error("Admin profile update error:", error);
+    return res.status(500).json({ message: "Failed to update user profile." });
+  }
+};
+
 exports.register = async (req, res) => {
   try {
     const { username, email, password } = req.body;

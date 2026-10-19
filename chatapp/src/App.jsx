@@ -17,6 +17,10 @@ const readSelectedChat = () => {
 };
 
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem("theme");
+    return savedTheme === "light" ? "light" : "dark";
+  });
   const [user, setUser] = useState(() => {
     try {
       return localStorage.getItem("token")
@@ -29,6 +33,17 @@ export default function App() {
     }
   });
   const [selectedChat, setSelectedChat] = useState(readSelectedChat);
+  const updateTheme = () => {
+    setTheme((currentTheme) => {
+      const nextTheme = currentTheme === "dark" ? "light" : "dark";
+      localStorage.setItem("theme", nextTheme);
+      return nextTheme;
+    });
+  };
+  const updateUser = (updatedUser) => {
+    setUser(updatedUser);
+    localStorage.setItem("user", JSON.stringify(updatedUser));
+  };
 
   const verifySession = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -73,22 +88,31 @@ export default function App() {
   }, [selectedChat]);
 
   return (
-    <Routes>
-      <Route path="/login" element={user ? <Navigate to="/chat" replace /> : <UserForm onAuthenticated={setUser} />} />
-      <Route
-        path="/admin"
-        element={user?.role === "admin" ? <AdminPanel user={user} /> : <Navigate to={user ? "/chat" : "/login"} replace />}
-      />
-      <Route
-        path="/chat"
-        element={user ? (
-          <Chat user={user} selectedChat={selectedChat} onSelectChat={setSelectedChat} />
-        ) : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="*"
-        element={<Navigate to={user ? "/chat" : "/login"} replace />}
-      />
-    </Routes>
+    <div className="app-theme min-h-screen" data-theme={theme}>
+      <Routes>
+        <Route path="/login" element={user ? <Navigate to="/chat" replace /> : <UserForm onAuthenticated={setUser} />} />
+        <Route
+          path="/admin"
+          element={user?.role === "admin" ? <AdminPanel user={user} onUserUpdated={updateUser} /> : <Navigate to={user ? "/chat" : "/login"} replace />}
+        />
+        <Route
+          path="/chat"
+          element={user ? (
+            <Chat
+              user={user}
+              selectedChat={selectedChat}
+              onSelectChat={setSelectedChat}
+              onUserUpdated={updateUser}
+              theme={theme}
+              onToggleTheme={updateTheme}
+            />
+          ) : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="*"
+          element={<Navigate to={user ? "/chat" : "/login"} replace />}
+        />
+      </Routes>
+    </div>
   );
 }

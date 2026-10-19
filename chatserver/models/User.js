@@ -18,6 +18,15 @@ const findByGoogleSub = async (googleSub) => {
   return rows[0] || null;
 };
 
+const findById = async (id) => {
+  const [rows] = await pool.execute(
+    `SELECT id, username, email, password, role, status
+     FROM users WHERE id = ? LIMIT 1`,
+    [id]
+  );
+  return rows[0] || null;
+};
+
 const findByUsername = async (username) => {
   const [rows] = await pool.execute(
     "SELECT id FROM users WHERE username = ? LIMIT 1",
@@ -69,12 +78,28 @@ const updateGoogleProfile = async (userId, { email, googleSub, googleName, googl
   );
 };
 
+const updateProfile = async (userId, { username, email, password }) => {
+  if (password) {
+    await pool.execute(
+      "UPDATE users SET username = ?, email = ?, password = ? WHERE id = ?",
+      [username, email, password, userId]
+    );
+    return;
+  }
+  await pool.execute(
+    "UPDATE users SET username = ?, email = ? WHERE id = ?",
+    [username, email, userId]
+  );
+};
+
 module.exports = {
   findByEmail,
   findByGoogleSub,
+  findById,
   findByUsername,
   listPublic,
   listAdmin,
   create,
   updateGoogleProfile,
+  updateProfile,
 };

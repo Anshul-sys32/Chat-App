@@ -150,15 +150,15 @@ function UserForm({ onAuthenticated }) {
     "w-full pl-10 pr-10 py-2 border rounded-md text-black bg-white outline-none focus:ring-2 ring-offset-0 transition-all duration-200 ease-in-out";
   const inputInvalid = "border-red-500 ring-red-300";
   const labelBase =
-    "absolute left-10 px-1 bg-white transition-all duration-200 ease-in-out text-sm pointer-events-none";
-  const floatLabel = "-top-2.5 translate-y-0 text-gray-700 text-xs";
+    "theme-auth-label absolute left-10 px-1 transition-all duration-200 ease-in-out text-sm pointer-events-none";
+  const floatLabel = "-top-2.5 translate-y-0 text-xs";
   const defaultLabel = "top-2.5 translate-y-0 text-gray-400";
 
   return (
     
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-r from-[#200122] to-[#6f0000] px-4">
+    <div className="theme-auth-page flex min-h-screen items-center justify-center px-4 py-4">
       <div
-        className="relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-x-hidden overflow-y-auto rounded-3xl bg-white/10 p-6 shadow-2xl backdrop-blur transition-all duration-[600ms]"
+        className="theme-auth-card relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-x-hidden overflow-y-auto rounded-3xl p-6 shadow-2xl backdrop-blur transition-all duration-[600ms]"
         style={{ height: isSignUp ? 470 : 500 }}
       >
         <div
@@ -171,9 +171,9 @@ function UserForm({ onAuthenticated }) {
           {/* Sign In Form */}
           <form
             onSubmit={handleSubmit}
-            className="flex min-w-0 flex-col justify-center space-y-4 px-3 text-white sm:px-6"
+            className="theme-auth-form flex min-w-0 flex-col justify-center space-y-4 px-3 sm:px-6"
           >
-            <h1 className="text-3xl font-bold text-center underline text-blue-200">
+            <h1 className="theme-auth-heading text-center text-3xl font-bold underline">
               Sign In
             </h1>
 
@@ -244,17 +244,17 @@ function UserForm({ onAuthenticated }) {
             <button
               type="submit"
               disabled={loading}
-              className="w-40 px-4 py-2 font-medium text-black bg-white rounded-full hover:bg-green-400 self-center"
+              className="theme-auth-submit w-40 self-center rounded-full px-4 py-2 font-medium"
             >
               {loading ? "Please wait..." : "Log In"}
             </button>
 
-            <p className="text-center text-sm text-white">
+            <p className="theme-auth-copy text-center text-sm">
               Don't have an account?{" "}
               <button
                 type="button"
                 onClick={toggleForm}
-                className="text-purple-300 no-underline hover:underline"
+                className="theme-auth-link no-underline hover:underline"
               >
                 Sign Up
               </button>
@@ -292,9 +292,9 @@ function UserForm({ onAuthenticated }) {
           {/* Sign Up Form */}
           <form
             onSubmit={handleSubmit}
-            className="flex min-w-0 flex-col justify-center space-y-6 px-3 text-white sm:px-6"
+            className="theme-auth-form flex min-w-0 flex-col justify-center space-y-6 px-3 sm:px-6"
           >
-            <h1 className="text-3xl font-bold text-center underline text-blue-200">
+            <h1 className="theme-auth-heading text-center text-3xl font-bold underline">
               Sign Up
             </h1>
 

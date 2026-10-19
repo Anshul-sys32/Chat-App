@@ -73,7 +73,7 @@ export default function UserList({ onStartChat, search = '' }) {
               <li
                 key={user._id}
                 onClick={() => handleStartChat(user)}
-                className="bg-gray-700 px-3 py-2 rounded hover:bg-gray-600 cursor-pointer flex justify-between items-center transition"
+                className="flex cursor-pointer items-center justify-between rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2.5 transition hover:border-teal-200/20 hover:bg-teal-300/[0.08]"
                 tabIndex={0}
                 role="button"
                 onKeyDown={(e) => {

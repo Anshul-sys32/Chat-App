@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { FaCheck, FaTrash } from "react-icons/fa";
+import { FaCheck, FaEdit, FaTrash } from "react-icons/fa";
 import GroupList from "./GroupList";
+import ProfileEditor from "./ProfileEditor";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const authConfig = () => ({
@@ -10,11 +11,12 @@ const authConfig = () => ({
   withCredentials: true,
 });
 
-export default function AdminPanel({ user, onBack }) {
+export default function AdminPanel({ user, onBack, onUserUpdated }) {
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [editingUser, setEditingUser] = useState(null);
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -61,7 +63,7 @@ export default function AdminPanel({ user, onBack }) {
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 text-white sm:px-8">
-      <div className="mx-auto max-w-5xl">
+      <div className="glass-panel mx-auto max-w-5xl rounded-2xl p-4 sm:p-6">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">Administration</h1>
@@ -77,7 +79,7 @@ export default function AdminPanel({ user, onBack }) {
             {users.map((candidate) => {
               const isSelf = String(candidate._id) === String(user?._id);
               return (
-                <section key={candidate._id} className="flex flex-col gap-4 rounded-xl border border-white/10 bg-white/[0.06] p-4 sm:flex-row sm:items-center">
+                <section key={candidate._id} className="glass-panel flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{candidate.username}{isSelf ? " (you)" : ""}</p>
                     <p className="truncate text-sm text-white/55">{candidate.email}</p>
@@ -124,6 +126,14 @@ export default function AdminPanel({ user, onBack }) {
                   )}
                   <button
                     type="button"
+                    onClick={() => setEditingUser(candidate)}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-teal-200/20 px-3 py-2 text-sm text-teal-100 transition hover:bg-teal-300/10"
+                    title={`Edit ${candidate.username}'s profile or password`}
+                  >
+                    <FaEdit size={12} /> Edit
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => deleteUser(candidate)}
                     disabled={isSelf}
                     title={`Delete ${candidate.username}`}
@@ -138,11 +148,24 @@ export default function AdminPanel({ user, onBack }) {
             {users.length === 0 && <p className="rounded-xl border border-dashed border-white/15 p-6 text-center text-sm text-white/50">No users found.</p>}
           </div>
         )}
-        <section className="mt-10 rounded-xl border border-white/10 bg-white/[0.04] p-4">
+        <section className="glass-panel mt-10 rounded-xl p-4">
           <h2 className="mb-4 text-lg font-semibold">Group management</h2>
           <GroupList />
         </section>
       </div>
+      {editingUser && (
+        <ProfileEditor
+          user={editingUser}
+          isAdmin
+          onClose={() => setEditingUser(null)}
+          onSaved={(updatedUser) => {
+            setUsers((previous) => previous.map((candidate) =>
+              String(candidate._id) === String(updatedUser._id) ? { ...candidate, ...updatedUser } : candidate
+            ));
+            if (String(updatedUser._id) === String(user?._id)) onUserUpdated?.(updatedUser);
+          }}
+        />
+      )}
     </main>
   );
 }
