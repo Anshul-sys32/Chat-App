@@ -149,6 +149,13 @@ const connectDB = async () => {
     if (!messageAttachmentsColumn[0].count) {
       await connection.query("ALTER TABLE messages ADD COLUMN attachments JSON NULL");
     }
+    const [messageReplyColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'messages' AND column_name = 'reply_to_id'`
+    );
+    if (!messageReplyColumn[0].count) {
+      await connection.query("ALTER TABLE messages ADD COLUMN reply_to_id BIGINT UNSIGNED NULL");
+    }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS chat_groups (
         id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -228,6 +235,13 @@ const connectDB = async () => {
     );
     if (!groupMessageAttachmentsColumn[0].count) {
         await connection.query("ALTER TABLE group_messages ADD COLUMN attachments JSON NULL");
+    }
+    const [groupMessageReplyColumn] = await connection.execute(
+        `SELECT COUNT(*) AS count FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'group_messages' AND column_name = 'reply_to_id'`
+    );
+    if (!groupMessageReplyColumn[0].count) {
+        await connection.query("ALTER TABLE group_messages ADD COLUMN reply_to_id BIGINT UNSIGNED NULL");
     }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS notifications (

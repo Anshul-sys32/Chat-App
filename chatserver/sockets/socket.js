@@ -90,6 +90,7 @@ const initSocket = (httpServer) => {
       try {
         const messagePayload = payload || {};
         const { receiver, content } = messagePayload;
+        const replyToId = Number(messagePayload.replyToId);
         const attachments = validateAttachments(messagePayload.attachments, socket.userId);
         const receiverId = Number(receiver);
         if (!Number.isSafeInteger(receiverId) || receiverId < 1
@@ -104,13 +105,30 @@ const initSocket = (httpServer) => {
         if (!recipients.length) {
           return socket.emit("message-error", { message: "That recipient is not available." });
         }
+        const [replied] = Number.isSafeInteger(replyToId) && replyToId > 0
+          ? await pool.execute(
+            `SELECT id FROM messages
+             WHERE id = ? AND ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))`,
+            [replyToId, Number(socket.userId), receiverId, receiverId, Number(socket.userId)]
+          )
+          : [[]];
+        if (messagePayload.replyToId !== undefined && !replied.length) {
+          return socket.emit("message-error", { message: "The message being replied to was not found." });
+        }
         const [result] = await pool.execute(
-          "INSERT INTO messages (sender_id, receiver_id, content, attachments) VALUES (?, ?, ?, ?)",
-          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments)]
+          "INSERT INTO messages (sender_id, receiver_id, content, attachments, reply_to_id) VALUES (?, ?, ?, ?, ?)",
+          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null]
         );
         const [rows] = await pool.execute(
-          `SELECT id AS _id, sender_id AS sender, receiver_id AS receiver, content,
-                  attachments, is_deleted AS isDeleted, created_at AS timestamp FROM messages WHERE id = ?`,
+          `SELECT messages.id AS _id, messages.sender_id AS sender, messages.receiver_id AS receiver,
+                  messages.content, messages.attachments, messages.reply_to_id AS replyToId,
+                  reply_user.username AS replySenderName,
+                  CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
+                  messages.created_at AS timestamp
+           FROM messages
+           LEFT JOIN messages reply_message ON reply_message.id = messages.reply_to_id
+           LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+           WHERE messages.id = ?`,
           [result.insertId]
         );
         const message = rows[0];
@@ -144,6 +162,7 @@ const initSocket = (httpServer) => {
     socket.on("group-message", async (payload = {}) => {
       const messagePayload = payload || {};
       const { groupId, content } = messagePayload;
+      const replyToId = Number(messagePayload.replyToId);
       const attachments = validateAttachments(messagePayload.attachments, socket.userId);
       const id = Number(groupId);
       if (!Number.isSafeInteger(id) || id < 1 || attachments === null
@@ -158,15 +177,27 @@ const initSocket = (httpServer) => {
         if (!memberships.length && socket.userRole !== "admin") {
           return socket.emit("message-error", { message: "You are no longer a member of this group." });
         }
+        const [replied] = Number.isSafeInteger(replyToId) && replyToId > 0
+          ? await pool.execute("SELECT id FROM group_messages WHERE id = ? AND group_id = ?", [replyToId, id])
+          : [[]];
+        if (messagePayload.replyToId !== undefined && !replied.length) {
+          return socket.emit("message-error", { message: "The message being replied to was not found." });
+        }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, sender_id, content, attachments) VALUES (?, ?, ?, ?)",
-          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments)]
+          "INSERT INTO group_messages (group_id, sender_id, content, attachments, reply_to_id) VALUES (?, ?, ?, ?, ?)",
+          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null]
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
-                  u.username AS senderName, gm.content, gm.attachments, gm.is_deleted AS isDeleted,
+                  u.username AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
+                  reply_user.username AS replySenderName,
+                  CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
+                  gm.is_deleted AS isDeleted,
                   gm.created_at AS timestamp
-           FROM group_messages gm JOIN users u ON u.id = gm.sender_id WHERE gm.id = ?`,
+           FROM group_messages gm JOIN users u ON u.id = gm.sender_id
+           LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
+           LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+           WHERE gm.id = ?`,
           [result.insertId]
         );
         io.to(`group:${id}`).emit("group-message", rows[0]);

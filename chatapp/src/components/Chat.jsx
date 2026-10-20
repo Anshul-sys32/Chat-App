@@ -3,7 +3,7 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaPaperclip, FaPhone, FaTrashAlt, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCopy, FaEllipsisV, FaPaperclip, FaPhone, FaReply, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -63,11 +63,30 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [loadingOlder, setLoadingOlder] = useState(false);
   const footerRef = React.useRef(null);
   const [footerHeight, setFooterHeight] = useState(0);
+  const [replyTo, setReplyTo] = useState(null);
+  const [openMessageMenu, setOpenMessageMenu] = useState(null);
+  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [openBulkMenu, setOpenBulkMenu] = useState(false);
+  const [pendingForward, setPendingForward] = useState(null);
+  const replyDrag = React.useRef(null);
 
   useEffect(() => {
     setIsSidebarOpen(false);
     setSelectedFiles([]);
+    setReplyTo(null);
+    setOpenMessageMenu(null);
+    setSelectedMessageIds([]);
+    setIsSelectionMode(false);
+    setOpenBulkMenu(false);
   }, [selectedChat?._id]);
+
+  useEffect(() => {
+    if (!pendingForward || !selectedChat?._id || String(selectedChat._id) === String(pendingForward.sourceChatId)) return;
+    setMsg(pendingForward.content || '');
+    setPendingForward(null);
+    setIsSidebarOpen(false);
+  }, [selectedChat?._id, pendingForward]);
 
   useEffect(() => {
     if (!selectedChat?._id || selectedChat.type === 'group') return;
@@ -407,6 +426,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       }
       const payload = {
         content: msg.trim(),
+        ...(replyTo?._id ? { replyToId: replyTo._id } : {}),
         ...(attachments.length ? { attachments } : {}),
       };
       if (chat.type === 'group') {
@@ -416,6 +436,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       }
       setMsg('');
       setSelectedFiles([]);
+      setReplyTo(null);
     } catch (error) {
       window.alert(error.response?.data?.message || 'Could not upload the selected files.');
     } finally {
@@ -444,6 +465,64 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setIsSidebarOpen((prev) => !prev);
   };
   const closeSidebar = () => setIsSidebarOpen(false);
+  const cancelSelection = () => {
+    setSelectedMessageIds([]);
+    setIsSelectionMode(false);
+    setOpenBulkMenu(false);
+  };
+  const toggleMessageSelection = (messageId) => {
+    setSelectedMessageIds((current) => current.includes(String(messageId))
+      ? current.filter((id) => id !== String(messageId))
+      : [...current, String(messageId)]);
+    setOpenMessageMenu(null);
+  };
+  const startSelection = (messageId) => {
+    setIsSelectionMode(true);
+    setSelectedMessageIds([String(messageId)]);
+    setOpenMessageMenu(null);
+  };
+  const forwardMessage = (message) => {
+    setPendingForward({ ...message, sourceChatId: selectedChat?._id });
+    setIsSidebarOpen(true);
+    setOpenMessageMenu(null);
+  };
+  const selectedMessages = messages.filter((message) => selectedMessageIds.includes(String(message._id)));
+  const copySelectedMessages = async () => {
+    const text = selectedMessages
+      .map((message) => `${message.senderName || (String(message.sender) === String(user?._id) ? 'You' : 'Message')}: ${message.content || '[Attachment]'}`)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error('Could not copy selected messages:', error);
+      window.alert('Could not copy the selected messages.');
+    }
+    cancelSelection();
+  };
+  const copyMessage = async (message) => {
+    const text = message.content || '[Attachment]';
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.error('Could not copy message:', error);
+      window.alert('Could not copy this message.');
+    }
+    setOpenMessageMenu(null);
+  };
+  const deleteSelectedMessages = async () => {
+    const deletable = selectedMessages.filter((message) => String(message.sender) === String(user?._id) && !message.isDeleted);
+    await Promise.all(deletable.map((message) => deleteMessage(message)));
+    cancelSelection();
+  };
+  const forwardSelectedMessages = () => {
+    if (!selectedMessages.length) return;
+    setPendingForward({
+      content: selectedMessages.map((message) => message.content || '[Attachment]').join('\n'),
+      sourceChatId: selectedChat?._id,
+    });
+    setIsSidebarOpen(true);
+    cancelSelection();
+  };
 
   return (
     <div style={{ height: 'var(--app-height, 100dvh)' }} className="theme-page flex h-screen w-screen overflow-hidden">
@@ -469,7 +548,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
-          {selectedChat && (
+          {isSelectionMode ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <button type="button" onClick={cancelSelection} className="theme-text grid h-10 w-10 place-items-center rounded-xl border" title="Cancel selection" aria-label="Cancel selection">
+                <FaTimes />
+              </button>
+              <h1 className="theme-text truncate text-lg font-semibold">{selectedMessageIds.length} selected</h1>
+            </div>
+          ) : selectedChat && (
             <Avatar
               src={selectedChat.type === 'group'
                 ? selectedChat.avatarUrl
@@ -487,7 +573,34 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <p className="theme-muted mt-0.5 text-xs">{selectedChat.members} members · {selectedChat.role}</p>
             )}
           </div>
-          <div className="flex shrink-0 items-center justify-end gap-1 sm:gap-4">
+          <div className="relative flex shrink-0 items-center justify-end gap-1 sm:gap-4">
+            {isSelectionMode ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setOpenBulkMenu((current) => !current)}
+                  className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border"
+                  title="Selected message actions"
+                  aria-label="Selected message actions"
+                >
+                  <FaEllipsisV />
+                </button>
+                {openBulkMenu && (
+                  <div className="absolute right-0 top-12 z-40 min-w-40 rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl">
+                    <button type="button" onClick={deleteSelectedMessages} className="block w-full rounded px-2 py-2 text-left text-rose-300 hover:bg-white/10">
+                      Delete selected
+                    </button>
+                    <button type="button" onClick={forwardSelectedMessages} className="block w-full rounded px-2 py-2 text-left hover:bg-white/10">
+                      Forward selected
+                    </button>
+                    <button type="button" onClick={copySelectedMessages} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left hover:bg-white/10">
+                      <FaCopy /> Copy selected
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
             <NotificationCenter />
             <button
               onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
@@ -507,6 +620,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             >
               <FaVideo />
             </button>
+              </>
+            )}
           </div>
         </header>
 
@@ -544,22 +659,106 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {selectedChat && messages.map((m) => (
               <div
                 key={m._id}
-                className={`flex ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'}`}
+                className={`relative flex touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'}`}
+                onClick={() => isSelectionMode && toggleMessageSelection(m._id)}
+                onPointerDown={(event) => {
+                  if (isSelectionMode) return;
+                  if (event.pointerType === 'mouse') return;
+                  replyDrag.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerMove={(event) => {
+                  const start = replyDrag.current;
+                  if (!start || isSelectionMode) return;
+                  const deltaX = Math.abs(event.clientX - start.x);
+                  const deltaY = Math.abs(event.clientY - start.y);
+                  if (deltaX > 12 && deltaX > deltaY) event.preventDefault();
+                }}
+                onPointerUp={(event) => {
+                  if (isSelectionMode) return;
+                  const start = replyDrag.current;
+                  replyDrag.current = null;
+                  if (!start || event.clientX - start.x < 70
+                    || Math.abs(event.clientX - start.x) <= Math.abs(event.clientY - start.y)) return;
+                  const replied = messages.find((candidate) => String(candidate._id) === String(m._id));
+                  if (event.clientX - start.x > 70) setReplyTo(replied);
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onPointerCancel={() => { replyDrag.current = null; }}
               >
                 <div
-                  className={`max-w-[min(82%,34rem)] rounded-2xl px-4 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
+                  data-message-id={m._id}
+                  className={`relative max-w-[min(82%,34rem)] rounded-2xl px-4 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
                     ? 'chat-bubble-own rounded-br-sm'
                     : 'chat-bubble-peer rounded-bl-sm'
                     }`}
                 >
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenMessageMenu((current) => current === String(m._id) ? null : String(m._id));
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label="Message actions"
+                    title="Message actions"
+                    className="absolute right-2 top-2 rounded-md p-1 opacity-60 transition hover:bg-black/20 hover:opacity-100"
+                  >
+                    <FaEllipsisV size={12} />
+                  </button>
+                  {openMessageMenu === String(m._id) && (
+                    <div onClick={(event) => event.stopPropagation()} className={`absolute top-9 z-20 min-w-32 rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl ${String(m.sender) === String(user?._id) ? 'right-0' : 'left-full ml-2'}`}>
+                      {!m.isDeleted && (
+                        <button type="button" onClick={() => { setReplyTo(m); setOpenMessageMenu(null); }} className="block w-full rounded px-2 py-1.5 text-left hover:bg-white/10">
+                          Reply
+                        </button>
+                      )}
+                      <button type="button" onClick={() => startSelection(m._id)} className="block w-full rounded px-2 py-1.5 text-left hover:bg-white/10">
+                        Select
+                      </button>
+                      <button type="button" onClick={() => forwardMessage(m)} className="block w-full rounded px-2 py-1.5 text-left hover:bg-white/10">
+                        Forward
+                      </button>
+                      <button type="button" onClick={() => copyMessage(m)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-white/10">
+                        <FaCopy /> Copy
+                      </button>
+                      {String(m.sender) === String(user?._id) && !m.isDeleted && (
+                        <button type="button" onClick={() => { setOpenMessageMenu(null); deleteMessage(m); }} className="block w-full rounded px-2 py-1.5 text-left text-rose-300 hover:bg-white/10">
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {selectedMessageIds.includes(String(m._id)) && (
+                    <span className="absolute -left-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-teal-400 text-[10px] font-bold text-slate-950">✓</span>
+                  )}
                   {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id)) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) ? 'text-teal-100' : 'text-teal-800'}`}>
                     {String(m.sender) === String(user?._id) ? 'You' : m.senderName || selectedChat.username}
                   </p>}
                   {m.content && (
                     <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
                   )}
-                  {!m.isDeleted && getAttachments(m).map((attachment) => (
-                    <div key={attachment.url} className="mt-2 max-w-full">
+                  {(m.replyToId || (!m.isDeleted && getAttachments(m).length > 0)) && (
+                    <div className="mt-2 flex max-w-full items-start gap-2">
+                    {m.replyToId && (() => {
+                      const quoted = messages.find((candidate) => String(candidate._id) === String(m.replyToId));
+                      return (
+                        <div
+                          onClick={() => quoted && messagesContainerRef.current?.querySelector(`[data-message-id="${quoted._id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                          className="flex min-w-0 max-w-[52%] cursor-pointer items-center gap-2 rounded-md border border-teal-200/40 bg-slate-950/80 px-2 py-1.5 text-left text-xs text-teal-50 shadow-inner"
+                        >
+                          <FaReply className="shrink-0 text-teal-300" />
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold">Replying to {quoted?.senderName || m.replySenderName || (String(quoted?.sender) === String(user?._id) ? 'You' : 'message')}</span>
+                            <span className="block truncate">{quoted?.content || m.replyContent || 'Attachment'}</span>
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  {!m.isDeleted && getAttachments(m).length > 0 && (
+                    <div className="flex min-w-0 flex-1 flex-wrap items-start gap-2">
+                    {getAttachments(m).map((attachment) => (
+                    <div key={attachment.url} className="max-w-full">
                       {attachment.mimeType.startsWith('image/') ? (
                         <a href={`${API_URL}${attachment.url}`} target="_blank" rel="noreferrer">
                           <img
@@ -589,24 +788,17 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                         </a>
                       )}
                     </div>
-                  ))}
+                    ))}
+                    </div>
+                  )}
+                    </div>
+                  )}
                   <span className={`mt-1 block text-right text-[10px] ${String(m.sender) === String(user?._id) ? 'text-teal-100/70' : 'text-gray-500'}`}>
                     {new Date(m.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
                   </span>
-                  {String(m.sender) === String(user?._id) && !m.isDeleted && (
-                    <button
-                      type="button"
-                      onClick={() => deleteMessage(m)}
-                      title="Delete message"
-                      aria-label="Delete message"
-                      className="mt-1 flex items-center gap-1 text-[10px] text-white/60 transition hover:text-rose-200"
-                    >
-                      <FaTrashAlt size={9} /> Delete
-                    </button>
-                  )}
                 </div>
               </div>
             ))}
@@ -621,6 +813,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           {selectedChat && !socketConnected && (
             <p role="status" className="mx-auto mb-2 max-w-4xl text-xs text-amber-200">
               Reconnecting to chat… Messages will send when the connection is restored.
+            </p>
+          )}
+          {pendingForward && (
+            <p className="mx-auto mb-2 max-w-4xl text-xs text-teal-200">
+              Choose a chat from the sidebar to forward this message.
             </p>
           )}
           <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
@@ -644,6 +841,21 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <FaPaperclip />
               <span>Attach</span>
             </button>
+            {replyTo && (
+              <div className="flex min-w-0 max-w-[42%] shrink items-center gap-1.5 rounded-xl border border-teal-300/30 bg-slate-950/40 px-2 py-1.5 text-xs">
+                <FaReply className="shrink-0 text-teal-300" />
+                <span className="min-w-0 flex-1 truncate">{replyTo.content || 'Attachment'}</span>
+                <button
+                  type="button"
+                  onClick={() => setReplyTo(null)}
+                  className="shrink-0 text-white/60 hover:text-white"
+                  aria-label="Cancel reply"
+                  title="Cancel reply"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             <input
               value={msg}
               onChange={(e) => setMsg(e.target.value)}

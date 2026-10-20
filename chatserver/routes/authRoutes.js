@@ -562,14 +562,19 @@ router.get("/messages/:userId", protect, async (req, res) => {
 	const limit = Number.isSafeInteger(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
 	try {
 		const [rows] = await pool.execute(
-			`SELECT id AS _id, sender_id AS sender, receiver_id AS receiver,
-							CASE WHEN is_deleted THEN 'This message was deleted' ELSE content END AS content,
-							CASE WHEN is_deleted THEN NULL ELSE attachments END AS attachments,
-							is_deleted AS isDeleted, created_at AS timestamp
+			`SELECT messages.id AS _id, messages.sender_id AS sender, messages.receiver_id AS receiver,
+							CASE WHEN messages.is_deleted THEN 'This message was deleted' ELSE messages.content END AS content,
+							CASE WHEN messages.is_deleted THEN NULL ELSE messages.attachments END AS attachments,
+							messages.is_deleted AS isDeleted, messages.reply_to_id AS replyToId,
+							reply_user.username AS replySenderName,
+							CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
+							messages.created_at AS timestamp
 			 FROM messages
-			 WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
-			   AND (? IS NULL OR id < ?)
-			 ORDER BY id DESC LIMIT ?`,
+			 LEFT JOIN messages reply_message ON reply_message.id = messages.reply_to_id
+			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+			 WHERE ((messages.sender_id = ? AND messages.receiver_id = ?) OR (messages.sender_id = ? AND messages.receiver_id = ?))
+			   AND (? IS NULL OR messages.id < ?)
+			 ORDER BY messages.id DESC LIMIT ?`,
 			[req.user.id, otherId, otherId, req.user.id, beforeId, beforeId, limit + 1]
 		);
 		const hasMore = rows.length > limit;
@@ -621,7 +626,7 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 		}
 		const [rows] = await pool.execute(
 			`SELECT id AS _id, sender_id AS sender, receiver_id AS receiver,
-			        content, NULL AS attachments, is_deleted AS isDeleted, created_at AS timestamp
+			        content, NULL AS attachments, is_deleted AS isDeleted, reply_to_id AS replyToId, created_at AS timestamp
 			 FROM messages WHERE id = ?`,
 			[messageId]
 		);
@@ -879,8 +884,13 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					u.username AS senderName,
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
-					gm.is_deleted AS isDeleted, gm.created_at AS timestamp
+					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
+					reply_user.username AS replySenderName,
+					CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
+					gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
+			 LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
+			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
 			 WHERE gm.group_id = ? AND (? IS NULL OR gm.id < ?)
 			 ORDER BY gm.id DESC LIMIT ?`,
 			[groupId, beforeId, beforeId, limit + 1]

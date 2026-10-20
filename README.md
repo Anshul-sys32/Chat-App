@@ -109,6 +109,10 @@ than one. Profile and group images support JPEG, PNG, GIF, WebP, and AVIF up to
 URL.
 Conversation history opens at the latest messages and loads older messages in
 50-message pages as you scroll upward.
+Messages can be replied to from the Reply action; on Android, swipe a message
+to the right to select it as the reply target. Replies retain a quoted sender
+and preview, including when the original message is outside the loaded history
+or has been deleted.
 
 The chat sidebar separates users into **Local Users** (people with whom the
 current account has exchanged direct messages) and **Global Users** (all other
