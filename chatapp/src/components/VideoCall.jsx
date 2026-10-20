@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FaExpand, FaPhone, FaPhoneSlash, FaWindowMinimize } from "react-icons/fa";
 import Socket from "../Socket";
+import { listAudioRoutes, selectAudioRoute } from "../audioRouting";
 
 export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const localVideo = useRef();
@@ -25,6 +26,10 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const [hasLocalMedia, setHasLocalMedia] = useState(false);
   const [hasRemoteMedia, setHasRemoteMedia] = useState(false);
   const [selfViewPosition, setSelfViewPosition] = useState(null);
+  const [audioRoutes, setAudioRoutes] = useState([]);
+  const [selectedAudioRoute, setSelectedAudioRoute] = useState("");
+  const [audioRouteError, setAudioRouteError] = useState("");
+  const [minimizedPosition, setMinimizedPosition] = useState(null);
 
   currentTo.current = to;
   currentPeerName.current = peerName;
@@ -48,6 +53,40 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     }
   }, [activeCallType, hasRemoteMedia, incomingOffer, visible]);
 
+  useEffect(() => {
+    if (!visible) return undefined;
+    let active = true;
+    const loadRoutes = async () => {
+      try {
+        const routes = await listAudioRoutes();
+        if (active) {
+          setAudioRoutes(routes);
+          if (routes.length && !selectedAudioRoute) setSelectedAudioRoute(routes[0].id);
+        }
+      } catch (routeError) {
+        if (active) setAudioRouteError(routeError.message || "Could not load audio outputs.");
+      }
+    };
+    loadRoutes();
+    const refresh = () => loadRoutes();
+    navigator.mediaDevices?.addEventListener?.("devicechange", refresh);
+    return () => {
+      active = false;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", refresh);
+    };
+  }, [visible, selectedAudioRoute]);
+
+  const changeAudioRoute = async (event) => {
+    const routeId = event.target.value;
+    setAudioRouteError("");
+    try {
+      await selectAudioRoute(routeId, [remoteAudio.current, remoteVideo.current]);
+      setSelectedAudioRoute(routeId);
+    } catch (routeError) {
+      setAudioRouteError(routeError.message || "Could not switch audio output.");
+    }
+  };
+
   const ensureLocalMedia = async (mediaType) => {
     if (!localStream.current) {
       const mediaDevices = navigator.mediaDevices;
@@ -69,7 +108,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   useEffect(() => {
     const positionSelfView = () => {
-      const width = Math.min(280, Math.max(110, window.innerWidth * 0.17));
+      const width = Math.min(360, Math.max(96, window.innerWidth * 0.25));
       const height = width * 9 / 16;
       setSelfViewPosition((position) => {
         const maxX = Math.max(8, window.innerWidth - width - 8);
@@ -82,6 +121,23 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     positionSelfView();
     window.addEventListener("resize", positionSelfView);
     return () => window.removeEventListener("resize", positionSelfView);
+  }, []);
+
+  useEffect(() => {
+    const positionMinimizedCall = () => {
+      const width = Math.min(320, Math.max(220, window.innerWidth * 0.75));
+      const height = 144;
+      setMinimizedPosition((position) => {
+        const maxX = Math.max(8, window.innerWidth - width - 8);
+        const maxY = Math.max(8, window.innerHeight - height - 8);
+        return position
+          ? { x: Math.min(position.x, maxX), y: Math.min(position.y, maxY) }
+          : { x: maxX, y: maxY };
+      });
+    };
+    positionMinimizedCall();
+    window.addEventListener("resize", positionMinimizedCall);
+    return () => window.removeEventListener("resize", positionMinimizedCall);
   }, []);
 
   const moveSelfView = (event) => {
@@ -103,6 +159,27 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     dragOffset.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
+  };
+
+  const startMinimizedDrag = (event) => {
+    if (event.target.closest("button")) return;
+    const card = event.currentTarget.closest("[data-minimized-call]");
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    dragOffset.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const moveMinimizedCall = (event) => {
+    const card = event.currentTarget.closest("[data-minimized-call]");
+    if (!card) return;
+    const width = card.offsetWidth;
+    const height = card.offsetHeight;
+    setMinimizedPosition({
+      x: Math.min(Math.max(8, event.clientX - dragOffset.current.x), window.innerWidth - width - 8),
+      y: Math.min(Math.max(8, event.clientY - dragOffset.current.y), window.innerHeight - height - 8),
+    });
   };
 
   useEffect(() => {
@@ -280,10 +357,13 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   return (
     <div
-      style={minimized ? undefined : { height: "var(--app-height, 100dvh)" }}
+      data-minimized-call={minimized ? "true" : undefined}
       className={`fixed z-[100] overflow-hidden bg-[#071315] text-white ${minimized
-        ? "inset-auto bottom-4 right-4 h-36 w-72 rounded-2xl border border-white/20 shadow-2xl"
+        ? "h-36 w-[min(75vw,320px)] rounded-2xl border border-white/20 shadow-2xl"
         : "inset-0 w-screen"}`}
+      style={minimized
+        ? { left: minimizedPosition?.x ?? 8, top: minimizedPosition?.y ?? 8 }
+        : { height: "var(--app-height, 100dvh)" }}
     >
       <section className="relative h-full w-full overflow-hidden" role="dialog" aria-modal={!minimized} aria-label={`${activeCallType} call`}>
         {activeCallType === "video" ? (
@@ -309,7 +389,15 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
         {!minimized && <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/55 via-transparent to-black/70" />}
 
         {minimized ? (
-          <header className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 bg-black/75 p-2.5 backdrop-blur">
+          <header
+            onPointerDown={startMinimizedDrag}
+            onPointerMove={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) moveMinimizedCall(event);
+            }}
+            onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+            onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+            className="absolute inset-0 z-30 flex cursor-grab touch-none items-end justify-between gap-2 bg-black/75 p-2.5 backdrop-blur active:cursor-grabbing"
+          >
             <div className="min-w-0">
               <p className="truncate text-xs font-semibold">{displayPeerName}</p>
               <p className="truncate text-[10px] text-white/70">{callStatus}</p>
@@ -360,31 +448,41 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             <p className="text-sm text-white/70">Audio call</p>
           </div>
         )}
+        {!minimized && !incomingOffer && audioRoutes.length > 0 && (
+          <div className="absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-1">
+            <label className="text-xs text-white/70" htmlFor="audio-route">Audio output</label>
+            <select
+              id="audio-route"
+              value={selectedAudioRoute}
+              onChange={changeAudioRoute}
+              className="rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-sm text-white backdrop-blur"
+            >
+              {audioRoutes.map((route) => <option key={route.id} value={route.id}>{route.label}</option>)}
+            </select>
+            {audioRouteError && <p className="text-xs text-rose-200">{audioRouteError}</p>}
+          </div>
+        )}
 
         {!minimized && activeCallType === "video" && hasLocalMedia && !incomingOffer && (
           <div
             data-self-view
-            className="absolute z-20 aspect-video overflow-hidden rounded-2xl border border-white/30 bg-black shadow-2xl shadow-black/50 ring-1 ring-black/20"
+            onPointerDown={startSelfViewDrag}
+            onPointerMove={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) moveSelfView(event);
+            }}
+            onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+            onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+            className="absolute z-20 aspect-video touch-none cursor-grab overflow-hidden rounded-2xl border border-white/30 bg-black shadow-2xl shadow-black/50 ring-1 ring-black/20 active:cursor-grabbing"
             style={{
-              width: "clamp(110px, 17vw, 280px)",
+              width: "clamp(96px, 25vw, 360px)",
               left: selfViewPosition?.x ?? 16,
               top: selfViewPosition?.y ?? 80,
             }}
           >
             <video ref={localVideo} autoPlay muted playsInline className="h-full w-full object-cover" />
-            <button
-              type="button"
-              onPointerDown={startSelfViewDrag}
-              onPointerMove={(event) => {
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) moveSelfView(event);
-              }}
-              onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-              onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-              className="absolute inset-x-0 top-0 flex cursor-grab touch-none items-center justify-center bg-gradient-to-b from-black/60 to-transparent px-2 pb-3 pt-2 text-[10px] font-medium text-white/90 active:cursor-grabbing sm:text-xs"
-              aria-label="Drag your video preview"
-            >
+            <span className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-center bg-gradient-to-b from-black/60 to-transparent px-2 pb-3 pt-2 text-[10px] font-medium text-white/90 sm:text-xs">
               Your camera · drag to move
-            </button>
+            </span>
           </div>
         )}
 

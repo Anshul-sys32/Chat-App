@@ -176,6 +176,10 @@ notification inbox; unread notifications remain available after reconnecting.
 Administrators can also add, edit, and remove the rotating quotes shown beneath
 NFaNG on the sign-in page. The dark theme uses a near-black grid background and
 a pointer-following glow; light mode remains available from the chat sidebar.
+During audio and video calls, the call panel provides an audio output selector.
+Browsers use supported output devices through `setSinkId`; the Android
+Capacitor client uses native routing for speaker, earpiece, wired/Bluetooth
+headsets, USB audio, and other detected outputs.
 
 On startup, the server migrates existing message tables to add `is_deleted` and
 attachment metadata columns, makes usernames unique, converts legacy inactive
