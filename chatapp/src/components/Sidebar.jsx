@@ -42,9 +42,10 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
     <>
       {/* Floating FaBars when sidebar is closed */}
       <div
-        className={`fixed top-4 left-4 z-50 transition-opacity duration-300 ease-in-out ${
+        className={`fixed left-4 z-50 transition-opacity duration-300 ease-in-out ${
           isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
+        style={{ top: 'calc(env(safe-area-inset-top, 0px) + 1rem)', left: 'calc(env(safe-area-inset-left, 0px) + 1rem)' }}
       >
         <button
           onClick={toggleSidebar}
@@ -59,7 +60,9 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       {/* Sidebar Container */}
       <div
         style={{
-          height: 'var(--app-height, 100dvh)',
+          top: 'env(safe-area-inset-top, 0px)',
+          bottom: 'env(safe-area-inset-bottom, 0px)',
+          height: 'calc(var(--app-height, 100dvh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
           transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
         }}
         className="theme-sidebar fixed left-0 top-0 z-40 flex min-h-0 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-in-out"
@@ -120,7 +123,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
           </div>
 
           {/* Footer */}
-          <div className="theme-sidebar-footer shrink-0 border-t px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+          <div className="theme-sidebar-footer shrink-0 border-t px-3 pb-4 pt-3">
             <button type="button" onClick={() => setIsProfileOpen(true)} className="flex w-full min-w-0 items-center gap-2 rounded-lg p-2 text-left transition hover:bg-white/[0.08]" title="Edit your profile">
               <Avatar src={user?.profilePicture || user?.googlePicture} name={user?.username} className="h-9 w-9 text-sm" />
               <span className="min-w-0 flex-1">
