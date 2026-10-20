@@ -180,6 +180,9 @@ During audio and video calls, the call panel provides an audio output selector.
 Browsers use supported output devices through `setSinkId`; the Android
 Capacitor client uses native routing for speaker, earpiece, wired/Bluetooth
 headsets, USB audio, and other detected outputs.
+The sidebar also includes Call History, where users can open a recent
+conversation, delete an individual call record, or clear their entire call
+history.
 
 On startup, the server migrates existing message tables to add `is_deleted` and
 attachment metadata columns, makes usernames unique, converts legacy inactive

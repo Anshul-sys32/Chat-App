@@ -99,6 +99,89 @@ router.post("/register/verify", verifySignup);
 router.post("/register/resend", resendSignupOtp);
 router.post("/password-reset/request", requestPasswordReset);
 router.post("/password-reset/confirm", resetPassword);
+router.get("/call-history", protect, async (req, res) => {
+	try {
+		const [calls] = await pool.execute(
+			`SELECT c.id AS _id, c.call_type AS callType, c.status,
+			        c.started_at AS startedAt, c.ended_at AS endedAt,
+			        CASE WHEN c.caller_id = ? THEN 'outgoing' ELSE 'incoming' END AS direction,
+			        CASE WHEN c.caller_id = ? THEN receiver.id ELSE caller.id END AS peerId,
+			        CASE WHEN c.caller_id = ? THEN receiver.username ELSE caller.username END AS peerName
+			 FROM call_history c
+			 JOIN users caller ON caller.id = c.caller_id
+			 JOIN users receiver ON receiver.id = c.receiver_id
+			 WHERE c.caller_id = ? OR c.receiver_id = ?
+			 ORDER BY c.started_at DESC, c.id DESC
+			 LIMIT 100`,
+			[req.user.id, req.user.id, req.user.id, req.user.id, req.user.id]
+		);
+		res.json(calls);
+	} catch (error) {
+		console.error("Fetch call history error:", error);
+		res.status(500).json({ message: "Could not load call history." });
+	}
+});
+router.post("/call-history", protect, async (req, res) => {
+	const receiverId = Number(req.body.receiverId);
+	const callType = req.body.callType === "audio" ? "audio" : req.body.callType === "video" ? "video" : null;
+	if (!validId(receiverId) || receiverId === Number(req.user.id) || !callType) {
+		return res.status(400).json({ message: "Invalid call details." });
+	}
+	try {
+		const [result] = await pool.execute(
+			`INSERT INTO call_history (caller_id, receiver_id, call_type, status)
+			 SELECT ?, id, ?, 'initiated' FROM users WHERE id = ? AND status = 'active'`,
+			[req.user.id, callType, receiverId]
+		);
+		if (!result.affectedRows) return res.status(404).json({ message: "That recipient is not available." });
+		res.status(201).json({ _id: result.insertId });
+	} catch (error) {
+		console.error("Create call history error:", error);
+		res.status(500).json({ message: "Could not save call history." });
+	}
+});
+router.patch("/call-history/:callId", protect, async (req, res) => {
+	const callId = Number(req.params.callId);
+	const status = ["completed", "missed", "declined"].includes(req.body.status) ? req.body.status : "completed";
+	if (!validId(callId)) return res.status(400).json({ message: "Invalid call id." });
+	try {
+		const [result] = await pool.execute(
+			"UPDATE call_history SET status = ?, ended_at = NOW() WHERE id = ? AND caller_id = ?",
+			[status, callId, req.user.id]
+		);
+		if (!result.affectedRows) return res.status(404).json({ message: "Call record not found." });
+		res.status(204).end();
+	} catch (error) {
+		console.error("Update call history error:", error);
+		res.status(500).json({ message: "Could not update call history." });
+	}
+});
+router.delete("/call-history/:callId", protect, async (req, res) => {
+	const callId = Number(req.params.callId);
+	if (!validId(callId)) return res.status(400).json({ message: "Invalid call id." });
+	try {
+		await pool.execute(
+			"DELETE FROM call_history WHERE id = ? AND (caller_id = ? OR receiver_id = ?)",
+			[callId, req.user.id, req.user.id]
+		);
+		res.status(204).end();
+	} catch (error) {
+		console.error("Delete call history error:", error);
+		res.status(500).json({ message: "Could not delete call record." });
+	}
+});
+router.delete("/call-history", protect, async (req, res) => {
+	try {
+		await pool.execute(
+			"DELETE FROM call_history WHERE caller_id = ? OR receiver_id = ?",
+			[req.user.id, req.user.id]
+		);
+		res.status(204).end();
+	} catch (error) {
+		console.error("Clear call history error:", error);
+		res.status(500).json({ message: "Could not clear call history." });
+	}
+});
 router.post("/login", login);
 router.get("/oauth/config", (_req, res) => {
 	res.set("Cache-Control", "no-store");

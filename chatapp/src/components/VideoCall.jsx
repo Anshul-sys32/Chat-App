@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { FaExpand, FaPhone, FaPhoneSlash, FaWindowMinimize } from "react-icons/fa";
+import { FaExpand, FaPhone, FaPhoneSlash, FaVolumeUp, FaWindowMinimize } from "react-icons/fa";
 import Socket from "../Socket";
 import { listAudioRoutes, selectAudioRoute } from "../audioRouting";
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
 export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const localVideo = useRef();
@@ -29,6 +32,8 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const [audioRoutes, setAudioRoutes] = useState([]);
   const [selectedAudioRoute, setSelectedAudioRoute] = useState("");
   const [audioRouteError, setAudioRouteError] = useState("");
+  const [showAudioRoutes, setShowAudioRoutes] = useState(false);
+  const callHistoryId = useRef(null);
   const [minimizedPosition, setMinimizedPosition] = useState(null);
 
   currentTo.current = to;
@@ -304,6 +309,18 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     remoteUserId.current = to;
     try {
       const stream = await ensureLocalMedia(callType);
+      try {
+        const { data: callRecord } = await axios.post(`${API_URL}/api/call-history`, {
+          receiverId: to,
+          callType,
+        }, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+          withCredentials: true,
+        });
+        callHistoryId.current = callRecord._id;
+      } catch (historyError) {
+        console.error("Could not save call history:", historyError);
+      }
       pc.current = createPeerConnection(to, callType);
       stream.getTracks().forEach((track) => pc.current.addTrack(track, stream));
       const offer = await pc.current.createOffer();
@@ -345,6 +362,13 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       Socket.emit("hangup", { to: remoteUserId.current });
     }
     cleanupCall();
+    if (callHistoryId.current) {
+      axios.patch(`${API_URL}/api/call-history/${callHistoryId.current}`, { status: "completed" }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        withCredentials: true,
+      }).catch((error) => console.error("Could not update call history:", error));
+      callHistoryId.current = null;
+    }
     setIncomingOffer(null);
     setCalling(false);
     setCallStatus("Call ended");
@@ -419,7 +443,41 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
               {incomingOffer ? `Incoming ${incomingOffer.callType} call` : callStatus}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="relative flex items-center gap-2">
+            {!incomingOffer && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowAudioRoutes((visibleRoutes) => !visibleRoutes)}
+                  aria-label="Choose audio output"
+                  aria-expanded={showAudioRoutes}
+                  title="Choose audio output"
+                  className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15"
+                >
+                  <FaVolumeUp />
+                </button>
+                {showAudioRoutes && (
+                  <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-xl border border-white/20 bg-[#071315]/95 p-2 shadow-2xl backdrop-blur">
+                    {audioRoutes.length > 0 ? (
+                      <>
+                        <p className="px-2 py-1 text-xs text-white/60">Audio output</p>
+                        <select
+                          id="audio-route"
+                          value={selectedAudioRoute}
+                          onChange={changeAudioRoute}
+                          className="w-full rounded-lg border border-white/20 bg-black/60 px-2 py-2 text-sm text-white"
+                        >
+                          {audioRoutes.map((route) => <option key={route.id} value={route.id}>{route.label}</option>)}
+                        </select>
+                      </>
+                    ) : (
+                      <p className="px-2 py-1 text-xs text-white/60">No selectable outputs detected.</p>
+                    )}
+                    {audioRouteError && <p className="px-2 py-1 text-xs text-rose-200">{audioRouteError}</p>}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setMinimized(true)}
@@ -448,21 +506,6 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             <p className="text-sm text-white/70">Audio call</p>
           </div>
         )}
-        {!minimized && !incomingOffer && audioRoutes.length > 0 && (
-          <div className="absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-1">
-            <label className="text-xs text-white/70" htmlFor="audio-route">Audio output</label>
-            <select
-              id="audio-route"
-              value={selectedAudioRoute}
-              onChange={changeAudioRoute}
-              className="rounded-lg border border-white/20 bg-black/60 px-3 py-2 text-sm text-white backdrop-blur"
-            >
-              {audioRoutes.map((route) => <option key={route.id} value={route.id}>{route.label}</option>)}
-            </select>
-            {audioRouteError && <p className="text-xs text-rose-200">{audioRouteError}</p>}
-          </div>
-        )}
-
         {!minimized && activeCallType === "video" && hasLocalMedia && !incomingOffer && (
           <div
             data-self-view
@@ -474,7 +517,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
             className="absolute z-20 aspect-video touch-none cursor-grab overflow-hidden rounded-2xl border border-white/30 bg-black shadow-2xl shadow-black/50 ring-1 ring-black/20 active:cursor-grabbing"
             style={{
-              width: "clamp(96px, 25vw, 360px)",
+              width: "25vw",
+              minWidth: 96,
+              maxWidth: 360,
               left: selfViewPosition?.x ?? 16,
               top: selfViewPosition?.y ?? 80,
             }}

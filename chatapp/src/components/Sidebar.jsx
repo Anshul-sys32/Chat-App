@@ -7,13 +7,15 @@ import {
   FaBars,
   FaShieldAlt,
   FaMoon,
-  FaSun
+  FaSun,
+  FaPhone
 } from 'react-icons/fa';
 import UserList from './UserList';
 import GroupList from './GroupList';
 import Socket from '../Socket';
 import ProfileEditor from './ProfileEditor';
 import Avatar from './Avatar';
+import CallHistory from './CallHistory';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
@@ -35,6 +37,8 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
         return <UserList currentUser={user} activeChatId={selectedChat?._id} scope="global" search={search} onStartChat={handleSelectChat} />;
       case 'groups':
         return <GroupList search={search} onSelectGroup={handleSelectChat} />;
+      case 'calls':
+        return <CallHistory onStartChat={handleSelectChat} />;
       default:
         return null;
     }
@@ -100,6 +104,12 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
               label="Groups"
               onClick={() => setActiveTab('groups')}
               active={activeTab === 'groups'}
+            />
+            <IconButton
+              icon={<FaPhone />}
+              label="Call History"
+              onClick={() => setActiveTab('calls')}
+              active={activeTab === 'calls'}
             />
             {user?.role === 'admin' && <IconButton
               icon={<FaShieldAlt />}

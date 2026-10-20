@@ -53,6 +53,21 @@ const connectDB = async () => {
         INDEX password_reset_otps_expiry (otp_expires_at)
       ) ENGINE=InnoDB
     `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS call_history (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        caller_id INT UNSIGNED NOT NULL,
+        receiver_id INT UNSIGNED NOT NULL,
+        call_type ENUM('audio', 'video') NOT NULL,
+        status ENUM('initiated', 'completed', 'missed', 'declined') NOT NULL DEFAULT 'initiated',
+        started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ended_at DATETIME NULL,
+        INDEX call_history_caller (caller_id, started_at, id),
+        INDEX call_history_receiver (receiver_id, started_at, id),
+        CONSTRAINT call_history_caller_fk FOREIGN KEY (caller_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT call_history_receiver_fk FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
     for (const [column, definition] of [
       ["google_sub", "VARCHAR(255) NULL"],
       ["google_name", "VARCHAR(255) NULL"],
