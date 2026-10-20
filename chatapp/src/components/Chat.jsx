@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
@@ -55,6 +55,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [messagesError, setMessagesError] = useState('');
   const [messagesAttempt, setMessagesAttempt] = useState(0);
   const messagesRequestId = React.useRef(0);
+  const messagesContainerRef = React.useRef(null);
+  const scrollToLatestOnLoad = React.useRef(false);
+  const pendingScrollAdjustment = React.useRef(null);
+  const loadingOlderRef = React.useRef(false);
+  const [messagesHasMore, setMessagesHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const footerRef = React.useRef(null);
+  const [footerHeight, setFooterHeight] = useState(0);
 
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -74,6 +82,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       window.visualViewport?.removeEventListener('resize', updateAppHeight);
       document.documentElement.style.removeProperty('--app-height');
     };
+  }, []);
+
+  useEffect(() => {
+    const footer = footerRef.current;
+    if (!footer) return undefined;
+    const measureFooter = () => setFooterHeight(footer.getBoundingClientRect().height);
+    measureFooter();
+    const observer = new ResizeObserver(measureFooter);
+    observer.observe(footer);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -196,8 +214,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     if (!selectedChat?._id) {
       messagesRequestId.current += 1;
       setMessages([]);
+      setMessagesHasMore(false);
       setMessagesError('');
       setMessagesLoading(false);
+      scrollToLatestOnLoad.current = false;
       return;
     }
     let active = true;
@@ -206,8 +226,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     const currentUserId = String(user?._id);
     const requestId = ++messagesRequestId.current;
     setMessages([]);
+    setMessagesHasMore(false);
     setMessagesError('');
     setMessagesLoading(true);
+    scrollToLatestOnLoad.current = true;
     const joinGroup = () => {
       if (Socket.connected) Socket.emit('join-group', { groupId: selectedChat._id });
     };
@@ -222,12 +244,15 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           `${API_URL}/api/${isGroup ? `groups/${selectedChat._id}/messages` : `messages/${selectedChat._id}`}`,
           { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
         );
-        if (!Array.isArray(data)) throw new Error('The server returned an invalid message history.');
+        if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') {
+          throw new Error('The server returned an invalid message history.');
+        }
         if (requestId !== messagesRequestId.current) return;
+        setMessagesHasMore(data.hasMore);
         if (active) {
           setMessages((current) => {
             const messagePrefix = isGroup ? `group:${chatId}:` : `direct:${currentUserId}:${chatId}:`;
-            const byId = new Map(data.map((message) => [`${messagePrefix}${message._id}`, message]));
+            const byId = new Map(data.messages.map((message) => [`${messagePrefix}${message._id}`, message]));
             current.forEach((message) => {
               const belongsToConversation = isGroup
                 ? String(message.groupId) === chatId
@@ -273,6 +298,65 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [selectedChat?._id, selectedChat?.type, messagesAttempt, user?._id]);
+
+  useLayoutEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (pendingScrollAdjustment.current) {
+      const { height, top } = pendingScrollAdjustment.current;
+      container.scrollTop = container.scrollHeight - height + top;
+      pendingScrollAdjustment.current = null;
+      return;
+    }
+    if (selectedChat && !messagesLoading && scrollToLatestOnLoad.current) {
+      container.scrollTop = container.scrollHeight;
+      scrollToLatestOnLoad.current = false;
+    }
+  }, [messages, messagesLoading, selectedChat]);
+
+  const loadOlderMessages = async () => {
+    const chat = selectedChatRef.current;
+    const oldestMessage = messages[0];
+    if (!chat?._id || !oldestMessage || !messagesHasMore || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const chatId = String(chat._id);
+    const isGroup = chat.type === 'group';
+    const container = messagesContainerRef.current;
+    const previousHeight = container?.scrollHeight || 0;
+    const previousTop = container?.scrollTop || 0;
+    try {
+      const { data } = await axios.get(
+        `${API_URL}/api/${isGroup ? `groups/${chat._id}/messages` : `messages/${chat._id}`}`,
+        {
+          headers: { Authorization: `******'token')}` },
+          params: { before: String(oldestMessage._id), limit: 50 },
+        }
+      );
+      if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') {
+        throw new Error('The server returned an invalid message history.');
+      }
+      const currentChat = selectedChatRef.current;
+      if (!currentChat || String(currentChat._id) !== chatId || currentChat.type !== chat.type) return;
+      pendingScrollAdjustment.current = { height: previousHeight, top: previousTop };
+      setMessages((current) => {
+        const existingIds = new Set(current.map((message) => String(message._id)));
+        const olderMessages = data.messages.filter((message) => !existingIds.has(String(message._id)));
+        return [...olderMessages, ...current];
+      });
+      setMessagesHasMore(data.hasMore);
+    } catch (error) {
+      setMessagesError(error.response?.data?.message || error.message || 'Could not load older messages.');
+      console.error('Failed to load older messages:', error);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  };
+
+  const handleMessagesScroll = (event) => {
+    if (event.currentTarget.scrollTop <= 80) loadOlderMessages();
+  };
 
   const selectFiles = (event) => {
     const incomingFiles = Array.from(event.target.files || []);
@@ -370,7 +454,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         className={`ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
       >
         {/* Header */}
-        <header className="theme-header relative z-30 flex shrink-0 items-center justify-between gap-2 border-b px-3 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
+        <header className="theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 rounded-b-2xl border px-3 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
@@ -416,7 +500,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         </header>
 
         {/* Main chat area */}
-        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-8 sm:py-6">
+        <main
+          ref={messagesContainerRef}
+          onScroll={handleMessagesScroll}
+          style={{ paddingBottom: `${footerHeight + 16}px` }}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-8 sm:py-6"
+        >
           <div className="chat-content-panel glass-panel mx-auto flex min-h-full w-full max-w-5xl flex-col space-y-3 rounded-2xl p-3 sm:p-5">
             {!selectedChat && <div className="flex h-full min-h-[55vh] flex-col items-center justify-center text-center">
               <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-teal-200/20 bg-teal-100/10 text-teal-100"><FaUsers size={25} /></div>
@@ -437,6 +526,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   Retry loading
                 </button>
               </div>
+            )}
+            {selectedChat && loadingOlder && (
+              <p role="status" className="theme-muted py-2 text-center text-xs">Loading older messages…</p>
             )}
             {selectedChat && messages.map((m) => (
               <div
@@ -511,13 +603,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         </main>
 
         {/* Footer */}
-        <footer className="theme-footer shrink-0 border-t px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:px-8 sm:py-4">
+        <footer
+          ref={footerRef}
+          className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border px-[max(0.75rem,env(safe-area-inset-left))] pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:px-8 sm:py-4"
+        >
           {selectedChat && !socketConnected && (
             <p role="status" className="mx-auto mb-2 max-w-4xl text-xs text-amber-200">
               Reconnecting to chat… Messages will send when the connection is restored.
             </p>
           )}
-          <form onSubmit={sendMessage} className="theme-composer mx-auto flex max-w-4xl items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
+          <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
             <input
               ref={fileInputRef}
               type="file"

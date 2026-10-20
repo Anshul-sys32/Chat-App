@@ -457,18 +457,27 @@ router.get("/messages/:userId", protect, async (req, res) => {
 	if (!Number.isSafeInteger(otherId) || otherId < 1) {
 		return res.status(400).json({ message: "Invalid user id" });
 	}
+	const beforeId = req.query.before === undefined ? null : String(req.query.before);
+	if (beforeId !== null && !/^\d+$/.test(beforeId)) {
+		return res.status(400).json({ message: "Invalid message cursor." });
+	}
+	const parsedLimit = Number(req.query.limit || 50);
+	const limit = Number.isSafeInteger(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
 	try {
-		const [messages] = await pool.execute(
+		const [rows] = await pool.execute(
 			`SELECT id AS _id, sender_id AS sender, receiver_id AS receiver,
 							CASE WHEN is_deleted THEN 'This message was deleted' ELSE content END AS content,
 							CASE WHEN is_deleted THEN NULL ELSE attachments END AS attachments,
 							is_deleted AS isDeleted, created_at AS timestamp
 			 FROM messages
-			 WHERE (sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)
-			 ORDER BY created_at ASC, id ASC`,
-			[req.user.id, otherId, otherId, req.user.id]
+			 WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))
+			   AND (? IS NULL OR id < ?)
+			 ORDER BY id DESC LIMIT ?`,
+			[req.user.id, otherId, otherId, req.user.id, beforeId, beforeId, limit + 1]
 		);
-		res.json(messages);
+		const hasMore = rows.length > limit;
+		const messages = rows.slice(0, limit).reverse();
+		res.json({ messages, hasMore });
 	} catch (err) {
 		console.error("Fetch messages error:", err);
 		res.status(500).json({ message: "Failed to get messages" });
@@ -734,21 +743,30 @@ router.delete("/groups/:groupId/members/:userId", protect, async (req, res) => {
 router.get("/groups/:groupId/messages", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
 	if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id" });
+	const beforeId = req.query.before === undefined ? null : String(req.query.before);
+	if (beforeId !== null && !/^\d+$/.test(beforeId)) {
+		return res.status(400).json({ message: "Invalid message cursor." });
+	}
+	const parsedLimit = Number(req.query.limit || 50);
+	const limit = Number.isSafeInteger(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
 	try {
 		if (req.user.role !== "admin" && !await getGroupRole(groupId, req.user.id)) {
 			return res.status(403).json({ message: "You are not a member of this group." });
 		}
-		const [messages] = await pool.execute(
+		const [rows] = await pool.execute(
 			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
 					u.username AS senderName,
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
-			 WHERE gm.group_id = ? ORDER BY gm.created_at, gm.id`,
-			[groupId]
+			 WHERE gm.group_id = ? AND (? IS NULL OR gm.id < ?)
+			 ORDER BY gm.id DESC LIMIT ?`,
+			[groupId, beforeId, beforeId, limit + 1]
 		);
-		res.json(messages);
+		const hasMore = rows.length > limit;
+		const messages = rows.slice(0, limit).reverse();
+		res.json({ messages, hasMore });
 	} catch (err) {
 		console.error("Fetch group messages error:", err);
 		res.status(500).json({ message: "Failed to get group messages" });

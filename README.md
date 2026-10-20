@@ -88,6 +88,8 @@ storage, and share the same directory between app instances if you run more
 than one. Profile and group images support JPEG, PNG, GIF, WebP, and AVIF up to
 5 MB. Upload URLs are unguessable but publicly retrievable by anyone who has the
 URL.
+Conversation history opens at the latest messages and loads older messages in
+50-message pages as you scroll upward.
 
 ## Run locally
 

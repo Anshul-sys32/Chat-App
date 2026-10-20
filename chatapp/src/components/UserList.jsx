@@ -71,7 +71,7 @@ export default function UserList({ currentUser, onStartChat, search = '' }) {
               <li
                 key={user._id}
                 onClick={() => handleStartChat(user)}
-                className="flex cursor-pointer items-center justify-between rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2.5 transition hover:border-teal-200/20 hover:bg-teal-300/[0.08]"
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2.5 transition hover:border-teal-200/20 hover:bg-teal-300/[0.08]"
                 tabIndex={0}
                 role="button"
                 onKeyDown={(e) => {
@@ -79,12 +79,12 @@ export default function UserList({ currentUser, onStartChat, search = '' }) {
                 }}
               >
                 <Avatar src={user.profilePicture || user.googlePicture} name={user.username} className="h-10 w-10 text-sm" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1 text-left">
                   <p className="truncate font-medium">{user.username}</p>
                   <p className="truncate text-xs text-gray-300">{user.email}</p>
                 </div>
                 {isOnline && (
-                  <span className="ml-2 h-2 w-2 bg-green-500 rounded-full" title="Online"></span>
+                  <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-green-500" title="Online"></span>
                 )}
               </li>
             );
