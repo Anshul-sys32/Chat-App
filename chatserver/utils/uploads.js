@@ -4,6 +4,14 @@ const { randomUUID } = require("node:crypto");
 
 const uploadDirectory = path.resolve(__dirname, "../uploads");
 const maxFileSize = 50 * 1024 * 1024;
+const avatarMaxFileSize = 5 * 1024 * 1024;
+const allowedAvatarTypes = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/gif", ".gif"],
+  ["image/webp", ".webp"],
+  ["image/avif", ".avif"],
+]);
 const allowedUploadTypes = new Map([
   ["image/jpeg", ".jpg"],
   ["image/png", ".png"],
@@ -37,8 +45,26 @@ const upload = multer({
   },
 });
 
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: uploadDirectory,
+    filename: (req, file, callback) => {
+      const extension = allowedAvatarTypes.get(file.mimetype);
+      callback(null, `${req.user.id}-avatar-${randomUUID()}${extension}`);
+    },
+  }),
+  limits: { fileSize: avatarMaxFileSize, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    if (!allowedAvatarTypes.has(file.mimetype)) {
+      return callback(new Error("Choose a JPEG, PNG, GIF, WebP, or AVIF image."));
+    }
+    return callback(null, true);
+  },
+});
+
 module.exports = {
   upload,
+  avatarUpload,
   uploadDirectory,
   allowedUploadTypes,
   maxFileSize,

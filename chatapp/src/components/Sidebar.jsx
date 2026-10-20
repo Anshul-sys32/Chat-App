@@ -6,7 +6,6 @@ import {
   FaTimes,
   FaBars,
   FaShieldAlt,
-  FaUserEdit,
   FaMoon,
   FaSun
 } from 'react-icons/fa';
@@ -14,6 +13,7 @@ import UserList from './UserList';
 import GroupList from './GroupList';
 import Socket from '../Socket';
 import ProfileEditor from './ProfileEditor';
+import Avatar from './Avatar';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
@@ -30,7 +30,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
   const renderContent = () => {
     switch (activeTab) {
       case 'users':
-        return <UserList search={search} onStartChat={handleSelectChat} />;
+        return <UserList currentUser={user} search={search} onStartChat={handleSelectChat} />;
       case 'groups':
         return <GroupList search={search} onSelectGroup={handleSelectChat} />;
       default:
@@ -122,7 +122,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
           {/* Footer */}
           <div className="theme-sidebar-footer shrink-0 border-t px-3 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
             <button type="button" onClick={() => setIsProfileOpen(true)} className="flex w-full min-w-0 items-center gap-2 rounded-lg p-2 text-left transition hover:bg-white/[0.08]" title="Edit your profile">
-              <span className="theme-profile-icon grid h-9 w-9 shrink-0 place-items-center rounded-full"><FaUserEdit size={15} /></span>
+              <Avatar src={user?.profilePicture || user?.googlePicture} name={user?.username} className="h-9 w-9 text-sm" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-semibold">{user?.username || 'Guest'}</span>
                 <span className="theme-muted block text-xs">Edit profile</span>

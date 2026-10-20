@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { FaChevronDown, FaChevronUp, FaCrown, FaPlus, FaUserMinus, FaUsers } from 'react-icons/fa';
+import { FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaPlus, FaUserMinus, FaUsers } from 'react-icons/fa';
 import Socket from '../Socket';
+import Avatar from './Avatar';
 
 const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const authConfig = () => ({
@@ -70,15 +71,32 @@ export default function GroupList({ search = '', onSelectGroup }) {
         setMembers((previous) => previous.filter((member) => String(member._id) !== String(userId)));
       }
     };
+    const handleGroupPicture = ({ groupId, avatarUrl }) => {
+      setGroups((previous) => previous.map((group) => String(group._id) === String(groupId)
+        ? { ...group, avatarUrl }
+        : group));
+      setActiveGroup((previous) => previous && String(previous._id) === String(groupId)
+        ? { ...previous, avatarUrl }
+        : previous);
+    };
+    const handleProfilePicture = ({ userId, profilePicture }) => {
+      setMembers((previous) => previous.map((member) => String(member._id) === String(userId)
+        ? { ...member, profilePicture }
+        : member));
+    };
     Socket.on('group-member-removed', handleRemoved);
     Socket.on('group-role-updated', handleRoleChange);
     Socket.on('group-member-added', handleMemberAdded);
     Socket.on('group-member-changed', handleMemberChanged);
+    Socket.on('group-picture-updated', handleGroupPicture);
+    Socket.on('profile-picture-updated', handleProfilePicture);
     return () => {
       Socket.off('group-member-removed', handleRemoved);
       Socket.off('group-role-updated', handleRoleChange);
       Socket.off('group-member-added', handleMemberAdded);
       Socket.off('group-member-changed', handleMemberChanged);
+      Socket.off('group-picture-updated', handleGroupPicture);
+      Socket.off('profile-picture-updated', handleProfilePicture);
     };
   }, [currentUser?._id, activeGroup?._id, groups]);
 
@@ -148,6 +166,32 @@ export default function GroupList({ search = '', onSelectGroup }) {
     }
   };
 
+  const uploadGroupAvatar = async (group, file) => {
+    if (!file) return;
+    setError('');
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Group images must be 5 MB or smaller.');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('avatar', file);
+    try {
+      const { data } = await axios.post(
+        `${apiUrl}/api/groups/${group._id}/avatar`,
+        formData,
+        authConfig()
+      );
+      setGroups((previous) => previous.map((candidate) => String(candidate._id) === String(group._id)
+        ? { ...candidate, avatarUrl: data.avatarUrl }
+        : candidate));
+      setActiveGroup((previous) => previous && String(previous._id) === String(group._id)
+        ? { ...previous, avatarUrl: data.avatarUrl }
+        : previous);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not update the group image.');
+    }
+  };
+
   const visibleGroups = groups.filter((group) => group.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
@@ -174,6 +218,7 @@ export default function GroupList({ search = '', onSelectGroup }) {
         {visibleGroups.map((group) => (
           <li key={group._id} className={`rounded-xl border transition ${activeGroup?._id === group._id ? 'border-teal-200/30 bg-teal-300/[0.1]' : 'border-white/[0.07] bg-white/[0.045] hover:bg-white/[0.08]'}`}>
             <div className="flex items-center gap-2 px-2.5 py-2">
+              <Avatar src={group.avatarUrl} name={group.name} group className="h-9 w-9 text-sm" />
               <button
                 type="button"
                 onClick={() => onSelectGroup?.({ ...group, type: 'group' })}
@@ -202,6 +247,21 @@ export default function GroupList({ search = '', onSelectGroup }) {
                   <span className="text-[10px] text-gray-400">{group.role === 'admin' ? 'Admin controls' : 'View only'}</span>
                 </div>
                 {group.role === 'admin' && (
+                  <label className="mb-2 inline-flex cursor-pointer items-center gap-1.5 rounded border border-white/10 px-2 py-1.5 text-[11px] text-gray-200 transition hover:bg-white/10">
+                    <FaCamera size={10} /> Change group photo
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp,image/avif"
+                      className="sr-only"
+                      aria-label={`Change ${group.name} photo`}
+                      onChange={(event) => {
+                        uploadGroupAvatar(group, event.target.files?.[0]);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                )}
+                {group.role === 'admin' && (
                   <form onSubmit={addMember} className="mb-2 flex gap-1">
                     <select
                       value={newMemberId}
@@ -221,6 +281,7 @@ export default function GroupList({ search = '', onSelectGroup }) {
                 <ul className="space-y-1">
                   {members.map((member) => (
                     <li key={member._id} className="flex min-w-0 items-center gap-1.5 rounded bg-gray-900/60 px-2 py-1.5">
+                      <Avatar src={member.profilePicture || member.googlePicture} name={member.username} className="h-6 w-6 text-[10px]" />
                       <span className="min-w-0 flex-1 truncate text-xs" title={member.email}>{member.username}</span>
                       {member.role === 'admin' && <FaCrown className="shrink-0 text-amber-300" size={10} title="Admin" />}
                       {group.role === 'admin' ? (

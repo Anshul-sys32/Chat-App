@@ -2,7 +2,8 @@ const { pool } = require("../config/db");
 
 const findByEmail = async (email) => {
   const [rows] = await pool.execute(
-    `SELECT id, username, email, password, google_sub AS googleSub, role, status
+    `SELECT id, username, email, password, google_sub AS googleSub,
+            google_picture AS googlePicture, profile_picture AS profilePicture, role, status
      FROM users WHERE email = ? LIMIT 1`,
     [email]
   );
@@ -11,7 +12,8 @@ const findByEmail = async (email) => {
 
 const findByGoogleSub = async (googleSub) => {
   const [rows] = await pool.execute(
-    `SELECT id, username, email, password, google_sub AS googleSub, role, status
+    `SELECT id, username, email, password, google_sub AS googleSub,
+            google_picture AS googlePicture, profile_picture AS profilePicture, role, status
      FROM users WHERE google_sub = ? LIMIT 1`,
     [googleSub]
   );
@@ -20,7 +22,8 @@ const findByGoogleSub = async (googleSub) => {
 
 const findById = async (id) => {
   const [rows] = await pool.execute(
-    `SELECT id, username, email, password, role, status
+    `SELECT id, username, email, password, google_picture AS googlePicture,
+            profile_picture AS profilePicture, role, status
      FROM users WHERE id = ? LIMIT 1`,
     [id]
   );
@@ -37,14 +40,18 @@ const findByUsername = async (username) => {
 
 const listPublic = async () => {
   const [rows] = await pool.query(
-    "SELECT id AS _id, username, email FROM users WHERE status = 'active' ORDER BY username"
+    `SELECT id AS _id, username, email, profile_picture AS profilePicture,
+            google_picture AS googlePicture
+     FROM users WHERE status = 'active' ORDER BY username`
   );
   return rows;
 };
 
 const listAdmin = async () => {
   const [rows] = await pool.query(
-    `SELECT id AS _id, username, email, role, status, created_at AS createdAt
+    `SELECT id AS _id, username, email, role, status,
+            profile_picture AS profilePicture, google_picture AS googlePicture,
+            created_at AS createdAt
      FROM users ORDER BY created_at DESC, id DESC`
   );
   return rows;
@@ -92,6 +99,13 @@ const updateProfile = async (userId, { username, email, password }) => {
   );
 };
 
+const updateProfilePicture = async (userId, profilePicture) => {
+  await pool.execute(
+    "UPDATE users SET profile_picture = ? WHERE id = ?",
+    [profilePicture, userId]
+  );
+};
+
 module.exports = {
   findByEmail,
   findByGoogleSub,
@@ -102,4 +116,5 @@ module.exports = {
   create,
   updateGoogleProfile,
   updateProfile,
+  updateProfilePicture,
 };

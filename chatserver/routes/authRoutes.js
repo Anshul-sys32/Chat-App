@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const path = require("node:path");
 const {
 	register,
 	login,
@@ -14,13 +15,55 @@ const User = require("../models/User");
 const { pool } = require("../config/db");
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
-const { upload } = require("../utils/uploads");
+const { upload, avatarUpload, uploadDirectory } = require("../utils/uploads");
 
 const removeUploadedFiles = async (files) => Promise.all((files || []).map((file) =>
 	fs.unlink(file.path).catch((error) => {
 		if (error.code !== "ENOENT") console.error("Uploaded file cleanup error:", error);
 	})
 ));
+
+const removeStoredAvatar = async (url) => {
+	if (typeof url !== "string" || !url.startsWith("/uploads/")) return;
+	const filename = path.basename(url);
+	if (!/^\d+-avatar-[a-f0-9-]{36}\.(jpg|png|gif|webp|avif)$/i.test(filename)) return;
+	await fs.unlink(path.join(uploadDirectory, filename)).catch((error) => {
+		if (error.code !== "ENOENT") console.error("Profile image cleanup error:", error);
+	});
+};
+
+const receiveAvatar = (req, res, next) => {
+	avatarUpload.single("avatar")(req, res, async (error) => {
+		if (!error) return next();
+		await removeUploadedFiles(req.file ? [req.file] : []);
+		const message = error.code === "LIMIT_FILE_SIZE"
+			? "Profile images must be 5 MB or smaller."
+			: error.message;
+		return res.status(400).json({ message });
+	});
+};
+
+const updateUserAvatar = async (req, res, userId) => {
+	if (!req.file) return res.status(400).json({ message: "Choose a profile image to upload." });
+	try {
+		const target = await User.findById(userId);
+		if (!target) {
+			await removeUploadedFiles([req.file]);
+			return res.status(404).json({ message: "User not found." });
+		}
+		const profilePicture = `/uploads/${req.file.filename}`;
+		await User.updateProfilePicture(userId, profilePicture);
+		await removeStoredAvatar(target.profilePicture);
+		req.app.get("io")?.emit("profile-picture-updated", { userId, profilePicture });
+		return res.json({
+			user: { _id: userId, profilePicture, googlePicture: target.googlePicture || null },
+		});
+	} catch (error) {
+		await removeUploadedFiles([req.file]);
+		console.error("Update profile image error:", error);
+		return res.status(500).json({ message: "Could not update the profile image." });
+	}
+};
 
 const getGroupRole = async (groupId, userId) => {
 	const [rows] = await pool.execute(
@@ -33,6 +76,19 @@ const getGroupRole = async (groupId, userId) => {
 const validId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 const canManageGroup = async (groupId, user) =>
 	user.role === "admin" || await getGroupRole(groupId, user.id) === "admin";
+const requireGroupAvatarAdmin = async (req, res, next) => {
+	const groupId = Number(req.params.groupId);
+	if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id." });
+	try {
+		if (!await canManageGroup(groupId, req.user)) {
+			return res.status(403).json({ message: "Only group admins can change the group image." });
+		}
+		return next();
+	} catch (error) {
+		console.error("Check group image permissions error:", error);
+		return res.status(500).json({ message: "Could not verify group image permissions." });
+	}
+};
 
 router.post("/register", register);
 router.post("/login", login);
@@ -56,6 +112,8 @@ router.get("/auth/me", protect, (req, res) => res.json({
 		email: req.user.email,
 		role: req.user.role,
 		status: req.user.status,
+		profilePicture: req.user.profilePicture || null,
+		googlePicture: req.user.googlePicture || null,
 	},
 }));
 router.get("/notifications", protect, async (req, res) => {
@@ -240,8 +298,18 @@ router.post("/uploads", protect, (req, res, next) => {
 	}
 });
 router.patch("/users/me/profile", protect, updateOwnProfile);
+router.post("/users/me/profile-picture", protect, receiveAvatar, async (req, res) =>
+	updateUserAvatar(req, res, Number(req.user.id)));
 router.get("/users", protect, user);
 router.patch("/admin/users/:userId/profile", protect, requireAdmin, updateAdminProfile);
+router.post("/admin/users/:userId/profile-picture", protect, requireAdmin, receiveAvatar, async (req, res) => {
+	const userId = Number(req.params.userId);
+	if (!validId(userId)) {
+		await removeUploadedFiles(req.file ? [req.file] : []);
+		return res.status(400).json({ message: "Invalid user id." });
+	}
+	return updateUserAvatar(req, res, userId);
+});
 router.get("/admin/users", protect, requireAdmin, async (_req, res) => {
 	try {
 		res.json(await User.listAdmin());
@@ -375,16 +443,18 @@ router.get("/groups", protect, async (req, res) => {
 	try {
 		const [groups] = req.user.role === "admin"
 			? await pool.execute(
-				`SELECT g.id AS _id, g.name, 'admin' AS role, COUNT(m.user_id) AS members
+				`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
+				        'admin' AS role, COUNT(m.user_id) AS members
 				 FROM chat_groups g LEFT JOIN group_members m ON m.group_id = g.id
-				 GROUP BY g.id, g.name ORDER BY g.name`
+				 GROUP BY g.id, g.name, g.avatar_url ORDER BY g.name`
 			)
 			: await pool.execute(
-				`SELECT g.id AS _id, g.name, mine.role, COUNT(m.user_id) AS members
+				`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
+				        mine.role, COUNT(m.user_id) AS members
 				 FROM chat_groups g
 				 JOIN group_members mine ON mine.group_id = g.id AND mine.user_id = ?
 				 JOIN group_members m ON m.group_id = g.id
-				 GROUP BY g.id, g.name, mine.role
+				 GROUP BY g.id, g.name, g.avatar_url, mine.role
 				 ORDER BY g.name`,
 				[req.user.id]
 			);
@@ -411,7 +481,7 @@ router.post("/groups", protect, async (req, res) => {
 			[result.insertId, req.user.id]
 		);
 		await connection.commit();
-		res.status(201).json({ _id: result.insertId, name, members: 1, role: "admin" });
+		res.status(201).json({ _id: result.insertId, name, avatarUrl: null, members: 1, role: "admin" });
 	} catch (err) {
 		await connection.rollback();
 		console.error("Create group error:", err);
@@ -429,7 +499,8 @@ router.get("/groups/:groupId/members", protect, async (req, res) => {
 			return res.status(403).json({ message: "You are not a member of this group." });
 		}
 		const [members] = await pool.execute(
-			`SELECT u.id AS _id, u.username, u.email, gm.role
+			`SELECT u.id AS _id, u.username, u.email,
+			        u.profile_picture AS profilePicture, u.google_picture AS googlePicture, gm.role
 			 FROM group_members gm JOIN users u ON u.id = gm.user_id
 			 WHERE gm.group_id = ? ORDER BY gm.role, u.username`,
 			[groupId]
@@ -438,6 +509,38 @@ router.get("/groups/:groupId/members", protect, async (req, res) => {
 	} catch (err) {
 		console.error("Fetch group members error:", err);
 		res.status(500).json({ message: "Failed to get group members" });
+	}
+});
+
+router.post("/groups/:groupId/avatar", protect, requireGroupAvatarAdmin, receiveAvatar, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	if (!validId(groupId)) {
+		await removeUploadedFiles(req.file ? [req.file] : []);
+		return res.status(400).json({ message: "Invalid group id." });
+	}
+	if (!req.file) return res.status(400).json({ message: "Choose a group image to upload." });
+	try {
+		if (!await canManageGroup(groupId, req.user)) {
+			await removeUploadedFiles([req.file]);
+			return res.status(403).json({ message: "Only group admins can change the group image." });
+		}
+		const [groups] = await pool.execute(
+			"SELECT avatar_url AS avatarUrl FROM chat_groups WHERE id = ? LIMIT 1",
+			[groupId]
+		);
+		if (!groups.length) {
+			await removeUploadedFiles([req.file]);
+			return res.status(404).json({ message: "Group not found." });
+		}
+		const avatarUrl = `/uploads/${req.file.filename}`;
+		await pool.execute("UPDATE chat_groups SET avatar_url = ? WHERE id = ?", [avatarUrl, groupId]);
+		await removeStoredAvatar(groups[0].avatarUrl);
+		req.app.get("io")?.emit("group-picture-updated", { groupId, avatarUrl });
+		return res.json({ groupId, avatarUrl });
+	} catch (error) {
+		await removeUploadedFiles([req.file]);
+		console.error("Update group image error:", error);
+		return res.status(500).json({ message: "Could not update the group image." });
 	}
 });
 
@@ -466,11 +569,13 @@ router.post("/groups/:groupId/members", protect, async (req, res) => {
 			});
 		}
 		const [rows] = await pool.execute(
-			"SELECT id AS _id, username, email, 'member' AS role FROM users WHERE id = ?",
+			`SELECT id AS _id, username, email, profile_picture AS profilePicture,
+			        google_picture AS googlePicture, 'member' AS role FROM users WHERE id = ?`,
 			[userId]
 		);
 		const [groupRows] = await pool.execute(
-			`SELECT name, (SELECT COUNT(*) FROM group_members WHERE group_id = ?) AS members
+			`SELECT name, avatar_url AS avatarUrl,
+			        (SELECT COUNT(*) FROM group_members WHERE group_id = ?) AS members
 			 FROM chat_groups WHERE id = ?`,
 			[groupId, groupId]
 		);
@@ -479,6 +584,7 @@ router.post("/groups/:groupId/members", protect, async (req, res) => {
 			groupId,
 			member: rows[0],
 			groupName: groupRows[0].name,
+			avatarUrl: groupRows[0].avatarUrl,
 			members: groupRows[0].members,
 		};
 		io?.to(`group:${groupId}`).emit("group-member-added", event);

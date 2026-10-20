@@ -23,6 +23,7 @@ const connectDB = async () => {
         google_sub VARCHAR(255) NULL,
         google_name VARCHAR(255) NULL,
         google_picture VARCHAR(2048) NULL,
+        profile_picture VARCHAR(255) NULL,
         role ENUM('user', 'moderator', 'admin', 'guest') NOT NULL DEFAULT 'user',
         status ENUM('active', 'pending', 'suspended', 'inactive') NOT NULL DEFAULT 'pending',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -32,6 +33,7 @@ const connectDB = async () => {
       ["google_sub", "VARCHAR(255) NULL"],
       ["google_name", "VARCHAR(255) NULL"],
       ["google_picture", "VARCHAR(2048) NULL"],
+      ["profile_picture", "VARCHAR(255) NULL"],
     ]) {
       const [columns] = await connection.execute(
         `SELECT COUNT(*) AS count FROM information_schema.columns
@@ -112,11 +114,19 @@ const connectDB = async () => {
       CREATE TABLE IF NOT EXISTS chat_groups (
         id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
+        avatar_url VARCHAR(255) NULL,
         created_by INT UNSIGNED NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT chat_groups_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB
     `);
+    const [groupAvatarColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'chat_groups' AND column_name = 'avatar_url'`
+    );
+    if (!groupAvatarColumn[0].count) {
+      await connection.query("ALTER TABLE chat_groups ADD COLUMN avatar_url VARCHAR(255) NULL");
+    }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS group_members (
         group_id INT UNSIGNED NOT NULL,

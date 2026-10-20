@@ -18,7 +18,9 @@ const protect = async (req, res, next) => {
 
   try {
     const [users] = await pool.execute(
-      "SELECT id, username, email, role, status FROM users WHERE id = ? LIMIT 1",
+      `SELECT id, username, email, role, status,
+              profile_picture AS profilePicture, google_picture AS googlePicture
+       FROM users WHERE id = ? LIMIT 1`,
       [decoded.id]
     );
     const user = users[0];

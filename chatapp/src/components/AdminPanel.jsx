@@ -5,6 +5,8 @@ import { FaCheck, FaEdit, FaTrash } from "react-icons/fa";
 import GroupList from "./GroupList";
 import ProfileEditor from "./ProfileEditor";
 import NotificationCenter from "./NotificationCenter";
+import Avatar from "./Avatar";
+import Socket from "../Socket";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const authConfig = () => ({
@@ -40,6 +42,16 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  useEffect(() => {
+    const handleProfilePicture = ({ userId, profilePicture }) => {
+      setUsers((previous) => previous.map((candidate) =>
+        String(candidate._id) === String(userId) ? { ...candidate, profilePicture } : candidate
+      ));
+    };
+    Socket.on("profile-picture-updated", handleProfilePicture);
+    return () => Socket.off("profile-picture-updated", handleProfilePicture);
+  }, []);
 
   const updateUser = async (target, updates) => {
     setError("");
@@ -186,6 +198,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               const isSelf = String(candidate._id) === String(user?._id);
               return (
                 <section key={candidate._id} className="glass-panel flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:items-center">
+                  <Avatar src={candidate.profilePicture || candidate.googlePicture} name={candidate.username} className="h-11 w-11 text-sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{candidate.username}{isSelf ? " (you)" : ""}</p>
                     <p className="truncate text-sm text-white/55">{candidate.email}</p>

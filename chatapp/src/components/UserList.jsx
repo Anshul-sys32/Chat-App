@@ -1,25 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Socket from '../Socket';
+import Avatar from './Avatar';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
-export default function UserList({ onStartChat, search = '' }) {
-  const [currentUser, setCurrentUser] = useState(null);
+export default function UserList({ currentUser, onStartChat, search = '' }) {
   const [allUsers, setAllUsers] = useState([]);
   const [onlineUserIds, setOnlineUserIds] = useState([]);
-
-  useEffect(() => {
-    // Safely parse current user
-    try {
-      const user = JSON.parse(localStorage.getItem('user'));
-      if (user && user._id && localStorage.getItem('token')) {
-        setCurrentUser(user);
-      }
-    } catch {
-      console.error("Invalid user data in localStorage");
-    }
-  }, []);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -47,6 +35,16 @@ export default function UserList({ onStartChat, search = '' }) {
 
     Socket.on('online-users', handleOnlineUsers);
     return () => Socket.off('online-users', handleOnlineUsers);
+  }, []);
+
+  useEffect(() => {
+    const handleProfilePicture = ({ userId, profilePicture }) => {
+      setAllUsers((previous) => previous.map((candidate) =>
+        String(candidate._id) === String(userId) ? { ...candidate, profilePicture } : candidate
+      ));
+    };
+    Socket.on('profile-picture-updated', handleProfilePicture);
+    return () => Socket.off('profile-picture-updated', handleProfilePicture);
   }, []);
 
   const handleStartChat = (selectedUser) => {
@@ -80,9 +78,10 @@ export default function UserList({ onStartChat, search = '' }) {
                   if (e.key === 'Enter' || e.key === ' ') handleStartChat(user);
                 }}
               >
-                <div>
-                  <p className="font-medium">{user.username}</p>
-                  <p className="text-xs text-gray-300">{user.email}</p>
+                <Avatar src={user.profilePicture || user.googlePicture} name={user.username} className="h-10 w-10 text-sm" />
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{user.username}</p>
+                  <p className="truncate text-xs text-gray-300">{user.email}</p>
                 </div>
                 {isOnline && (
                   <span className="ml-2 h-2 w-2 bg-green-500 rounded-full" title="Online"></span>

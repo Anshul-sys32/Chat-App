@@ -21,6 +21,8 @@ const sendSession = (res, user) => {
       email: user.email,
       role: user.role,
       status: user.status,
+      profilePicture: user.profilePicture || null,
+      googlePicture: user.googlePicture || null,
     },
   };
 };
@@ -61,7 +63,10 @@ exports.updateOwnProfile = async (req, res) => {
     const hashedPassword = newPassword ? await bcrypt.hash(newPassword, 12) : undefined;
     await User.updateProfile(req.user.id, { username, email, password: hashedPassword });
     return res.json({
-      user: { _id: req.user.id, username, email, role: user.role, status: user.status },
+      user: {
+        _id: req.user.id, username, email, role: user.role, status: user.status,
+        profilePicture: user.profilePicture || null, googlePicture: user.googlePicture || null,
+      },
     });
   } catch (error) {
     if (error.code === "ER_DUP_ENTRY") {
@@ -98,7 +103,10 @@ exports.updateAdminProfile = async (req, res) => {
     io?.in(`user:${userId}`).emit("account-profile-updated", { username, email });
     if (hashedPassword) io?.in(`user:${userId}`).disconnectSockets(true);
     return res.json({
-      user: { _id: userId, username, email, role: target.role, status: target.status },
+      user: {
+        _id: userId, username, email, role: target.role, status: target.status,
+        profilePicture: target.profilePicture || null, googlePicture: target.googlePicture || null,
+      },
     });
   } catch (error) {
     if (error.code === "ER_DUP_ENTRY") {

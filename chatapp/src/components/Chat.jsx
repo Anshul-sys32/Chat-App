@@ -7,6 +7,7 @@ import { FaPaperclip, FaPhone, FaTrashAlt, FaUsers, FaVideo } from 'react-icons/
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
+import Avatar from './Avatar';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const MAX_FILES_PER_MESSAGE = 5;
@@ -148,6 +149,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         onSelectChat(null);
       }
     };
+    const handleProfilePicture = ({ userId, profilePicture }) => {
+      if (selectedChatRef.current?.type === 'group'
+        || String(selectedChatRef.current?._id) !== String(userId)) return;
+      onSelectChat({ ...selectedChatRef.current, profilePicture });
+    };
+    const handleGroupPicture = ({ groupId, avatarUrl }) => {
+      if (selectedChatRef.current?.type !== 'group'
+        || String(selectedChatRef.current?._id) !== String(groupId)) return;
+      onSelectChat({ ...selectedChatRef.current, avatarUrl });
+    };
 
     Socket.on('receive-message', handleReceive);
     Socket.on('message-sent', handleSent);
@@ -156,6 +167,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('message-updated', handleMessageUpdated);
     Socket.on('group-message-updated', handleMessageUpdated);
     Socket.on('group-member-removed', handleRemovedFromGroup);
+    Socket.on('profile-picture-updated', handleProfilePicture);
+    Socket.on('group-picture-updated', handleGroupPicture);
 
     return () => {
       Socket.off('receive-message', handleReceive);
@@ -165,6 +178,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('message-updated', handleMessageUpdated);
       Socket.off('group-message-updated', handleMessageUpdated);
       Socket.off('group-member-removed', handleRemovedFromGroup);
+      Socket.off('profile-picture-updated', handleProfilePicture);
+      Socket.off('group-picture-updated', handleGroupPicture);
       Socket.off('connect', handleSocketConnect);
       Socket.off('disconnect', handleSocketDisconnect);
       window.removeEventListener('online', reconnectOnResume);
@@ -359,6 +374,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
+          {selectedChat && (
+            <Avatar
+              src={selectedChat.type === 'group'
+                ? selectedChat.avatarUrl
+                : selectedChat.profilePicture || selectedChat.googlePicture}
+              name={selectedChat.name || selectedChat.username}
+              group={selectedChat.type === 'group'}
+              className="h-10 w-10 text-sm"
+            />
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="theme-text truncate text-lg font-semibold">
               {selectedChat?.name || selectedChat?.username || 'Choose a conversation'}

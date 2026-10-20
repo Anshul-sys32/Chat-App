@@ -64,8 +64,9 @@ Direct and group chats support image, video, audio, and PDF attachments up to
 `chatserver/uploads` and serves them through the existing Caddy reverse proxy;
 back up this directory along with the MySQL database. Keep it on persistent
 storage, and share the same directory between app instances if you run more
-than one. Upload URLs are unguessable but publicly retrievable by anyone who
-has the URL.
+than one. Profile and group images support JPEG, PNG, GIF, WebP, and AVIF up to
+5 MB. Upload URLs are unguessable but publicly retrievable by anyone who has the
+URL.
 
 ## Run locally
 
@@ -109,9 +110,13 @@ current account/role checks protect the API; client-side route restrictions are
 only a navigation aid.
 
 Users can edit their username and email from the profile button at the bottom of
-the chat sidebar. Changing an existing password requires the current password;
-OAuth-only accounts can set a password without one. Administrators can edit any
-account's username/email or set a replacement password from the Admin panel.
+the chat sidebar, including uploading or changing their profile image. Images
+appear in user lists, group member lists, and conversation headers. Group admins
+can change a group's image from its management panel; group images appear in the
+group list and conversation header. Changing an existing password requires the
+current password; OAuth-only accounts can set a password without one.
+Administrators can edit any account's username/email, profile image, or set a
+replacement password from the Admin panel.
 Passwords are hashed before storage and are never returned by profile endpoints.
 
 Administrators can send persistent notifications to all active users or selected
