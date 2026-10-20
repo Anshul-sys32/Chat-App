@@ -101,6 +101,24 @@ export default function App() {
     else localStorage.removeItem("selectedChat");
   }, [selectedChat]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    let frame = 0;
+    const trackPointer = (event) => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        root.style.setProperty("--pointer-x", `${event.clientX}px`);
+        root.style.setProperty("--pointer-y", `${event.clientY}px`);
+        frame = 0;
+      });
+    };
+    window.addEventListener("pointermove", trackPointer, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", trackPointer);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
   return (
     <div className="app-theme min-h-screen" data-theme={theme}>
       <Routes>

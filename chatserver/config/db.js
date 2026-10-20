@@ -196,6 +196,13 @@ const connectDB = async () => {
         CONSTRAINT notifications_sender_fk FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE SET NULL
       ) ENGINE=InnoDB
     `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS login_quotes (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        quote VARCHAR(500) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB
+    `);
   } finally {
     connection.release();
   }

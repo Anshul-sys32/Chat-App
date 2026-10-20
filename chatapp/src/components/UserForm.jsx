@@ -23,9 +23,35 @@ function UserForm({ onAuthenticated }) {
   const [notice, setNotice] = useState("");
   const [googleClientId, setGoogleClientId] = useState("");
   const [googleStatus, setGoogleStatus] = useState("loading");
+  const [loginQuotes, setLoginQuotes] = useState([]);
+  const [activeQuoteIndex, setActiveQuoteIndex] = useState(0);
   const googleButton = useRef(null);
 
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API_URL}/api/login-quotes`, { timeout: 10000 })
+      .then(({ data }) => {
+        if (active && Array.isArray(data)) setLoginQuotes(data.filter((item) => typeof item.quote === "string" && item.quote.trim()));
+      })
+      .catch((requestError) => {
+        console.error("Could not load login quotes:", requestError);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (loginQuotes.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveQuoteIndex((index) => (index + 1) % loginQuotes.length);
+    }, 7000);
+    return () => window.clearInterval(timer);
+  }, [loginQuotes.length]);
+
+  useEffect(() => {
+    setActiveQuoteIndex(0);
+  }, [loginQuotes]);
 
   const toggleForm = () => {
     setIsSignUp((prev) => !prev);
@@ -147,7 +173,7 @@ function UserForm({ onAuthenticated }) {
 
   const inputWrapper = "relative w-full";
   const inputBase =
-    "w-full pl-10 pr-10 py-2 border rounded-md text-black bg-white outline-none focus:ring-2 ring-offset-0 transition-all duration-200 ease-in-out";
+    "theme-auth-input w-full pl-10 pr-10 py-2 border rounded-md outline-none focus:ring-2 ring-offset-0 transition-all duration-200 ease-in-out";
   const inputInvalid = "border-red-500 ring-red-300";
   const labelBase =
     "theme-auth-label absolute left-10 px-1 transition-all duration-200 ease-in-out text-sm pointer-events-none";
@@ -159,10 +185,18 @@ function UserForm({ onAuthenticated }) {
     <div className="theme-auth-page flex min-h-screen items-center justify-center px-4 py-4">
       <div
         className="theme-auth-card relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-x-hidden overflow-y-auto rounded-3xl p-6 shadow-2xl backdrop-blur transition-all duration-[600ms]"
-        style={{ height: isSignUp ? 470 : 500 }}
+        style={{ height: isSignUp ? 550 : 600 }}
       >
+        <header className="theme-auth-brand absolute inset-x-6 top-5 z-10 text-center">
+          <h1 className="text-3xl font-extrabold tracking-[0.2em] sm:text-4xl">NFaNG</h1>
+          {loginQuotes.length > 0 && (
+            <p key={loginQuotes[activeQuoteIndex]?._id} className="theme-auth-quote mt-2 min-h-10 text-sm italic leading-5 sm:text-base">
+              “{loginQuotes[activeQuoteIndex]?.quote}”
+            </p>
+          )}
+        </header>
         <div
-          className="grid h-full grid-cols-2 gap-4 transition-transform duration-500 ease-in-out"
+          className="mt-[105px] grid h-[calc(100%-105px)] grid-cols-2 gap-4 transition-transform duration-500 ease-in-out"
           style={{
             width: "calc(200% + 1rem)",
             transform: isSignUp ? "translateX(calc(-50% - 0.5rem))" : "translateX(0)",
@@ -173,9 +207,9 @@ function UserForm({ onAuthenticated }) {
             onSubmit={handleSubmit}
             className="theme-auth-form flex min-w-0 flex-col justify-center space-y-4 px-3 sm:px-6"
           >
-            <h1 className="theme-auth-heading text-center text-3xl font-bold underline">
+            <h2 className="theme-auth-heading text-center text-3xl font-bold underline">
               Sign In
-            </h1>
+            </h2>
 
             <div className={inputWrapper}>
               <FaEnvelope className="absolute top-3 left-3 text-gray-500" />
@@ -294,9 +328,9 @@ function UserForm({ onAuthenticated }) {
             onSubmit={handleSubmit}
             className="theme-auth-form flex min-w-0 flex-col justify-center space-y-6 px-3 sm:px-6"
           >
-            <h1 className="theme-auth-heading text-center text-3xl font-bold underline">
+            <h2 className="theme-auth-heading text-center text-3xl font-bold underline">
               Sign Up
-            </h1>
+            </h2>
 
             <div className={inputWrapper}>
               <FaUser className="absolute top-3 left-3 text-gray-500" />

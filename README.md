@@ -122,6 +122,9 @@ Passwords are hashed before storage and are never returned by profile endpoints.
 Administrators can send persistent notifications to all active users or selected
 users from the Administration page. Users receive them in the chat header's
 notification inbox; unread notifications remain available after reconnecting.
+Administrators can also add, edit, and remove the rotating quotes shown beneath
+NFaNG on the sign-in page. The dark theme uses a near-black grid background and
+a pointer-following glow; light mode remains available from the chat sidebar.
 
 On startup, the server migrates existing message tables to add `is_deleted` and
 attachment metadata columns, makes usernames unique, converts legacy inactive

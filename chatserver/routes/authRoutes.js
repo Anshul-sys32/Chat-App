@@ -96,6 +96,17 @@ router.get("/oauth/config", (_req, res) => {
 	res.set("Cache-Control", "no-store");
 	res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
 });
+router.get("/login-quotes", async (_req, res) => {
+	try {
+		const [quotes] = await pool.query(
+			"SELECT id AS _id, quote FROM login_quotes ORDER BY id"
+		);
+		res.json(quotes);
+	} catch (error) {
+		console.error("Fetch login quotes error:", error);
+		res.status(500).json({ message: "Could not load login quotes." });
+	}
+});
 router.post("/oauth/google", googleLogin);
 router.post("/logout", (_req, res) => {
 	res.clearCookie("token", {
@@ -241,6 +252,60 @@ router.post("/admin/notifications", protect, requireAdmin, async (req, res) => {
 	} catch (error) {
 		console.error("Send notification error:", error);
 		res.status(500).json({ message: "Could not send the notification." });
+	}
+});
+router.get("/admin/login-quotes", protect, requireAdmin, async (_req, res) => {
+	try {
+		const [quotes] = await pool.query(
+			"SELECT id AS _id, quote FROM login_quotes ORDER BY id"
+		);
+		res.json(quotes);
+	} catch (error) {
+		console.error("Fetch admin login quotes error:", error);
+		res.status(500).json({ message: "Could not load login quotes." });
+	}
+});
+router.post("/admin/login-quotes", protect, requireAdmin, async (req, res) => {
+	const quote = typeof req.body.quote === "string" ? req.body.quote.trim() : "";
+	if (!quote || quote.length > 500) {
+		return res.status(400).json({ message: "Quotes must be between 1 and 500 characters." });
+	}
+	try {
+		const [result] = await pool.execute("INSERT INTO login_quotes (quote) VALUES (?)", [quote]);
+		res.status(201).json({ _id: result.insertId, quote });
+	} catch (error) {
+		console.error("Create login quote error:", error);
+		res.status(500).json({ message: "Could not add login quote." });
+	}
+});
+router.patch("/admin/login-quotes/:quoteId", protect, requireAdmin, async (req, res) => {
+	const quoteId = Number(req.params.quoteId);
+	const quote = typeof req.body.quote === "string" ? req.body.quote.trim() : "";
+	if (!validId(quoteId) || !quote || quote.length > 500) {
+		return res.status(400).json({ message: "Provide a valid quote id and quote (up to 500 characters)." });
+	}
+	try {
+		const [result] = await pool.execute("UPDATE login_quotes SET quote = ? WHERE id = ?", [quote, quoteId]);
+		if (!result.affectedRows) {
+			const [rows] = await pool.execute("SELECT id FROM login_quotes WHERE id = ?", [quoteId]);
+			if (!rows.length) return res.status(404).json({ message: "Quote not found." });
+		}
+		res.json({ _id: quoteId, quote });
+	} catch (error) {
+		console.error("Update login quote error:", error);
+		res.status(500).json({ message: "Could not update login quote." });
+	}
+});
+router.delete("/admin/login-quotes/:quoteId", protect, requireAdmin, async (req, res) => {
+	const quoteId = Number(req.params.quoteId);
+	if (!validId(quoteId)) return res.status(400).json({ message: "Invalid quote id." });
+	try {
+		const [result] = await pool.execute("DELETE FROM login_quotes WHERE id = ?", [quoteId]);
+		if (!result.affectedRows) return res.status(404).json({ message: "Quote not found." });
+		res.status(204).end();
+	} catch (error) {
+		console.error("Delete login quote error:", error);
+		res.status(500).json({ message: "Could not delete login quote." });
 	}
 });
 router.post("/uploads", protect, (req, res, next) => {

@@ -26,6 +26,11 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   const [notificationRecipients, setNotificationRecipients] = useState([]);
   const [sendingNotification, setSendingNotification] = useState(false);
   const [notificationSuccess, setNotificationSuccess] = useState("");
+  const [loginQuotes, setLoginQuotes] = useState([]);
+  const [newQuote, setNewQuote] = useState("");
+  const [editingQuoteId, setEditingQuoteId] = useState(null);
+  const [editingQuoteText, setEditingQuoteText] = useState("");
+  const [quoteError, setQuoteError] = useState("");
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -42,6 +47,18 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API_URL}/api/admin/login-quotes`, authConfig())
+      .then(({ data }) => {
+        if (active) setLoginQuotes(data);
+      })
+      .catch((requestError) => {
+        if (active) setQuoteError(requestError.response?.data?.message || "Could not load login quotes.");
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const handleProfilePicture = ({ userId, profilePicture }) => {
@@ -104,6 +121,51 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
       setError(requestError.response?.data?.message || "Could not send the notification.");
     } finally {
       setSendingNotification(false);
+    }
+  };
+
+  const addLoginQuote = async (event) => {
+    event.preventDefault();
+    setQuoteError("");
+    try {
+      const { data } = await axios.post(
+        `${API_URL}/api/admin/login-quotes`,
+        { quote: newQuote },
+        authConfig()
+      );
+      setLoginQuotes((previous) => [...previous, data]);
+      setNewQuote("");
+    } catch (requestError) {
+      setQuoteError(requestError.response?.data?.message || "Could not add login quote.");
+    }
+  };
+
+  const saveLoginQuote = async (quoteId) => {
+    setQuoteError("");
+    try {
+      const { data } = await axios.patch(
+        `${API_URL}/api/admin/login-quotes/${quoteId}`,
+        { quote: editingQuoteText },
+        authConfig()
+      );
+      setLoginQuotes((previous) => previous.map((quote) =>
+        String(quote._id) === String(quoteId) ? data : quote
+      ));
+      setEditingQuoteId(null);
+      setEditingQuoteText("");
+    } catch (requestError) {
+      setQuoteError(requestError.response?.data?.message || "Could not update login quote.");
+    }
+  };
+
+  const deleteLoginQuote = async (quote) => {
+    setQuoteError("");
+    try {
+      await axios.delete(`${API_URL}/api/admin/login-quotes/${quote._id}`, authConfig());
+      setLoginQuotes((previous) => previous.filter((item) => String(item._id) !== String(quote._id)));
+      if (String(editingQuoteId) === String(quote._id)) setEditingQuoteId(null);
+    } catch (requestError) {
+      setQuoteError(requestError.response?.data?.message || "Could not delete login quote.");
     }
   };
 
@@ -191,6 +253,60 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               {sendingNotification ? "Sending…" : "Send notification"}
             </button>
           </form>
+        </section>
+        <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
+          <h2 className="text-lg font-semibold">Login page quotes</h2>
+          <p className="mt-1 text-sm text-white/60">Add, edit, or remove the quotes shown beneath NFaNG. Quotes rotate on the sign-in page.</p>
+          <form onSubmit={addLoginQuote} className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <textarea
+              value={newQuote}
+              onChange={(event) => setNewQuote(event.target.value)}
+              maxLength={500}
+              rows={2}
+              required
+              placeholder="Write a quote to show on the sign-in page"
+              aria-label="New login quote"
+              className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+            />
+            <button
+              type="submit"
+              disabled={!newQuote.trim()}
+              className="self-end rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Add quote
+            </button>
+          </form>
+          {quoteError && <p role="alert" className="mt-3 text-sm text-rose-300">{quoteError}</p>}
+          <ul className="mt-4 space-y-2">
+            {loginQuotes.map((quote) => (
+              <li key={quote._id} className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:flex-row sm:items-center">
+                {String(editingQuoteId) === String(quote._id) ? (
+                  <textarea
+                    value={editingQuoteText}
+                    onChange={(event) => setEditingQuoteText(event.target.value)}
+                    maxLength={500}
+                    rows={2}
+                    aria-label="Edit login quote"
+                    className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none focus:border-teal-300/60"
+                  />
+                ) : (
+                  <p className="min-w-0 flex-1 text-sm text-white/80">“{quote.quote}”</p>
+                )}
+                <div className="flex shrink-0 gap-2">
+                  {String(editingQuoteId) === String(quote._id) ? (
+                    <>
+                      <button type="button" onClick={() => saveLoginQuote(quote._id)} disabled={!editingQuoteText.trim()} className="rounded-md border border-teal-200/20 px-3 py-1.5 text-xs text-teal-100 hover:bg-teal-300/10 disabled:opacity-50">Save</button>
+                      <button type="button" onClick={() => setEditingQuoteId(null)} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Cancel</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => { setEditingQuoteId(quote._id); setEditingQuoteText(quote.quote); }} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Edit</button>
+                  )}
+                  <button type="button" onClick={() => deleteLoginQuote(quote)} className="rounded-md border border-rose-300/20 px-3 py-1.5 text-xs text-rose-200 hover:bg-rose-500/10">Remove</button>
+                </div>
+              </li>
+            ))}
+            {loginQuotes.length === 0 && <li className="rounded-lg border border-dashed border-white/15 px-3 py-5 text-center text-sm text-white/50">No login quotes yet.</li>}
+          </ul>
         </section>
         {loading ? <p className="mt-6 text-sm text-white/60">Loading users…</p> : (
           <div className="mt-6 space-y-3">

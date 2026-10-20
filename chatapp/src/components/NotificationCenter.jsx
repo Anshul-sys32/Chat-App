@@ -92,7 +92,12 @@ export default function NotificationCenter() {
       {isOpen && (
         <section
           aria-label="Notifications"
-          className="theme-sidebar absolute right-0 z-[70] mt-2 max-h-[min(75vh,32rem)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border p-3 shadow-2xl"
+          style={{
+            top: "calc(env(safe-area-inset-top) + 4.25rem)",
+            right: "max(0.75rem, env(safe-area-inset-right))",
+            maxHeight: "min(32rem, calc(var(--app-height, 100dvh) - 5.5rem - env(safe-area-inset-bottom)))",
+          }}
+          className="theme-sidebar fixed z-[70] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 shadow-2xl"
         >
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Notifications</h2>
