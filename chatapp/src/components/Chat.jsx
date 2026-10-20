@@ -70,6 +70,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   }, [selectedChat?._id]);
 
   useEffect(() => {
+    if (!selectedChat?._id || selectedChat.type === 'group') return;
+    axios.post(`${API_URL}/api/messages/${selectedChat._id}/read`, {}, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      withCredentials: true,
+    }).catch((error) => {
+      console.error('Failed to mark messages as read:', error);
+    });
+  }, [selectedChat?._id, selectedChat?.type]);
+
+  useEffect(() => {
     const updateAppHeight = () => {
       const height = window.visualViewport?.height || window.innerHeight;
       document.documentElement.style.setProperty('--app-height', `${height}px`);
@@ -329,7 +339,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       const { data } = await axios.get(
         `${API_URL}/api/${isGroup ? `groups/${chat._id}/messages` : `messages/${chat._id}`}`,
         {
-          headers: { Authorization: `******'token')}` },
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
           params: { before: String(oldestMessage._id), limit: 50 },
         }
       );
@@ -447,6 +457,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         onUserUpdated={onUserUpdated}
         theme={theme}
         onToggleTheme={onToggleTheme}
+        selectedChat={selectedChat}
       />
 
 

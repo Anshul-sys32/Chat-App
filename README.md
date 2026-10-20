@@ -9,7 +9,26 @@ A direct-message chat app built with Vite, React, Express, Socket.IO, and MySQL.
 
 Create the `chatapp` database and configure `chatserver/.env` with a MySQL user and password. The server creates the `users`, `messages`, `chat_groups`, and `group_members` tables at startup. Registration creates active standard accounts.
 
-The checked-out `chatserver/.env` defaults to `localhost:3306`, user `root`, and database `chatapp`. Set `DB_PASSWORD` to the password for your local MySQL user.
+The checked-out `chatserver/.env` defaults to `localhost:3306`, user `root`, and database `chatapp`. Set `DB_PASSWORD` to the password for your local MySQL user. New registrations require email verification before the account is created and submitted for administrator approval.
+
+Configure SMTP delivery in `chatserver/.env` for signup OTPs:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-smtp-user
+SMTP_PASS=your-smtp-password
+MAIL_FROM=NFaNG <no-reply@example.com>
+```
+
+`SMTP_SECURE=true` is typically used with port 465. The six-digit OTP expires
+after 10 minutes, allows five failed attempts, and can be resent no more than
+once per minute.
+
+The login page also provides **Forgot password?**. It sends a separate
+six-digit reset OTP, expires it after 10 minutes, limits failed attempts, and
+allows the user to set a new password after verification.
 
 Set `chatapp/.env` to the server URL for `VITE_API_URL`, `VITE_SERVER_URL`, and `VITE_SOCKET_URL`. These URLs must be reachable from the browser; `localhost` and a private LAN address refer to the phone itself when the app is opened on Android.
 
@@ -90,6 +109,15 @@ than one. Profile and group images support JPEG, PNG, GIF, WebP, and AVIF up to
 URL.
 Conversation history opens at the latest messages and loads older messages in
 50-message pages as you scroll upward.
+
+The chat sidebar separates users into **Local Users** (people with whom the
+current account has exchanged direct messages) and **Global Users** (all other
+active accounts). Direct-message unread counts are persisted per conversation,
+increase for incoming messages while another conversation is open, and clear
+when that conversation is opened.
+Global users are fetched in 30-user pages as the list is scrolled. Administrators
+can search notification recipients by entering multiple exact usernames separated
+by commas.
 
 ## Run locally
 

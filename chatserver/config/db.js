@@ -29,6 +29,30 @@ const connectDB = async () => {
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB
     `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS pending_signups (
+        email VARCHAR(255) NOT NULL PRIMARY KEY,
+        username VARCHAR(100) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        otp_hash CHAR(64) NOT NULL,
+        otp_expires_at DATETIME NOT NULL,
+        otp_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+        last_sent_at DATETIME NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX pending_signups_expiry (otp_expires_at)
+      ) ENGINE=InnoDB
+    `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_otps (
+        email VARCHAR(255) NOT NULL PRIMARY KEY,
+        otp_hash CHAR(64) NOT NULL,
+        otp_expires_at DATETIME NOT NULL,
+        otp_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+        last_sent_at DATETIME NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX password_reset_otps_expiry (otp_expires_at)
+      ) ENGINE=InnoDB
+    `);
     for (const [column, definition] of [
       ["google_sub", "VARCHAR(255) NULL"],
       ["google_name", "VARCHAR(255) NULL"],
@@ -163,6 +187,17 @@ const connectDB = async () => {
         INDEX group_messages_history (group_id, created_at, id),
         CONSTRAINT group_messages_group_fk FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
         CONSTRAINT group_messages_sender_fk FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS direct_message_reads (
+        user_id INT UNSIGNED NOT NULL,
+        other_user_id INT UNSIGNED NOT NULL,
+        last_read_message_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, other_user_id),
+        CONSTRAINT direct_reads_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT direct_reads_other_user_fk FOREIGN KEY (other_user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB
     `);
     const [groupMessageDeletedColumn] = await connection.execute(

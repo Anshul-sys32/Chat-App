@@ -17,8 +17,8 @@ import Avatar from './Avatar';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
-const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme }) => {
-  const [activeTab, setActiveTab] = useState('users');
+const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, selectedChat }) => {
+  const [activeTab, setActiveTab] = useState('localUsers');
   const [search, setSearch] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const handleSelectChat = (chat) => {
@@ -29,8 +29,10 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'users':
-        return <UserList currentUser={user} search={search} onStartChat={handleSelectChat} />;
+      case 'localUsers':
+        return <UserList currentUser={user} activeChatId={selectedChat?._id} scope="local" search={search} onStartChat={handleSelectChat} />;
+      case 'globalUsers':
+        return <UserList currentUser={user} activeChatId={selectedChat?._id} scope="global" search={search} onStartChat={handleSelectChat} />;
       case 'groups':
         return <GroupList search={search} onSelectGroup={handleSelectChat} />;
       default:
@@ -83,9 +85,15 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
           <div className="mt-10 space-y-4">
             <IconButton
               icon={<FaUsers />}
-              label="Users"
-              onClick={() => setActiveTab('users')}
-              active={activeTab === 'users'}
+              label="Local Users"
+              onClick={() => setActiveTab('localUsers')}
+              active={activeTab === 'localUsers'}
+            />
+            <IconButton
+              icon={<FaUsers />}
+              label="Global Users"
+              onClick={() => setActiveTab('globalUsers')}
+              active={activeTab === 'globalUsers'}
             />
             <IconButton
               icon={<FaLayerGroup />}

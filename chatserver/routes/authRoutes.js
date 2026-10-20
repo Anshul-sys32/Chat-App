@@ -3,6 +3,10 @@ const router = express.Router();
 const path = require("node:path");
 const {
 	register,
+	verifySignup,
+	resendSignupOtp,
+	requestPasswordReset,
+	resetPassword,
 	login,
 	googleLogin,
 	updateOwnProfile,
@@ -91,6 +95,10 @@ const requireGroupAvatarAdmin = async (req, res, next) => {
 };
 
 router.post("/register", register);
+router.post("/register/verify", verifySignup);
+router.post("/register/resend", resendSignupOtp);
+router.post("/password-reset/request", requestPasswordReset);
+router.post("/password-reset/confirm", resetPassword);
 router.post("/login", login);
 router.get("/oauth/config", (_req, res) => {
 	res.set("Cache-Control", "no-store");
@@ -375,9 +383,15 @@ router.post("/admin/users/:userId/profile-picture", protect, requireAdmin, recei
 	}
 	return updateUserAvatar(req, res, userId);
 });
-router.get("/admin/users", protect, requireAdmin, async (_req, res) => {
+router.get("/admin/users", protect, requireAdmin, async (req, res) => {
 	try {
-		res.json(await User.listAdmin());
+		const names = typeof req.query.names === "string"
+			? [...new Set(req.query.names.split(",").map((name) => name.trim().toLowerCase()).filter(Boolean))]
+			: [];
+		if (names.length > 100) {
+			return res.status(400).json({ message: "Search for up to 100 usernames at a time." });
+		}
+		res.json(await User.listAdmin(names));
 	} catch (err) {
 		console.error("Fetch admin users error:", err);
 		res.status(500).json({ message: "Failed to get users" });
@@ -481,6 +495,30 @@ router.get("/messages/:userId", protect, async (req, res) => {
 	} catch (err) {
 		console.error("Fetch messages error:", err);
 		res.status(500).json({ message: "Failed to get messages" });
+	}
+});
+router.post("/messages/:userId/read", protect, async (req, res) => {
+	const otherId = Number(req.params.userId);
+	if (!validId(otherId) || otherId === Number(req.user.id)) {
+		return res.status(400).json({ message: "Invalid conversation user." });
+	}
+	try {
+		const [[latest]] = await pool.execute(
+			`SELECT COALESCE(MAX(id), 0) AS lastReadMessageId
+			 FROM messages
+			 WHERE sender_id = ? AND receiver_id = ?`,
+			[otherId, req.user.id]
+		);
+		await pool.execute(
+			`INSERT INTO direct_message_reads (user_id, other_user_id, last_read_message_id)
+			 VALUES (?, ?, ?)
+			 ON DUPLICATE KEY UPDATE last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id))`,
+			[req.user.id, otherId, latest.lastReadMessageId]
+		);
+		res.status(204).end();
+	} catch (error) {
+		console.error("Mark direct messages read error:", error);
+		res.status(500).json({ message: "Could not mark messages as read." });
 	}
 });
 router.delete("/messages/:messageId", protect, async (req, res) => {

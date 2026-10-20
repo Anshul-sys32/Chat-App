@@ -16,6 +16,10 @@ function UserForm({ onAuthenticated }) {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,6 +64,10 @@ function UserForm({ onAuthenticated }) {
     setUsername("");
     setEmail("");
     setPassword("");
+    setVerificationCode("");
+    setVerificationPending(false);
+    setForgotPassword(false);
+    setResetRequested(false);
     setFocusedField("");
     setShowPass(false);
   };
@@ -149,9 +157,8 @@ function UserForm({ onAuthenticated }) {
         withCredentials: true,
       });
       if (isSignUp) {
-        setNotice(data.message || "Your account is awaiting administrator approval.");
-        setIsSignUp(false);
-        setPassword("");
+        setVerificationPending(true);
+        setNotice(data.message || "A verification code was sent to your email.");
         return;
       }
       if (!data.user?._id || !data.token) {
@@ -169,6 +176,100 @@ function UserForm({ onAuthenticated }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const verifySignup = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      const { data } = await axios.post(`${API_URL}/api/register/verify`, {
+        email,
+        code: verificationCode,
+      });
+      setNotice(data.message || "Email verified. Your account is awaiting approval.");
+      setVerificationPending(false);
+      setIsSignUp(false);
+      setPassword("");
+      setVerificationCode("");
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not verify your email.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendSignupCode = async () => {
+    setLoading(true);
+    setError("");
+    setNotice("");
+    try {
+      const { data } = await axios.post(`${API_URL}/api/register/resend`, { email });
+      setNotice(data.message || "A new verification code was sent.");
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not resend the verification code.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestPasswordReset = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    setNotice("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address.");
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data } = await axios.post(`${API_URL}/api/password-reset/request`, { email });
+      setResetRequested(true);
+      setNotice(data.message || "If an account exists for that email, a reset code was sent.");
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not request a password reset.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmPasswordReset = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    setNotice("");
+    if (!/^\d{6}$/.test(verificationCode) || password.length < 8) {
+      setError("Enter the six-digit reset code and a password of at least 8 characters.");
+      setLoading(false);
+      return;
+    }
+    try {
+      const { data } = await axios.post(`${API_URL}/api/password-reset/confirm`, {
+        email,
+        code: verificationCode,
+        password,
+      });
+      setNotice(data.message || "Password reset successfully. You can now sign in.");
+      setForgotPassword(false);
+      setResetRequested(false);
+      setVerificationCode("");
+      setPassword("");
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not reset the password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openForgotPassword = () => {
+    setForgotPassword(true);
+    setResetRequested(false);
+    setError("");
+    setNotice("");
+    setPassword("");
+    setVerificationCode("");
   };
 
   const inputWrapper = "relative w-full";
@@ -204,13 +305,74 @@ function UserForm({ onAuthenticated }) {
         >
           {/* Sign In Form */}
           <form
-            onSubmit={handleSubmit}
+            onSubmit={forgotPassword ? (resetRequested ? confirmPasswordReset : requestPasswordReset) : handleSubmit}
+            noValidate={forgotPassword}
             className="theme-auth-form flex min-w-0 flex-col justify-center space-y-4 px-3 sm:px-6"
           >
             <h2 className="theme-auth-heading text-center text-3xl font-bold underline">
-              Sign In
+              {forgotPassword ? "Reset Password" : "Sign In"}
             </h2>
 
+            {forgotPassword ? (
+              <>
+                <p className="text-center text-sm text-white/75">
+                  Enter your email to receive a password reset code.
+                </p>
+                <div className={inputWrapper}>
+                  <FaEnvelope className="absolute top-3 left-3 text-gray-500" />
+                  <input
+                    type="email"
+                    className={`${inputBase} border-gray-300`}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Email"
+                  />
+                </div>
+                {resetRequested && (
+                  <>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      pattern="\d{6}"
+                      value={verificationCode}
+                      onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, ""))}
+                      placeholder="Six-digit reset code"
+                      className={`${inputBase} border-gray-300 text-center tracking-[0.35em]`}
+                    />
+                    <div className={inputWrapper}>
+                      <FaLock className="absolute top-3 left-3 text-gray-500" />
+                      <input
+                        type={showPass ? "text" : "password"}
+                        minLength={8}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="New password"
+                        className={`${inputBase} border-gray-300`}
+                      />
+                    </div>
+                  </>
+                )}
+                {error && <p className="text-center text-sm text-red-300">{error}</p>}
+                {notice && <p className="text-center text-sm text-emerald-200">{notice}</p>}
+                <button
+                  type="submit"
+                  disabled={loading || (resetRequested && (verificationCode.length !== 6 || password.length < 8))}
+                  className="theme-auth-submit w-40 self-center rounded-full px-4 py-2 font-medium"
+                >
+                  {loading ? "Please wait..." : resetRequested ? "Reset password" : "Send code"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setForgotPassword(false); setResetRequested(false); setError(""); setNotice(""); }}
+                  className="theme-auth-link text-sm no-underline hover:underline"
+                >
+                  Back to sign in
+                </button>
+              </>
+            ) : (
+            <>
             <div className={inputWrapper}>
               <FaEnvelope className="absolute top-3 left-3 text-gray-500" />
               <input
@@ -282,6 +444,13 @@ function UserForm({ onAuthenticated }) {
             >
               {loading ? "Please wait..." : "Log In"}
             </button>
+            <button
+              type="button"
+              onClick={openForgotPassword}
+              className="theme-auth-link text-sm no-underline hover:underline"
+            >
+              Forgot password?
+            </button>
 
             <p className="theme-auth-copy text-center text-sm">
               Don't have an account?{" "}
@@ -321,6 +490,8 @@ function UserForm({ onAuthenticated }) {
                 </p>
               )}
             </div>
+            </>
+            )}
           </form>
 
           {/* Sign Up Form */}
@@ -332,7 +503,45 @@ function UserForm({ onAuthenticated }) {
               Sign Up
             </h2>
 
-            <div className={inputWrapper}>
+            {verificationPending && (
+              <div className="space-y-3">
+                <p className="text-center text-sm text-white/75">
+                  Enter the six-digit code sent to <strong>{email}</strong>.
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  pattern="\d{6}"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, ""))}
+                  placeholder="Verification code"
+                  className={`${inputBase} border-gray-300 text-center tracking-[0.35em]`}
+                  required
+                />
+                {error && <p className="text-center text-sm text-red-300">{error}</p>}
+                {notice && <p className="text-center text-sm text-emerald-200">{notice}</p>}
+                <button
+                  type="button"
+                  onClick={verifySignup}
+                  disabled={loading || verificationCode.length !== 6}
+                  className="mx-auto block rounded-full bg-white px-4 py-2 font-medium text-black hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loading ? "Verifying..." : "Verify email"}
+                </button>
+                <button
+                  type="button"
+                  onClick={resendSignupCode}
+                  disabled={loading}
+                  className="mx-auto block text-sm text-purple-300 hover:underline disabled:opacity-50"
+                >
+                  Resend code
+                </button>
+              </div>
+            )}
+
+            {!verificationPending && <><div className={inputWrapper}>
               <FaUser className="absolute top-3 left-3 text-gray-500" />
               <input
                 type="text"
@@ -427,7 +636,7 @@ function UserForm({ onAuthenticated }) {
               className="w-40 px-4 py-2 font-medium text-black bg-white rounded-full hover:bg-green-400 self-center"
             >
               {loading ? "Please wait..." : "Register"}
-            </button>
+            </button></>}
 
             <p className="text-center text-sm text-white">
               Already have an account?{" "}

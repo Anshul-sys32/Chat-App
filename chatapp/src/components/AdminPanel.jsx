@@ -24,6 +24,8 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   const [notificationBody, setNotificationBody] = useState("");
   const [notificationAudience, setNotificationAudience] = useState("all");
   const [notificationRecipients, setNotificationRecipients] = useState([]);
+  const [notificationRecipientQuery, setNotificationRecipientQuery] = useState("");
+  const [notificationRecipientMatches, setNotificationRecipientMatches] = useState([]);
   const [sendingNotification, setSendingNotification] = useState(false);
   const [notificationSuccess, setNotificationSuccess] = useState("");
   const [loginQuotes, setLoginQuotes] = useState([]);
@@ -47,6 +49,31 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   useEffect(() => {
     loadUsers();
   }, [loadUsers]);
+
+  useEffect(() => {
+    if (notificationAudience !== "selected") return;
+    const names = notificationRecipientQuery.split(",").map((name) => name.trim()).filter(Boolean);
+    if (!names.length) {
+      setNotificationRecipientMatches(users.filter((candidate) => candidate.status === "active"));
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const { data } = await axios.get(
+          `${API_URL}/api/admin/users?names=${encodeURIComponent(names.join(","))}`,
+          authConfig()
+        );
+        if (active) setNotificationRecipientMatches(data);
+      } catch (requestError) {
+        if (active) setError(requestError.response?.data?.message || "Could not search recipients.");
+      }
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [notificationAudience, notificationRecipientQuery, users]);
 
   useEffect(() => {
     let active = true;
@@ -117,6 +144,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
       setNotificationTitle("");
       setNotificationBody("");
       setNotificationRecipients([]);
+      setNotificationRecipientQuery("");
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Could not send the notification.");
     } finally {
@@ -228,7 +256,13 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
             </label>
             {notificationAudience === "selected" && (
               <label className="block text-sm">
-                <span className="mb-1 block text-white/70">Choose users (Ctrl/Cmd-click to select multiple)</span>
+                <span className="mb-1 block text-white/70">Search usernames (separate multiple names with commas)</span>
+                <input
+                  value={notificationRecipientQuery}
+                  onChange={(event) => setNotificationRecipientQuery(event.target.value)}
+                  placeholder="alice, bob, charlie"
+                  className="mb-2 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+                />
                 <select
                   multiple
                   value={notificationRecipients}
@@ -237,7 +271,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                   )}
                   className="max-h-48 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white"
                 >
-                  {users.filter((candidate) => candidate.status === "active").map((candidate) => (
+                  {notificationRecipientMatches.map((candidate) => (
                     <option key={candidate._id} value={candidate._id}>
                       {candidate.username} ({candidate.email})
                     </option>
