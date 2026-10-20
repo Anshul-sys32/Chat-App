@@ -31,6 +31,27 @@ The app provides matching dark and light themes. Switch themes from the sun/moon
 button in the chat sidebar; the selection is saved in the browser and also applies
 to the sign-in and administration pages.
 
+### Android app
+
+The React client is packaged as an Android app with Capacitor. Install Android
+Studio with Android SDK Platform 36 and configure `chatapp/.env` with the
+production HTTPS API and Socket.IO URLs before building; Android devices cannot
+reach a development machine through `localhost`.
+
+```sh
+cd chatapp
+npm install
+npm run android:sync
+npm run android:open
+```
+
+In Android Studio, build and run the `app` configuration on an emulator or
+connected device. `npm run android:sync` builds the React app and copies its web
+assets into the native project. Camera and microphone permissions are declared
+for video/audio calls. The current Google sign-in uses browser-based Google
+Identity Services; Google may block this flow in embedded WebViews, so native
+Google sign-in needs a dedicated Android OAuth integration.
+
 ### Host on an IPv6 address
 
 The development servers can bind to IPv6 using the settings in `chatapp/.env` and `chatserver/.env`. IPv6 literals in URLs must be enclosed in square brackets. Vite's development server is for development only; it may serve the page but does not ensure the app's API and Socket.IO connections work externally.

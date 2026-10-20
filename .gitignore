@@ -17,6 +17,19 @@ dist-ssr
 build/
 chatserver/uploads/
 
+# Android / Gradle outputs and local signing configuration
+**/.gradle/
+**/local.properties
+*.apk
+*.aab
+*.aar
+*.ap_
+*.dex
+*.class
+*.jks
+*.keystore
+**/google-services.json
+
 # Vite cache
 .vite/
 
