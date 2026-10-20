@@ -113,7 +113,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   useEffect(() => {
     const positionSelfView = () => {
-      const width = Math.min(420, Math.max(160, window.innerWidth * 0.35));
+      const width = Math.min(560, Math.max(220, window.innerWidth * 0.5));
       const height = width * 9 / 16;
       setSelfViewPosition((position) => {
         const maxX = Math.max(8, window.innerWidth - width - 8);
@@ -517,9 +517,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
             className="absolute z-20 aspect-video touch-none cursor-grab overflow-hidden rounded-2xl border border-white/30 bg-black shadow-2xl shadow-black/50 ring-1 ring-black/20 active:cursor-grabbing"
             style={{
-              width: "35vw",
-              minWidth: 160,
-              maxWidth: 420,
+              width: "50vw",
+              minWidth: 220,
+              maxWidth: 560,
               left: selfViewPosition?.x ?? 16,
               top: selfViewPosition?.y ?? 80,
             }}
