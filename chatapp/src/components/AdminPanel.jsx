@@ -33,6 +33,9 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   const [editingQuoteId, setEditingQuoteId] = useState(null);
   const [editingQuoteText, setEditingQuoteText] = useState("");
   const [quoteError, setQuoteError] = useState("");
+  const [stickers, setStickers] = useState([]);
+  const [stickerName, setStickerName] = useState("");
+  const [stickerUrl, setStickerUrl] = useState("");
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -85,6 +88,12 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
         if (active) setQuoteError(requestError.response?.data?.message || "Could not load login quotes.");
       });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    axios.get(`${API_URL}/api/stickers`, authConfig())
+      .then(({ data }) => setStickers(data))
+      .catch((requestError) => setError(requestError.response?.data?.message || "Could not load stickers."));
   }, []);
 
   useEffect(() => {
@@ -194,6 +203,27 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
       if (String(editingQuoteId) === String(quote._id)) setEditingQuoteId(null);
     } catch (requestError) {
       setQuoteError(requestError.response?.data?.message || "Could not delete login quote.");
+    }
+  };
+
+  const addSticker = async (event) => {
+    event.preventDefault();
+    try {
+      const { data } = await axios.post(`${API_URL}/api/admin/stickers`, { name: stickerName, imageUrl: stickerUrl }, authConfig());
+      setStickers((current) => [...current, data]);
+      setStickerName("");
+      setStickerUrl("");
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not add sticker.");
+    }
+  };
+
+  const deleteSticker = async (sticker) => {
+    try {
+      await axios.delete(`${API_URL}/api/admin/stickers/${sticker._id}`, authConfig());
+      setStickers((current) => current.filter((item) => String(item._id) !== String(sticker._id)));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not remove sticker.");
     }
   };
 
@@ -340,6 +370,24 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               </li>
             ))}
             {loginQuotes.length === 0 && <li className="rounded-lg border border-dashed border-white/15 px-3 py-5 text-center text-sm text-white/50">No login quotes yet.</li>}
+          </ul>
+        </section>
+        <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
+          <h2 className="text-lg font-semibold">Custom stickers</h2>
+          <p className="mt-1 text-sm text-white/60">Add approved HTTPS image URLs. These stickers are available to all users on web and Android.</p>
+          <form onSubmit={addSticker} className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
+            <input value={stickerUrl} onChange={(event) => setStickerUrl(event.target.value)} required type="url" placeholder="https://example.com/sticker.png" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
+            <button type="submit" className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27]">Add sticker</button>
+          </form>
+          <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {stickers.map((sticker) => (
+              <li key={sticker._id} className="relative rounded-lg border border-white/10 p-2">
+                <img src={sticker.imageUrl} alt={sticker.name} className="mx-auto h-16 w-16 object-contain" />
+                <p className="truncate text-center text-xs text-white/70">{sticker.name}</p>
+                <button type="button" onClick={() => deleteSticker(sticker)} className="mt-1 w-full text-xs text-rose-200">Remove</button>
+              </li>
+            ))}
           </ul>
         </section>
         {loading ? <p className="mt-6 text-sm text-white/60">Loading users…</p> : (

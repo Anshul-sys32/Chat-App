@@ -122,6 +122,13 @@ when that conversation is opened.
 Global users are fetched in 30-user pages as the list is scrolled. Administrators
 can search notification recipients by entering multiple exact usernames separated
 by commas.
+Administrators can manage custom stickers from the Admin panel by adding
+approved HTTPS image URLs. Users can select these stickers from the composer;
+messages store the sticker ID and render the approved image in web and Android
+clients.
+The sticker picker includes All, Favorites, and Recent categories. The Create
+sticker shortcut opens Flaticon stickers; users should import only assets they
+are permitted to use by pasting an HTTPS image URL.
 
 ## Run locally
 

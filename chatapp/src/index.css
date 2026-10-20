@@ -158,6 +158,37 @@
   background: #f7fbfa;
 }
 
+.message-reply-highlight {
+  animation: message-reply-highlight 900ms ease-in-out 3;
+  position: relative;
+  z-index: 1;
+}
+
+.message-reply-highlight-own {
+  --reply-highlight-color: 255 255 255;
+}
+
+.message-reply-highlight-peer {
+  --reply-highlight-color: 45 212 191;
+}
+
+@keyframes message-reply-highlight {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgb(var(--reply-highlight-color) / 0%);
+  }
+  50% {
+    box-shadow: 0 0 2.25rem 0.65rem rgb(var(--reply-highlight-color) / 80%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-reply-highlight {
+    animation: none;
+    outline: 3px solid rgb(var(--reply-highlight-color) / 85%);
+    box-shadow: 0 0 1.5rem 0.4rem rgb(var(--reply-highlight-color) / 60%);
+  }
+}
+
 .theme-menu-button,
 .theme-icon-button {
   color: var(--theme-text);

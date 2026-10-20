@@ -3,7 +3,7 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCopy, FaEllipsisV, FaPaperclip, FaPhone, FaReply, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCopy, FaEllipsisV, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -69,6 +69,17 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [openBulkMenu, setOpenBulkMenu] = useState(false);
   const [pendingForward, setPendingForward] = useState(null);
+  const [stickers, setStickers] = useState([]);
+  const [showStickers, setShowStickers] = useState(false);
+  const [showAddSticker, setShowAddSticker] = useState(false);
+  const [stickerName, setStickerName] = useState('');
+  const [stickerUrl, setStickerUrl] = useState('');
+  const [stickerFile, setStickerFile] = useState(null);
+  const [stickerError, setStickerError] = useState('');
+  const [stickerCategory, setStickerCategory] = useState('all');
+  const [favoriteStickerIds, setFavoriteStickerIds] = useState([]);
+  const [recentStickerIds, setRecentStickerIds] = useState([]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
   const replyDrag = React.useRef(null);
 
   useEffect(() => {
@@ -87,6 +98,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setPendingForward(null);
     setIsSidebarOpen(false);
   }, [selectedChat?._id, pendingForward]);
+
+  useEffect(() => {
+    axios.get(`${API_URL}/api/stickers`, {
+      headers: { Authorization: `******'token') || ''}` },
+      withCredentials: true,
+    }).then(({ data }) => setStickers(Array.isArray(data) ? data : []))
+      .catch((error) => console.error('Could not load stickers:', error));
+  }, []);
+
+  useEffect(() => {
+    const key = `sticker-preferences-${user?._id || 'guest'}`;
+    try {
+      setFavoriteStickerIds(JSON.parse(localStorage.getItem(`${key}-favorites`) || '[]'));
+      setRecentStickerIds(JSON.parse(localStorage.getItem(`${key}-recent`) || '[]'));
+    } catch (error) {
+      console.error('Could not load sticker preferences:', error);
+    }
+  }, [user?._id]);
 
   useEffect(() => {
     if (!selectedChat?._id || selectedChat.type === 'group') return;
@@ -429,6 +458,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         ...(replyTo?._id ? { replyToId: replyTo._id } : {}),
         ...(attachments.length ? { attachments } : {}),
       };
+
       if (chat.type === 'group') {
         Socket.emit('group-message', { ...payload, groupId: chat._id });
       } else {
@@ -442,6 +472,99 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     } finally {
       setIsSending(false);
     }
+  };
+
+  const sendSticker = (sticker) => {
+    if (!selectedChat || !Socket.connected) return;
+    const payload = { content: '', stickerId: sticker._id };
+    Socket.emit(selectedChat.type === 'group' ? 'group-message' : 'send-message', selectedChat.type === 'group'
+      ? { ...payload, groupId: selectedChat._id }
+      : { ...payload, receiver: selectedChat._id });
+    const key = `sticker-preferences-${user?._id || 'guest'}`;
+    const recent = [String(sticker._id), ...recentStickerIds.filter((id) => String(id) !== String(sticker._id))].slice(0, 30);
+    setRecentStickerIds(recent);
+    localStorage.setItem(`${key}-recent`, JSON.stringify(recent));
+    setShowStickers(false);
+  };
+
+  const toggleFavoriteSticker = (stickerId) => {
+    const key = `sticker-preferences-${user?._id || 'guest'}`;
+    const next = favoriteStickerIds.includes(String(stickerId))
+      ? favoriteStickerIds.filter((id) => id !== String(stickerId))
+      : [...favoriteStickerIds, String(stickerId)];
+    setFavoriteStickerIds(next);
+    localStorage.setItem(`${key}-favorites`, JSON.stringify(next));
+  };
+
+  const addSticker = async () => {
+    if (!stickerName.trim() || !stickerUrl.trim() && !stickerFile) {
+      setStickerError('Enter a sticker name and HTTPS image URL, or choose an image file.');
+      return;
+    }
+    setStickerError('');
+    try {
+      const formData = new FormData();
+      formData.append('name', stickerName.trim());
+      let endpoint = '/api/stickers';
+      if (stickerFile) {
+        formData.append('sticker', stickerFile);
+        endpoint = '/api/stickers/upload';
+      } else {
+        formData.append('imageUrl', stickerUrl.trim());
+      }
+      const { data } = await axios.post(`${API_URL}${endpoint}`, stickerFile ? formData : {
+        name: stickerName.trim(),
+        imageUrl: stickerUrl.trim(),
+      }, {
+        headers: { Authorization: `******'token') || ''}` },
+        withCredentials: true,
+      });
+      setStickers((current) => [...current, data]);
+      setStickerName('');
+      setStickerUrl('');
+      setStickerFile(null);
+      setShowAddSticker(false);
+    } catch (error) {
+      setStickerError(error.response?.data?.message || 'Could not add sticker.');
+    }
+  };
+  const removeSticker = async (sticker) => {
+    if (String(sticker.ownerId) !== String(user?._id)) return;
+    try {
+      await axios.delete(`${API_URL}/api/stickers/${sticker._id}`, {
+        headers: { Authorization: `******'token') || ''}` },
+        withCredentials: true,
+      });
+      setStickers((current) => current.filter((item) => String(item._id) !== String(sticker._id)));
+      setFavoriteStickerIds((current) => current.filter((id) => id !== String(sticker._id)));
+      setRecentStickerIds((current) => current.filter((id) => id !== String(sticker._id)));
+    } catch (error) {
+      setStickerError(error.response?.data?.message || 'Could not remove sticker.');
+    }
+  };
+  const displayedStickers = stickers.filter((sticker) => {
+    if (stickerCategory === 'favorites') return favoriteStickerIds.includes(String(sticker._id));
+    if (stickerCategory === 'recent') return recentStickerIds.includes(String(sticker._id));
+    return true;
+  }).sort((a, b) => {
+    if (stickerCategory !== 'recent') return 0;
+    return recentStickerIds.indexOf(String(a._id)) - recentStickerIds.indexOf(String(b._id));
+  });
+  const getStickerUrl = (message) => (
+    [message.stickerUrl, stickers.find((sticker) => String(sticker._id) === String(message.stickerId))?.imageUrl]
+      .find(Boolean)
+  );
+  const resolveStickerUrl = (url) => url?.startsWith('/uploads/') ? `${API_URL}${url}` : url;
+  const jumpToMessage = (message) => {
+    if (!message) return;
+    setHighlightedMessageId(String(message._id));
+    messagesContainerRef.current?.querySelector(`[data-message-id="${message._id}"]`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+    window.setTimeout(() => {
+      setHighlightedMessageId((current) => current === String(message._id) ? null : current);
+    }, 3200);
   };
 
   const deleteMessage = async (message) => {
@@ -691,7 +814,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   className={`relative max-w-[min(82%,34rem)] rounded-2xl px-4 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
                     ? 'chat-bubble-own rounded-br-sm'
                     : 'chat-bubble-peer rounded-bl-sm'
-                    }`}
+                    } ${highlightedMessageId === String(m._id)
+                      ? String(m.sender) === String(user?._id)
+                        ? 'message-reply-highlight message-reply-highlight-own'
+                        : 'message-reply-highlight message-reply-highlight-peer'
+                      : ''}`}
                 >
                   <button
                     type="button"
@@ -738,13 +865,36 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   {m.content && (
                     <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
                   )}
+                  {getStickerUrl(m) && !m.isDeleted && (
+                                    <img
+                                      src={resolveStickerUrl(getStickerUrl(m))}
+                      alt="Sticker"
+                      className="mt-1 h-28 w-28 object-contain"
+                      loading="lazy"
+                      onError={(event) => {
+                        event.currentTarget.style.display = 'none';
+                        event.currentTarget.nextElementSibling?.removeAttribute('hidden');
+                      }}
+                    />
+                  )}
+                  {m.stickerId && !m.isDeleted && (
+                    <a
+                      href={getStickerUrl(m) || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      hidden={Boolean(getStickerUrl(m))}
+                      className="mt-1 block text-xs text-teal-200 underline"
+                    >
+                      Sticker unavailable. Open source
+                    </a>
+                  )}
                   {(m.replyToId || (!m.isDeleted && getAttachments(m).length > 0)) && (
                     <div className="mt-2 flex max-w-full items-start gap-2">
                     {m.replyToId && (() => {
                       const quoted = messages.find((candidate) => String(candidate._id) === String(m.replyToId));
                       return (
                         <div
-                          onClick={() => quoted && messagesContainerRef.current?.querySelector(`[data-message-id="${quoted._id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                          onClick={() => jumpToMessage(quoted)}
                           className="flex min-w-0 max-w-[52%] cursor-pointer items-center gap-2 rounded-md border border-teal-200/40 bg-slate-950/80 px-2 py-1.5 text-left text-xs text-teal-50 shadow-inner"
                         >
                           <FaReply className="shrink-0 text-teal-300" />
@@ -830,6 +980,76 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               className="sr-only"
               aria-label="Choose attachments"
             />
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowStickers((current) => !current)}
+                disabled={!selectedChat || isSending}
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-50"
+                title="Stickers"
+                aria-label="Open stickers"
+              >
+                <FaSmile />
+              </button>
+              {showStickers && (
+                <div className="absolute bottom-12 left-0 z-40 w-64 rounded-xl border border-white/15 bg-slate-950 p-3 shadow-xl">
+                  <div className="mb-2 flex gap-1 border-b border-white/10 pb-2">
+                    {['all', 'favorites', 'recent'].map((category) => (
+                      <button type="button" key={category} onClick={() => setStickerCategory(category)} className={`rounded px-2 py-1 text-[11px] capitalize ${stickerCategory === category ? 'bg-teal-500 text-slate-950' : 'text-white/70 hover:bg-white/10'}`}>
+                        {category === 'all' ? 'All' : category}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <button type="button" onClick={() => setShowAddSticker((current) => !current)} className="rounded bg-teal-500 px-2 py-1 text-[11px] font-semibold text-slate-950">
+                      {showAddSticker ? 'Close add' : 'Add sticker'}
+                    </button>
+                    <a href="https://www.flaticon.com/stickers" target="_blank" rel="noreferrer" className="text-[11px] text-white/70 underline">
+                      Create sticker
+                    </a>
+                  </div>
+                  {showAddSticker && (
+                    <div className="mb-2 space-y-2 border-b border-white/10 pb-2 text-left">
+                      <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="w-full rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
+                      <input value={stickerUrl} onChange={(event) => setStickerUrl(event.target.value)} type="url" placeholder="Direct HTTPS image URL" className="w-full rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
+                      <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="w-full text-[11px] text-white/70" />
+                      {stickerError && <p className="text-xs text-rose-300">{stickerError}</p>}
+                      <button type="button" onClick={addSticker} className="rounded bg-teal-500 px-2 py-1 text-[11px] font-semibold text-slate-950">Add</button>
+                    </div>
+                  )}
+                  {displayedStickers.length ? (
+                    <div className="grid max-h-48 grid-cols-5 gap-2 overflow-y-auto">
+                    {displayedStickers.map((sticker) => (
+                      <div key={sticker._id} className="relative rounded-lg p-1 hover:bg-white/10">
+                        <button type="button" onClick={() => sendSticker(sticker)} title={sticker.name} className="block">
+                          <img src={resolveStickerUrl(sticker.imageUrl)} alt={sticker.name} className="h-10 w-10 object-contain" loading="lazy" />
+                        </button>
+                        <button type="button" onClick={() => toggleFavoriteSticker(sticker._id)} className={`absolute -right-1 -top-1 ${favoriteStickerIds.includes(String(sticker._id)) ? 'text-yellow-300' : 'text-white/40'}`} aria-label="Toggle favorite">
+                          <FaStar size={9} />
+                        </button>
+                        {String(sticker.ownerId) === String(user?._id) && (
+                          <button type="button" onClick={() => removeSticker(sticker)} className="absolute -bottom-1 -right-1 text-[9px] text-rose-300" aria-label="Remove sticker">
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    </div>
+                  ) : (
+                    <div className="col-span-5 space-y-2 text-center text-xs text-white/70">
+                      <p>{stickers.length ? `No ${stickerCategory} stickers yet.` : 'No stickers available yet.'}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <input
+              value={msg}
+              onChange={(e) => setMsg(e.target.value)}
+              className="theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-3 text-base outline-none placeholder:opacity-60 sm:text-sm"
+              placeholder={selectedChat ? `Message ${selectedChat.name || selectedChat.username}...` : 'Choose a conversation first'}
+              disabled={!selectedChat || isSending}
+            />
             <button
               type="button"
               title="Attach images, audio, video, or PDF files (up to 50 MB each)"
@@ -856,13 +1076,6 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 </button>
               </div>
             )}
-            <input
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-              className="theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-3 text-base outline-none placeholder:opacity-60 sm:text-sm"
-              placeholder={selectedChat ? `Message ${selectedChat.name || selectedChat.username}...` : 'Choose a conversation first'}
-              disabled={!selectedChat || isSending}
-            />
             <button
               className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"

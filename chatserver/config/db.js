@@ -135,6 +135,22 @@ const connectDB = async () => {
         CONSTRAINT messages_receiver_fk FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB
     `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS stickers (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT UNSIGNED NULL,
+        name VARCHAR(100) NOT NULL,
+        image_url VARCHAR(1000) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB
+    `);
+    const [stickerOwnerColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'stickers' AND column_name = 'owner_id'`
+    );
+    if (!stickerOwnerColumn[0].count) {
+      await connection.query("ALTER TABLE stickers ADD COLUMN owner_id INT UNSIGNED NULL");
+    }
     const [messageDeletedColumn] = await connection.execute(
       `SELECT COUNT(*) AS count FROM information_schema.columns
          WHERE table_schema = DATABASE() AND table_name = 'messages' AND column_name = 'is_deleted'`
@@ -155,6 +171,13 @@ const connectDB = async () => {
     );
     if (!messageReplyColumn[0].count) {
       await connection.query("ALTER TABLE messages ADD COLUMN reply_to_id BIGINT UNSIGNED NULL");
+    }
+    const [messageStickerColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'messages' AND column_name = 'sticker_id'`
+    );
+    if (!messageStickerColumn[0].count) {
+      await connection.query("ALTER TABLE messages ADD COLUMN sticker_id INT UNSIGNED NULL");
     }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS chat_groups (
@@ -228,6 +251,13 @@ const connectDB = async () => {
     );
     if (!groupMessageDeletedColumn[0].count) {
         await connection.query("ALTER TABLE group_messages ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE");
+    }
+    const [groupStickerColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'group_messages' AND column_name = 'sticker_id'`
+    );
+    if (!groupStickerColumn[0].count) {
+      await connection.query("ALTER TABLE group_messages ADD COLUMN sticker_id INT UNSIGNED NULL");
     }
     const [groupMessageAttachmentsColumn] = await connection.execute(
         `SELECT COUNT(*) AS count FROM information_schema.columns

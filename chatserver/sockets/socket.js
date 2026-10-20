@@ -91,11 +91,12 @@ const initSocket = (httpServer) => {
         const messagePayload = payload || {};
         const { receiver, content } = messagePayload;
         const replyToId = Number(messagePayload.replyToId);
+        const stickerId = Number(messagePayload.stickerId);
         const attachments = validateAttachments(messagePayload.attachments, socket.userId);
         const receiverId = Number(receiver);
         if (!Number.isSafeInteger(receiverId) || receiverId < 1
           || attachments === null
-          || (typeof content !== "string" || !content.trim()) && !attachments.length) {
+          || (typeof content !== "string" || !content.trim()) && !attachments.length && !(Number.isSafeInteger(stickerId) && stickerId > 0)) {
           return socket.emit("message-error", { message: "A recipient and message are required." });
         }
         const [recipients] = await pool.execute(
@@ -115,19 +116,27 @@ const initSocket = (httpServer) => {
         if (messagePayload.replyToId !== undefined && !replied.length) {
           return socket.emit("message-error", { message: "The message being replied to was not found." });
         }
+        const [sticker] = Number.isSafeInteger(stickerId) && stickerId > 0
+          ? await pool.execute("SELECT id FROM stickers WHERE id = ?", [stickerId])
+          : [[]];
+        if (messagePayload.stickerId !== undefined && !sticker.length) {
+          return socket.emit("message-error", { message: "That sticker is not available." });
+        }
         const [result] = await pool.execute(
-          "INSERT INTO messages (sender_id, receiver_id, content, attachments, reply_to_id) VALUES (?, ?, ?, ?, ?)",
-          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null]
+          "INSERT INTO messages (sender_id, receiver_id, content, attachments, reply_to_id, sticker_id) VALUES (?, ?, ?, ?, ?, ?)",
+          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null]
         );
         const [rows] = await pool.execute(
           `SELECT messages.id AS _id, messages.sender_id AS sender, messages.receiver_id AS receiver,
                   messages.content, messages.attachments, messages.reply_to_id AS replyToId,
+                  messages.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
                   reply_user.username AS replySenderName,
                   CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
                   messages.created_at AS timestamp
            FROM messages
            LEFT JOIN messages reply_message ON reply_message.id = messages.reply_to_id
            LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+           LEFT JOIN stickers ON stickers.id = messages.sticker_id
            WHERE messages.id = ?`,
           [result.insertId]
         );
@@ -163,10 +172,11 @@ const initSocket = (httpServer) => {
       const messagePayload = payload || {};
       const { groupId, content } = messagePayload;
       const replyToId = Number(messagePayload.replyToId);
+      const stickerId = Number(messagePayload.stickerId);
       const attachments = validateAttachments(messagePayload.attachments, socket.userId);
       const id = Number(groupId);
       if (!Number.isSafeInteger(id) || id < 1 || attachments === null
-        || (typeof content !== "string" || !content.trim()) && !attachments.length) {
+        || (typeof content !== "string" || !content.trim()) && !attachments.length && !(Number.isSafeInteger(stickerId) && stickerId > 0)) {
         return socket.emit("message-error", { message: "A group and message are required." });
       }
       try {
@@ -183,13 +193,20 @@ const initSocket = (httpServer) => {
         if (messagePayload.replyToId !== undefined && !replied.length) {
           return socket.emit("message-error", { message: "The message being replied to was not found." });
         }
+        const [sticker] = Number.isSafeInteger(stickerId) && stickerId > 0
+          ? await pool.execute("SELECT id FROM stickers WHERE id = ?", [stickerId])
+          : [[]];
+        if (messagePayload.stickerId !== undefined && !sticker.length) {
+          return socket.emit("message-error", { message: "That sticker is not available." });
+        }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, sender_id, content, attachments, reply_to_id) VALUES (?, ?, ?, ?, ?)",
-          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null]
+          "INSERT INTO group_messages (group_id, sender_id, content, attachments, reply_to_id, sticker_id) VALUES (?, ?, ?, ?, ?, ?)",
+          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null]
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
                   u.username AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
+                  gm.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
                   reply_user.username AS replySenderName,
                   CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
                   gm.is_deleted AS isDeleted,
@@ -197,6 +214,7 @@ const initSocket = (httpServer) => {
            FROM group_messages gm JOIN users u ON u.id = gm.sender_id
            LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
            LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+           LEFT JOIN stickers ON stickers.id = gm.sticker_id
            WHERE gm.id = ?`,
           [result.insertId]
         );

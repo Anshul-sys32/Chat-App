@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+
 const path = require("node:path");
 const {
 	register,
@@ -78,6 +79,104 @@ const getGroupRole = async (groupId, userId) => {
 };
 
 const validId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
+
+router.get("/stickers", protect, async (_req, res) => {
+	try {
+		const [stickers] = await pool.execute(
+			"SELECT id AS _id, owner_id AS ownerId, name, image_url AS imageUrl FROM stickers ORDER BY name, id"
+		);
+		res.json(stickers);
+	} catch (error) {
+		console.error("Fetch stickers error:", error);
+		res.status(500).json({ message: "Failed to load stickers." });
+	}
+});
+
+router.post("/stickers", protect, async (req, res) => {
+	const name = String(req.body.name || "").trim();
+	const imageUrl = String(req.body.imageUrl || "").trim();
+	if (!name || name.length > 100 || !/^https:\/\//i.test(imageUrl) || imageUrl.length > 1000) {
+		return res.status(400).json({ message: "Provide a name and a valid HTTPS sticker URL." });
+	}
+	try {
+		const [result] = await pool.execute("INSERT INTO stickers (owner_id, name, image_url) VALUES (?, ?, ?)", [req.user.id, name, imageUrl]);
+		res.status(201).json({ _id: result.insertId, ownerId: req.user.id, name, imageUrl });
+	} catch (error) {
+		console.error("Create user sticker error:", error);
+		res.status(500).json({ message: "Failed to add sticker." });
+	}
+});
+
+router.post("/stickers/upload", protect, (req, res, next) => {
+	upload.single("sticker")(req, res, async (error) => {
+		if (error) {
+			await removeUploadedFiles(req.file ? [req.file] : []);
+			return res.status(400).json({ message: error.message || "Could not upload sticker." });
+		}
+		next();
+	});
+}, async (req, res) => {
+	if (!req.file) return res.status(400).json({ message: "Choose a sticker image to upload." });
+	const name = String(req.body.name || "").trim();
+	if (!name || name.length > 100) {
+		await removeUploadedFiles([req.file]);
+		return res.status(400).json({ message: "Provide a sticker name." });
+	}
+	try {
+		const imageUrl = `/uploads/${req.file.filename}`;
+		const [result] = await pool.execute("INSERT INTO stickers (owner_id, name, image_url) VALUES (?, ?, ?)", [req.user.id, name, imageUrl]);
+		res.status(201).json({ _id: result.insertId, ownerId: req.user.id, name, imageUrl });
+	} catch (error) {
+		await removeUploadedFiles([req.file]);
+		console.error("Upload sticker error:", error);
+		res.status(500).json({ message: "Failed to save uploaded sticker." });
+	}
+});
+
+router.delete("/stickers/:stickerId", protect, async (req, res) => {
+	const stickerId = Number(req.params.stickerId);
+	if (!validId(stickerId)) return res.status(400).json({ message: "Invalid sticker id." });
+	try {
+		const [result] = await pool.execute(
+			"DELETE FROM stickers WHERE id = ? AND owner_id = ?",
+			[stickerId, req.user.id]
+		);
+		if (!result.affectedRows) return res.status(404).json({ message: "Sticker not found." });
+		res.status(204).end();
+	} catch (error) {
+		console.error("Delete user sticker error:", error);
+		res.status(500).json({ message: "Failed to remove sticker." });
+	}
+});
+
+router.post("/admin/stickers", protect, requireAdmin, async (req, res) => {
+	const name = String(req.body.name || "").trim();
+	const imageUrl = String(req.body.imageUrl || "").trim();
+	if (!name || name.length > 100 || !/^https:\/\//i.test(imageUrl) || imageUrl.length > 1000) {
+		return res.status(400).json({ message: "Provide a name and a valid HTTPS sticker URL." });
+	}
+	try {
+		const [result] = await pool.execute("INSERT INTO stickers (name, image_url) VALUES (?, ?)", [name, imageUrl]);
+		res.status(201).json({ _id: result.insertId, name, imageUrl });
+	} catch (error) {
+		console.error("Create sticker error:", error);
+		res.status(500).json({ message: "Failed to create sticker." });
+	}
+});
+
+router.delete("/admin/stickers/:stickerId", protect, requireAdmin, async (req, res) => {
+	const stickerId = Number(req.params.stickerId);
+	if (!Number.isSafeInteger(stickerId) || stickerId < 1) {
+		return res.status(400).json({ message: "Invalid sticker id." });
+	}
+	try {
+		await pool.execute("DELETE FROM stickers WHERE id = ?", [stickerId]);
+		res.status(204).end();
+	} catch (error) {
+		console.error("Delete sticker error:", error);
+		res.status(500).json({ message: "Failed to delete sticker." });
+	}
+});
 const canManageGroup = async (groupId, user) =>
 	user.role === "admin" || await getGroupRole(groupId, user.id) === "admin";
 const requireGroupAvatarAdmin = async (req, res, next) => {
@@ -566,12 +665,14 @@ router.get("/messages/:userId", protect, async (req, res) => {
 							CASE WHEN messages.is_deleted THEN 'This message was deleted' ELSE messages.content END AS content,
 							CASE WHEN messages.is_deleted THEN NULL ELSE messages.attachments END AS attachments,
 							messages.is_deleted AS isDeleted, messages.reply_to_id AS replyToId,
+							messages.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
 							reply_user.username AS replySenderName,
 							CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 							messages.created_at AS timestamp
 			 FROM messages
 			 LEFT JOIN messages reply_message ON reply_message.id = messages.reply_to_id
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+			 LEFT JOIN stickers ON stickers.id = messages.sticker_id
 			 WHERE ((messages.sender_id = ? AND messages.receiver_id = ?) OR (messages.sender_id = ? AND messages.receiver_id = ?))
 			   AND (? IS NULL OR messages.id < ?)
 			 ORDER BY messages.id DESC LIMIT ?`,
@@ -885,12 +986,14 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
+					gm.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
 					reply_user.username AS replySenderName,
 					CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 					gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
 			 LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+			 LEFT JOIN stickers ON stickers.id = gm.sticker_id
 			 WHERE gm.group_id = ? AND (? IS NULL OR gm.id < ?)
 			 ORDER BY gm.id DESC LIMIT ?`,
 			[groupId, beforeId, beforeId, limit + 1]
