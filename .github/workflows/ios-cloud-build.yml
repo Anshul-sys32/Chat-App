@@ -1,0 +1,67 @@
+name: iOS Cloud Build
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  simulator-build:
+    name: Build iOS Simulator App
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: chatapp
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: chatapp/package-lock.json
+
+      - name: Configure backend URL
+        env:
+          VITE_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+        run: |
+          if [[ ! "$VITE_SERVER_URL" =~ ^https:// ]]; then
+            echo "::error::Set the repository variable VITE_SERVER_URL to the HTTPS backend origin."
+            exit 1
+          fi
+          {
+            echo "VITE_API_URL=$VITE_SERVER_URL"
+            echo "VITE_SERVER_URL=$VITE_SERVER_URL"
+            echo "VITE_SOCKET_URL=$VITE_SERVER_URL"
+          } >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build web assets and sync Capacitor iOS
+        run: npm run ios:sync
+
+      - name: Resolve Xcode packages
+        run: xcodebuild -resolvePackageDependencies -project ios/App/App.xcodeproj -scheme App
+
+      - name: Build simulator app
+        run: >-
+          xcodebuild
+          -project ios/App/App.xcodeproj
+          -scheme App
+          -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath ios/App/DerivedData
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfang-ios-simulator-app
+          path: chatapp/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/App.app
+          if-no-files-found: error
+          retention-days: 7

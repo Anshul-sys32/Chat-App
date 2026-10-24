@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
@@ -66,6 +67,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [footerHeight, setFooterHeight] = useState(0);
   const [replyTo, setReplyTo] = useState(null);
   const [openMessageMenu, setOpenMessageMenu] = useState(null);
+  const messageMenuRef = React.useRef(null);
+  const messageMenuTriggerRef = React.useRef(null);
+  const [messageMenuPosition, setMessageMenuPosition] = useState(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [openBulkMenu, setOpenBulkMenu] = useState(false);
@@ -86,7 +90,89 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [recentStickerIds, setRecentStickerIds] = useState([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
   const replyDrag = React.useRef(null);
+  const suppressMessageClick = React.useRef(false);
   const [replySwipe, setReplySwipe] = useState({ messageId: null, offset: 0, dragging: false });
+
+  useEffect(() => () => {
+    if (replyDrag.current?.timer) window.clearTimeout(replyDrag.current.timer);
+  }, []);
+
+  const toggleMessageMenu = (event, messageId) => {
+    event.stopPropagation();
+    if (openMessageMenu === String(messageId)) {
+      setOpenMessageMenu(null);
+      setMessageMenuPosition(null);
+      messageMenuTriggerRef.current = null;
+      return;
+    }
+    messageMenuTriggerRef.current = event.currentTarget;
+    setOpenMessageMenu(String(messageId));
+  };
+
+  useLayoutEffect(() => {
+    if (!openMessageMenu || !messageMenuRef.current || !messageMenuTriggerRef.current) return undefined;
+    const menu = messageMenuRef.current;
+    const trigger = messageMenuTriggerRef.current;
+    const visualViewport = window.visualViewport;
+    const margin = 8;
+    const viewportLeft = visualViewport?.offsetLeft || 0;
+    const viewportTop = visualViewport?.offsetTop || 0;
+    const viewportWidth = visualViewport?.width || window.innerWidth;
+    const viewportHeight = visualViewport?.height || window.innerHeight;
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const maxWidth = Math.max(0, viewportWidth - margin * 2);
+    const maxHeight = Math.max(0, viewportHeight - margin * 2);
+    const width = Math.min(menuRect.width, maxWidth);
+    const height = Math.min(menuRect.height, maxHeight);
+    const left = Math.min(
+      Math.max(triggerRect.right - width, viewportLeft + margin),
+      viewportLeft + viewportWidth - width - margin,
+    );
+    const below = triggerRect.bottom + 4;
+    const above = triggerRect.top - height - 4;
+    const preferredTop = below + height <= viewportTop + viewportHeight - margin
+      ? below
+      : above;
+    const top = Math.min(
+      Math.max(preferredTop, viewportTop + margin),
+      viewportTop + viewportHeight - height - margin,
+    );
+    setMessageMenuPosition({ left, top, maxWidth, maxHeight });
+    return undefined;
+  }, [openMessageMenu]);
+
+  useEffect(() => {
+    if (!openMessageMenu) return undefined;
+    const messagesContainer = messagesContainerRef.current;
+    const dismissOutside = (event) => {
+      if (messageMenuRef.current?.contains(event.target)
+        || messageMenuTriggerRef.current?.contains(event.target)) return;
+      setOpenMessageMenu(null);
+      setMessageMenuPosition(null);
+      messageMenuTriggerRef.current = null;
+    };
+    const dismissOnEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      setOpenMessageMenu(null);
+      setMessageMenuPosition(null);
+      messageMenuTriggerRef.current = null;
+    };
+    document.addEventListener('pointerdown', dismissOutside, true);
+    document.addEventListener('keydown', dismissOnEscape);
+    messagesContainer?.addEventListener('scroll', dismissOutside, { passive: true });
+    window.visualViewport?.addEventListener('resize', dismissOutside, { passive: true });
+    window.visualViewport?.addEventListener('scroll', dismissOutside, { passive: true });
+    window.addEventListener('resize', dismissOutside, { passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside, true);
+      document.removeEventListener('keydown', dismissOnEscape);
+      messagesContainer?.removeEventListener('scroll', dismissOutside);
+      window.visualViewport?.removeEventListener('resize', dismissOutside);
+      window.visualViewport?.removeEventListener('scroll', dismissOutside);
+      window.removeEventListener('resize', dismissOutside);
+    };
+  }, [openMessageMenu]);
 
   const applyStickerCatalog = useCallback((catalog) => {
     setStickers(catalog.stickers);
@@ -167,21 +253,6 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       console.error('Failed to mark messages as read:', error);
     });
   }, [selectedChat?._id, selectedChat?.type]);
-
-  useEffect(() => {
-    const updateAppHeight = () => {
-      const height = window.visualViewport?.height || window.innerHeight;
-      document.documentElement.style.setProperty('--app-height', `${height}px`);
-    };
-    updateAppHeight();
-    window.addEventListener('resize', updateAppHeight);
-    window.visualViewport?.addEventListener('resize', updateAppHeight);
-    return () => {
-      window.removeEventListener('resize', updateAppHeight);
-      window.visualViewport?.removeEventListener('resize', updateAppHeight);
-      document.documentElement.style.removeProperty('--app-height');
-    };
-  }, []);
 
   useEffect(() => {
     const footer = footerRef.current;
@@ -703,8 +774,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setOpenMessageMenu(null);
   };
   const deleteSelectedMessages = async () => {
-    const deletable = selectedMessages.filter((message) => !message.isDeleted);
-    await Promise.all(deletable.map((message) => deleteMessage(message)));
+    await Promise.all(selectedMessages.map((message) => deleteMessage(message)));
     cancelSelection();
   };
   const forwardSelectedMessages = () => {
@@ -718,7 +788,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   };
 
   return (
-    <div style={{ height: 'var(--app-height, 100dvh)' }} className="theme-page flex h-screen w-screen overflow-hidden">
+    <div style={{ height: 'var(--app-height, 100dvh)', width: 'var(--app-width, 100vw)' }} className="theme-page flex h-screen w-screen overflow-hidden">
       <Sidebar
         isOpen={isSidebarOpen}
         toggleSidebar={toggleSidebar}
@@ -737,7 +807,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         className={`ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
       >
         {/* Header */}
-        <header className="theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 rounded-b-2xl border px-3 py-3 pl-16 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:px-6 sm:py-4">
+        <header className="theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 rounded-b-2xl border py-3 pl-[max(4rem,calc(3rem+env(safe-area-inset-left)))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:py-4 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))]">
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
@@ -823,7 +893,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           ref={messagesContainerRef}
           onScroll={handleMessagesScroll}
           style={{ paddingBottom: `${footerHeight + 16}px` }}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 sm:px-8 sm:py-6"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-6 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
           <div className="chat-content-panel glass-panel mx-auto flex min-h-full w-full max-w-5xl flex-col space-y-3 rounded-2xl p-3 sm:p-5">
             {!selectedChat && <div className="flex h-full min-h-[55vh] flex-col items-center justify-center text-center">
@@ -852,17 +922,34 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {selectedChat && messages.map((m) => (
               <div
                 key={m._id}
-                className={`relative flex w-full min-w-0 touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'}`}
+                className={`message-row relative flex w-full min-w-0 touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'} ${highlightedMessageId === String(m._id) ? 'message-reply-highlight' : ''}`}
                 style={{
                   transform: `translate3d(${replySwipe.messageId === String(m._id) ? replySwipe.offset : 0}px, 0, 0)`,
                   transition: replySwipe.messageId === String(m._id) && replySwipe.dragging ? 'none' : 'transform 180ms ease-out',
                 }}
-                onClick={() => isSelectionMode && toggleMessageSelection(m._id)}
+                onClick={() => {
+                  if (suppressMessageClick.current) {
+                    suppressMessageClick.current = false;
+                    return;
+                  }
+                  if (isSelectionMode) toggleMessageSelection(m._id);
+                }}
                 onPointerDown={(event) => {
                   if (isSelectionMode) return;
                   if (event.pointerType === 'mouse') return;
-                  replyDrag.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
-                  setReplySwipe({ messageId: String(m._id), offset: 0, dragging: true });
+                  if (replyDrag.current?.timer) window.clearTimeout(replyDrag.current.timer);
+                  const gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, timer: null };
+                  gesture.timer = window.setTimeout(() => {
+                    if (replyDrag.current !== gesture) return;
+                    replyDrag.current = null;
+                    suppressMessageClick.current = true;
+                    setIsSelectionMode(true);
+                    setSelectedMessageIds([String(m._id)]);
+                    setOpenMessageMenu(null);
+                    setOpenBulkMenu(false);
+                    setReplySwipe({ messageId: String(m._id), offset: 0, dragging: false });
+                  }, 500);
+                  replyDrag.current = gesture;
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }}
                 onPointerMove={(event) => {
@@ -871,6 +958,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   const signedDeltaX = event.clientX - start.x;
                   const deltaX = Math.abs(signedDeltaX);
                   const deltaY = Math.abs(event.clientY - start.y);
+                  if (deltaX > 12 || deltaY > 12) {
+                    start.moved = true;
+                    if (start.timer) {
+                      window.clearTimeout(start.timer);
+                      start.timer = null;
+                    }
+                  }
                   if (deltaX > 12 && deltaX > deltaY) {
                     event.preventDefault();
                     setReplySwipe({ messageId: String(m._id), offset: Math.max(-88, Math.min(88, signedDeltaX)), dragging: true });
@@ -879,9 +973,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 onPointerUp={(event) => {
                   const start = replyDrag.current;
                   replyDrag.current = null;
+                  if (start?.timer) window.clearTimeout(start.timer);
                   const deltaX = start ? event.clientX - start.x : 0;
                   const deltaY = start ? event.clientY - start.y : 0;
-                  if (!isSelectionMode && Math.abs(deltaX) >= 70 && Math.abs(deltaX) > Math.abs(deltaY)) {
+                  if (!isSelectionMode && start?.moved && Math.abs(deltaX) >= 70 && Math.abs(deltaX) > Math.abs(deltaY)) {
                     const replied = messages.find((candidate) => String(candidate._id) === String(m._id));
                     if (replied && !replied.isDeleted) setReplyTo(replied);
                   }
@@ -889,6 +984,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
                 }}
                 onPointerCancel={() => {
+                  if (replyDrag.current?.timer) window.clearTimeout(replyDrag.current.timer);
                   replyDrag.current = null;
                   setReplySwipe({ messageId: String(m._id), offset: 0, dragging: false });
                 }}
@@ -898,14 +994,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   className={`relative max-w-[min(82%,34rem)] rounded-2xl px-4 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
                     ? 'chat-bubble-own rounded-br-sm'
                     : 'chat-bubble-peer rounded-bl-sm'
-                    } ${highlightedMessageId === String(m._id) ? 'message-reply-highlight' : ''}`}
+                    }`}
                 >
                   <button
                     type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setOpenMessageMenu((current) => current === String(m._id) ? null : String(m._id));
-                    }}
+                    onClick={(event) => toggleMessageMenu(event, m._id)}
                     onPointerDown={(event) => event.stopPropagation()}
                     aria-label="Message actions"
                     title="Message actions"
@@ -913,8 +1006,22 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   >
                     <FaEllipsisV size={12} />
                   </button>
-                  {openMessageMenu === String(m._id) && (
-                    <div onClick={(event) => event.stopPropagation()} className={`absolute top-9 z-20 min-w-32 rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl ${String(m.sender) === String(user?._id) ? 'right-0' : 'left-full ml-2'}`}>
+                  {openMessageMenu === String(m._id) && createPortal(
+                    <div
+                      ref={messageMenuRef}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      style={{
+                        position: 'fixed',
+                        left: messageMenuPosition?.left ?? 0,
+                        top: messageMenuPosition?.top ?? 0,
+                        minWidth: messageMenuPosition ? Math.min(128, messageMenuPosition.maxWidth) : 'min(8rem, calc(100vw - 16px))',
+                        maxWidth: messageMenuPosition?.maxWidth ?? 'calc(100vw - 16px)',
+                        maxHeight: messageMenuPosition?.maxHeight ?? 'calc(100dvh - 16px)',
+                        visibility: messageMenuPosition ? 'visible' : 'hidden',
+                      }}
+                      className="z-[100] overflow-y-auto rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl"
+                    >
                       {!m.isDeleted && (
                         <button type="button" onClick={() => { setReplyTo(m); setOpenMessageMenu(null); }} className="block w-full rounded px-2 py-1.5 text-left hover:bg-white/10">
                           Reply
@@ -929,12 +1036,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       <button type="button" onClick={() => copyMessage(m)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-white/10">
                         <FaCopy /> Copy
                       </button>
-                      {!m.isDeleted && (
-                        <button type="button" onClick={() => { setOpenMessageMenu(null); deleteMessage(m); }} className="block w-full rounded px-2 py-1.5 text-left text-rose-300 hover:bg-white/10">
-                          {String(m.sender) === String(user?._id) ? 'Delete for everyone' : 'Delete for me'}
-                        </button>
-                      )}
-                    </div>
+                      <button type="button" onClick={() => { setOpenMessageMenu(null); deleteMessage(m); }} className="block w-full rounded px-2 py-1.5 text-left text-rose-300 hover:bg-white/10">
+                        {m.isDeleted
+                          ? 'Remove from chat'
+                          : String(m.sender) === String(user?._id) ? 'Delete for everyone' : 'Delete for me'}
+                      </button>
+                    </div>,
+                    document.body,
                   )}
                   {selectedMessageIds.includes(String(m._id)) && (
                     <span className="absolute -left-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-teal-400 text-[10px] font-bold text-slate-950">✓</span>
@@ -1035,7 +1143,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         {/* Footer */}
         <footer
           ref={footerRef}
-          className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border px-[max(0.75rem,env(safe-area-inset-left))] pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:px-8 sm:py-4"
+          className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border pt-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:py-4 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
           {selectedChat && !socketConnected && (
             <p role="status" className="mx-auto mb-2 max-w-4xl text-xs text-amber-200">

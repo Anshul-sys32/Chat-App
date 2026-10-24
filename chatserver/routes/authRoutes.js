@@ -732,7 +732,7 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 	if (!validId(messageId)) return res.status(400).json({ message: "Invalid message id." });
 	try {
 		const [found] = await pool.execute(
-			"SELECT id, sender_id AS sender, receiver_id AS receiver FROM messages WHERE id = ? LIMIT 1",
+			"SELECT id, sender_id AS sender, receiver_id AS receiver, is_deleted AS isDeleted FROM messages WHERE id = ? LIMIT 1",
 			[messageId]
 		);
 		const original = found[0];
@@ -740,7 +740,7 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 		if (Number(original.sender) !== Number(req.user.id) && Number(original.receiver) !== Number(req.user.id)) {
 			return res.status(403).json({ message: "You are not part of this conversation." });
 		}
-		if (Number(original.sender) !== Number(req.user.id)) {
+		if (Number(original.sender) !== Number(req.user.id) || original.isDeleted) {
 			await pool.execute("INSERT IGNORE INTO direct_message_hidden_for (message_id, user_id) VALUES (?, ?)", [messageId, req.user.id]);
 			const hidden = { _id: messageId, receiver: Number(original.receiver), hiddenForMe: true };
 			req.app.get("io")?.to(`user:${req.user.id}`).emit("message-hidden-for-user", hidden);
@@ -1044,13 +1044,13 @@ router.delete("/groups/:groupId/messages/:messageId", protect, async (req, res) 
 	}
 	try {
 		const [messages] = await pool.execute(
-			"SELECT sender_id AS sender FROM group_messages WHERE id = ? AND group_id = ?",
+			"SELECT sender_id AS sender, is_deleted AS isDeleted FROM group_messages WHERE id = ? AND group_id = ?",
 			[messageId, groupId]
 		);
 		const message = messages[0];
 		if (!message) return res.status(404).json({ message: "Message not found." });
 		const isMember = req.user.role === "admin" || Boolean(await getGroupRole(groupId, req.user.id));
-		if (Number(message.sender) !== Number(req.user.id)) {
+		if (Number(message.sender) !== Number(req.user.id) || message.isDeleted) {
 			if (!isMember) return res.status(403).json({ message: "You are not a member of this group." });
 			await pool.execute("INSERT IGNORE INTO group_message_hidden_for (message_id, user_id) VALUES (?, ?)", [messageId, req.user.id]);
 			const hidden = { _id: messageId, groupId, hiddenForMe: true };

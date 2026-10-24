@@ -283,7 +283,7 @@ function UserForm({ onAuthenticated }) {
 
   return (
     
-    <div className="theme-auth-page flex min-h-screen items-center justify-center px-4 py-4">
+    <div className="theme-auth-page flex min-h-[var(--app-height,100dvh)] items-center justify-center px-[max(1rem,env(safe-area-inset-left))] py-[max(1rem,env(safe-area-inset-top))] pr-[max(1rem,env(safe-area-inset-right))] pb-[max(1rem,env(safe-area-inset-bottom))]">
       <div
         className="theme-auth-card relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-x-hidden overflow-y-auto rounded-3xl p-6 shadow-2xl backdrop-blur transition-all duration-[600ms]"
         style={{ height: isSignUp ? 550 : 600 }}

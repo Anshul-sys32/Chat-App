@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
 @media (min-width: 768px) {
   html,
   body,
@@ -43,7 +57,7 @@
   --theme-control: #171a1b;
   position: relative;
   isolation: isolate;
-  min-height: 100vh;
+  min-height: var(--app-height, 100dvh);
   color: var(--theme-text);
   background-color: var(--theme-page);
   background-attachment: fixed;
@@ -158,6 +172,10 @@
   background: #f7fbfa;
 }
 
+.message-row {
+  isolation: isolate;
+}
+
 .message-reply-highlight {
   position: relative;
   z-index: 1;
@@ -167,7 +185,7 @@
   position: absolute;
   z-index: -1;
   inset: 0;
-  border-radius: inherit;
+  border-radius: 0.75rem;
   background: #fff;
   content: "";
   pointer-events: none;

@@ -8,12 +8,15 @@
     "build": "vite build",
     "android:sync": "npm run build && cap sync android",
     "android:open": "cap open android",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:open": "cap open ios",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",
     "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
     "axios": "^1.8.4",
     "dotenv": "^16.5.0",
     "react": "^19.0.0",

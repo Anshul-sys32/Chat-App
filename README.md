@@ -327,6 +327,23 @@ Before building, configure `chatapp/.env` with the appropriate API and Socket.IO
 
 Camera and microphone features require permissions and a secure browser context or suitable native configuration. Google sign-in may also require a dedicated native OAuth flow for reliable operation inside an embedded WebView.
 
+## 🍎 iOS Application
+
+The same React client is packaged for iPhone and iPad with Capacitor. The generated Xcode project is in `chatapp/ios` and requires iOS 15 or newer.
+
+On macOS with Xcode installed, configure `chatapp/.env` with the public HTTPS backend origin, then run:
+
+```bash
+cd chatapp
+npm ci
+npm run ios:sync
+npm run ios:open
+```
+
+For a cloud Mac simulator build, run the **iOS Cloud Build** GitHub Actions workflow manually. Set the repository variable `VITE_SERVER_URL` to the HTTPS backend origin first. The workflow uploads an unsigned iOS Simulator `.app`; installing on a physical device or distributing through TestFlight additionally requires Apple signing certificates and provisioning profiles.
+
+The app measures the visible viewport separately from safe-area insets: keyboard, browser-chrome, and orientation changes update the viewport height, while CSS safe-area padding keeps content clear of notches and the home indicator without subtracting those insets twice.
+
 ---
 
 ## 🌐 Deployment
