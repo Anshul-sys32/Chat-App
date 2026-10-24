@@ -681,16 +681,19 @@ router.get("/messages/:userId", protect, async (req, res) => {
 							messages.is_deleted AS isDeleted, messages.reply_to_id AS replyToId,
 							messages.sticker_id AS stickerId, COALESCE(messages.sticker_url, stickers.image_url) AS stickerUrl,
 							reply_user.username AS replySenderName,
-							CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
+							CASE WHEN reply_hidden.message_id IS NOT NULL THEN 'Message unavailable'
+							     WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 							messages.created_at AS timestamp
 			 FROM messages
 			 LEFT JOIN messages reply_message ON reply_message.id = messages.reply_to_id
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+				 LEFT JOIN direct_message_hidden_for reply_hidden ON reply_hidden.message_id = reply_message.id AND reply_hidden.user_id = ?
 			 LEFT JOIN stickers ON stickers.id = messages.sticker_id
 			 WHERE ((messages.sender_id = ? AND messages.receiver_id = ?) OR (messages.sender_id = ? AND messages.receiver_id = ?))
+				   AND NOT EXISTS (SELECT 1 FROM direct_message_hidden_for hidden WHERE hidden.message_id = messages.id AND hidden.user_id = ?)
 			   AND (? IS NULL OR messages.id < ?)
 			 ORDER BY messages.id DESC LIMIT ?`,
-			[req.user.id, otherId, otherId, req.user.id, beforeId, beforeId, limit + 1]
+			[req.user.id, req.user.id, otherId, otherId, req.user.id, req.user.id, beforeId, beforeId, limit + 1]
 		);
 		const hasMore = rows.length > limit;
 		const messages = rows.slice(0, limit).reverse();
@@ -728,17 +731,26 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 	const messageId = Number(req.params.messageId);
 	if (!validId(messageId)) return res.status(400).json({ message: "Invalid message id." });
 	try {
-		const [result] = await pool.execute(
-			`UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted', attachments = NULL
-			 WHERE id = ? AND sender_id = ? AND is_deleted = FALSE`,
-			[messageId, req.user.id]
+		const [found] = await pool.execute(
+			"SELECT id, sender_id AS sender, receiver_id AS receiver FROM messages WHERE id = ? LIMIT 1",
+			[messageId]
 		);
-		if (!result.affectedRows) {
-			const [messages] = await pool.execute("SELECT id FROM messages WHERE id = ?", [messageId]);
-			return res.status(messages.length ? 403 : 404).json({
-				message: messages.length ? "You can only delete your own messages." : "Message not found.",
-			});
+		const original = found[0];
+		if (!original) return res.status(404).json({ message: "Message not found." });
+		if (Number(original.sender) !== Number(req.user.id) && Number(original.receiver) !== Number(req.user.id)) {
+			return res.status(403).json({ message: "You are not part of this conversation." });
 		}
+		if (Number(original.sender) !== Number(req.user.id)) {
+			await pool.execute("INSERT IGNORE INTO direct_message_hidden_for (message_id, user_id) VALUES (?, ?)", [messageId, req.user.id]);
+			const hidden = { _id: messageId, receiver: Number(original.receiver), hiddenForMe: true };
+			req.app.get("io")?.to(`user:${req.user.id}`).emit("message-hidden-for-user", hidden);
+			return res.json(hidden);
+		}
+		await pool.execute(
+			`UPDATE messages SET is_deleted = TRUE, content = 'This message was deleted', attachments = NULL
+			 WHERE id = ? AND is_deleted = FALSE`,
+			[messageId]
+		);
 		const [rows] = await pool.execute(
 			`SELECT id AS _id, sender_id AS sender, receiver_id AS receiver,
 			        content, NULL AS attachments, is_deleted AS isDeleted, reply_to_id AS replyToId, created_at AS timestamp
@@ -1002,15 +1014,19 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
 					gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
 					reply_user.username AS replySenderName,
-					CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
+					CASE WHEN reply_hidden.message_id IS NOT NULL THEN 'Message unavailable'
+					     WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 					gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
 			 LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
+				 LEFT JOIN group_message_hidden_for reply_hidden ON reply_hidden.message_id = reply_message.id AND reply_hidden.user_id = ?
 			 LEFT JOIN stickers ON stickers.id = gm.sticker_id
-			 WHERE gm.group_id = ? AND (? IS NULL OR gm.id < ?)
+				 WHERE gm.group_id = ?
+				   AND NOT EXISTS (SELECT 1 FROM group_message_hidden_for hidden WHERE hidden.message_id = gm.id AND hidden.user_id = ?)
+				   AND (? IS NULL OR gm.id < ?)
 			 ORDER BY gm.id DESC LIMIT ?`,
-			[groupId, beforeId, beforeId, limit + 1]
+			[req.user.id, groupId, req.user.id, beforeId, beforeId, limit + 1]
 		);
 		const hasMore = rows.length > limit;
 		const messages = rows.slice(0, limit).reverse();
@@ -1033,9 +1049,13 @@ router.delete("/groups/:groupId/messages/:messageId", protect, async (req, res) 
 		);
 		const message = messages[0];
 		if (!message) return res.status(404).json({ message: "Message not found." });
-		const isGroupAdmin = await canManageGroup(groupId, req.user);
-		if (Number(message.sender) !== Number(req.user.id) && !isGroupAdmin) {
-			return res.status(403).json({ message: "You can only delete your own messages." });
+		const isMember = req.user.role === "admin" || Boolean(await getGroupRole(groupId, req.user.id));
+		if (Number(message.sender) !== Number(req.user.id)) {
+			if (!isMember) return res.status(403).json({ message: "You are not a member of this group." });
+			await pool.execute("INSERT IGNORE INTO group_message_hidden_for (message_id, user_id) VALUES (?, ?)", [messageId, req.user.id]);
+			const hidden = { _id: messageId, groupId, hiddenForMe: true };
+			req.app.get("io")?.to(`user:${req.user.id}`).emit("message-hidden-for-user", hidden);
+			return res.json(hidden);
 		}
 		await pool.execute(
 			"UPDATE group_messages SET is_deleted = TRUE, content = 'This message was deleted', attachments = NULL WHERE id = ? AND is_deleted = FALSE",

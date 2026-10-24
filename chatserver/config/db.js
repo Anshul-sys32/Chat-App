@@ -136,6 +136,17 @@ const connectDB = async () => {
       ) ENGINE=InnoDB
     `);
     await connection.query(`
+      CREATE TABLE IF NOT EXISTS direct_message_hidden_for (
+        message_id BIGINT UNSIGNED NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        hidden_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        INDEX direct_message_hidden_user (user_id, message_id),
+        CONSTRAINT direct_message_hidden_message_fk FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+        CONSTRAINT direct_message_hidden_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    await connection.query(`
       CREATE TABLE IF NOT EXISTS sticker_categories (
         id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(60) NOT NULL,
@@ -276,6 +287,17 @@ const connectDB = async () => {
         INDEX group_messages_history (group_id, created_at, id),
         CONSTRAINT group_messages_group_fk FOREIGN KEY (group_id) REFERENCES chat_groups(id) ON DELETE CASCADE,
         CONSTRAINT group_messages_sender_fk FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS group_message_hidden_for (
+        message_id BIGINT UNSIGNED NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        hidden_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        INDEX group_message_hidden_user (user_id, message_id),
+        CONSTRAINT group_message_hidden_message_fk FOREIGN KEY (message_id) REFERENCES group_messages(id) ON DELETE CASCADE,
+        CONSTRAINT group_message_hidden_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) ENGINE=InnoDB
     `);
     await connection.query(`

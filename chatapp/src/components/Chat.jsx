@@ -86,6 +86,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [recentStickerIds, setRecentStickerIds] = useState([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
   const replyDrag = React.useRef(null);
+  const [replySwipe, setReplySwipe] = useState({ messageId: null, offset: 0, dragging: false });
 
   const applyStickerCatalog = useCallback((catalog) => {
     setStickers(catalog.stickers);
@@ -258,6 +259,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         String(message._id) === String(data._id) ? { ...message, ...data } : message
       ));
     };
+    const handleMessageHiddenForUser = (data) => {
+      const isGroup = selectedChatRef.current?.type === 'group';
+      if (isGroup) {
+        if (String(data.groupId) !== String(selectedChatRef.current?._id)) return;
+      } else if (data.groupId) {
+        return;
+      }
+      setMessages((previous) => previous.filter((message) => String(message._id) !== String(data._id)));
+      setSelectedMessageIds((previous) => previous.filter((id) => id !== String(data._id)));
+    };
     const handleRemovedFromGroup = ({ groupId }) => {
       if (selectedChatRef.current?.type !== 'group') return;
       if (String(groupId) === String(selectedChatRef.current?._id)) {
@@ -282,6 +293,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('group-message', handleGroupMessage);
     Socket.on('message-updated', handleMessageUpdated);
     Socket.on('group-message-updated', handleMessageUpdated);
+    Socket.on('message-hidden-for-user', handleMessageHiddenForUser);
     Socket.on('group-member-removed', handleRemovedFromGroup);
     Socket.on('profile-picture-updated', handleProfilePicture);
     Socket.on('group-picture-updated', handleGroupPicture);
@@ -293,6 +305,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('group-message', handleGroupMessage);
       Socket.off('message-updated', handleMessageUpdated);
       Socket.off('group-message-updated', handleMessageUpdated);
+      Socket.off('message-hidden-for-user', handleMessageHiddenForUser);
       Socket.off('group-member-removed', handleRemovedFromGroup);
       Socket.off('profile-picture-updated', handleProfilePicture);
       Socket.off('group-picture-updated', handleGroupPicture);
@@ -628,9 +641,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
         withCredentials: true,
       });
-      setMessages((previous) => previous.map((candidate) =>
-        String(candidate._id) === String(data._id) ? { ...candidate, ...data } : candidate
-      ));
+      if (data.hiddenForMe) {
+        setMessages((previous) => previous.filter((candidate) => String(candidate._id) !== String(data._id)));
+        setSelectedMessageIds((previous) => previous.filter((id) => id !== String(data._id)));
+      } else {
+        setMessages((previous) => previous.map((candidate) =>
+          String(candidate._id) === String(data._id) ? { ...candidate, ...data } : candidate
+        ));
+      }
     } catch (error) {
       window.alert(error.response?.data?.message || 'Could not delete this message.');
     }
@@ -685,7 +703,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setOpenMessageMenu(null);
   };
   const deleteSelectedMessages = async () => {
-    const deletable = selectedMessages.filter((message) => String(message.sender) === String(user?._id) && !message.isDeleted);
+    const deletable = selectedMessages.filter((message) => !message.isDeleted);
     await Promise.all(deletable.map((message) => deleteMessage(message)));
     cancelSelection();
   };
@@ -834,43 +852,53 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {selectedChat && messages.map((m) => (
               <div
                 key={m._id}
-                className={`relative flex touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'}`}
+                className={`relative flex w-full min-w-0 touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'}`}
+                style={{
+                  transform: `translate3d(${replySwipe.messageId === String(m._id) ? replySwipe.offset : 0}px, 0, 0)`,
+                  transition: replySwipe.messageId === String(m._id) && replySwipe.dragging ? 'none' : 'transform 180ms ease-out',
+                }}
                 onClick={() => isSelectionMode && toggleMessageSelection(m._id)}
                 onPointerDown={(event) => {
                   if (isSelectionMode) return;
                   if (event.pointerType === 'mouse') return;
                   replyDrag.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+                  setReplySwipe({ messageId: String(m._id), offset: 0, dragging: true });
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }}
                 onPointerMove={(event) => {
                   const start = replyDrag.current;
                   if (!start || isSelectionMode) return;
-                  const deltaX = Math.abs(event.clientX - start.x);
+                  const signedDeltaX = event.clientX - start.x;
+                  const deltaX = Math.abs(signedDeltaX);
                   const deltaY = Math.abs(event.clientY - start.y);
-                  if (deltaX > 12 && deltaX > deltaY) event.preventDefault();
+                  if (deltaX > 12 && deltaX > deltaY) {
+                    event.preventDefault();
+                    setReplySwipe({ messageId: String(m._id), offset: Math.max(-88, Math.min(88, signedDeltaX)), dragging: true });
+                  }
                 }}
                 onPointerUp={(event) => {
-                  if (isSelectionMode) return;
                   const start = replyDrag.current;
                   replyDrag.current = null;
-                  if (!start || event.clientX - start.x < 70
-                    || Math.abs(event.clientX - start.x) <= Math.abs(event.clientY - start.y)) return;
-                  const replied = messages.find((candidate) => String(candidate._id) === String(m._id));
-                  if (event.clientX - start.x > 70) setReplyTo(replied);
-                  event.currentTarget.releasePointerCapture(event.pointerId);
+                  const deltaX = start ? event.clientX - start.x : 0;
+                  const deltaY = start ? event.clientY - start.y : 0;
+                  if (!isSelectionMode && Math.abs(deltaX) >= 70 && Math.abs(deltaX) > Math.abs(deltaY)) {
+                    const replied = messages.find((candidate) => String(candidate._id) === String(m._id));
+                    if (replied && !replied.isDeleted) setReplyTo(replied);
+                  }
+                  setReplySwipe({ messageId: String(m._id), offset: 0, dragging: false });
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
                 }}
-                onPointerCancel={() => { replyDrag.current = null; }}
+                onPointerCancel={() => {
+                  replyDrag.current = null;
+                  setReplySwipe({ messageId: String(m._id), offset: 0, dragging: false });
+                }}
               >
                 <div
                   data-message-id={m._id}
                   className={`relative max-w-[min(82%,34rem)] rounded-2xl px-4 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
                     ? 'chat-bubble-own rounded-br-sm'
                     : 'chat-bubble-peer rounded-bl-sm'
-                    } ${highlightedMessageId === String(m._id)
-                      ? String(m.sender) === String(user?._id)
-                        ? 'message-reply-highlight message-reply-highlight-own'
-                        : 'message-reply-highlight message-reply-highlight-peer'
-                      : ''}`}
+                    } ${highlightedMessageId === String(m._id) ? 'message-reply-highlight' : ''}`}
                 >
                   <button
                     type="button"
@@ -901,9 +929,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       <button type="button" onClick={() => copyMessage(m)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-white/10">
                         <FaCopy /> Copy
                       </button>
-                      {String(m.sender) === String(user?._id) && !m.isDeleted && (
+                      {!m.isDeleted && (
                         <button type="button" onClick={() => { setOpenMessageMenu(null); deleteMessage(m); }} className="block w-full rounded px-2 py-1.5 text-left text-rose-300 hover:bg-white/10">
-                          Delete
+                          {String(m.sender) === String(user?._id) ? 'Delete for everyone' : 'Delete for me'}
                         </button>
                       )}
                     </div>
