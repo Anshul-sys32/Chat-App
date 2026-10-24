@@ -1,163 +1,294 @@
-A direct-message chat app built with Vite, React, Express, Socket.IO, and MySQL.
+# NFaNG — Full-Stack Real-Time Chat Application 💬
 
-## Requirements
+**A modern messaging platform with real-time communication, group conversations, audio/video calling, and an Android client.**
 
-- Node.js 18 or newer
-- MySQL 8 or compatible MySQL server
+NFaNG is a full-stack chat application built with React, Vite, Express, Socket.IO, and MySQL. It brings together direct messaging, group conversations, media sharing, account management, and real-time communication in a responsive web interface with Android support.
 
-## MySQL setup
+The project explores full-stack application development, real-time event-driven communication, authentication, database design, and cross-platform deployment.
 
-Create the `chatapp` database and configure `chatserver/.env` with a MySQL user and password. The server creates the `users`, `messages`, `chat_groups`, and `group_members` tables at startup. Registration creates active standard accounts.
+<p align="center">
+  <a href="https://github.com/Anshul-sys32/Chat-App">
+    <strong>Explore the Repository</strong>
+  </a>
+</p>
 
-The checked-out `chatserver/.env` defaults to `localhost:3306`, user `root`, and database `chatapp`. Set `DB_PASSWORD` to the password for your local MySQL user. New registrations require email verification before the account is created and submitted for administrator approval.
+---
 
-Configure SMTP delivery in `chatserver/.env` for signup OTPs:
+## ✨ Features
+
+### 💬 Messaging and Conversations
+
+- **Real-time messaging** with Socket.IO.
+- **Direct messages** for one-to-one conversations.
+- **Group chats** with group membership and role management.
+- **Message replies** with quoted sender information and previews.
+- **Paginated conversation history** for navigating older messages.
+- **Unread message counts** maintained across conversations.
+- **Online user discovery** with separate local and global user lists.
+- **Persistent notifications** that remain available after reconnecting.
+
+### 📎 Media Sharing
+
+- Support for image, video, audio, and PDF attachments.
+- Multiple attachments per message, subject to upload limits.
+- Profile picture uploads and group images.
+- Custom stickers managed through the administration interface.
+- Persistent attachment storage on the backend.
+
+### 📞 Audio and Video Calling
+
+- Audio and video calling capabilities.
+- Browser camera and microphone access.
+- Audio output device selection where supported.
+- Call history with options to manage stored call records.
+- Real-time signaling through the application server.
+
+*Calling functionality depends on browser permissions, secure-context requirements, network connectivity, and server configuration.*
+
+### 🔐 Authentication and Account Security
+
+- Account registration and login.
+- Email verification using one-time passwords (OTPs).
+- Password recovery through email verification.
+- Google sign-in integration.
+- JWT-based authentication and server-side account checks.
+- Password hashing before database storage.
+- Administrator approval for newly registered accounts.
+
+### 🛡️ Administration
+
+- Approve, suspend, reactivate, and manage user accounts.
+- Assign user roles and manage group membership.
+- Search for users and manage account information.
+- Send persistent notifications to selected users or active users.
+- Manage the custom stickers available in conversations.
+- Configure rotating messages displayed on the sign-in page.
+
+### 🎨 User Experience
+
+- Responsive React-based interface.
+- Dark and light themes.
+- Persistent theme selection.
+- User profiles with editable account information.
+- Android packaging through Capacitor.
+
+---
+
+## 🛠️ Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| React | Frontend user interface |
+| Vite | Frontend development server and build tooling |
+| Node.js | JavaScript runtime |
+| Express | Backend HTTP server and API |
+| Socket.IO | Real-time messaging and event communication |
+| MySQL | Persistent relational data storage |
+| JWT | Authentication and access verification |
+| Google Identity Services | Google sign-in |
+| SMTP | Email verification and password recovery |
+| Capacitor | Android application packaging |
+| Caddy | HTTPS and reverse-proxy deployment |
+| CSS | Interface styling and themes |
+
+---
+
+## 🏗️ Architecture
+
+The application separates the frontend client from the backend server. The frontend communicates with the backend through HTTP APIs and Socket.IO connections, while MySQL stores persistent application data.
+
+```mermaid
+flowchart TD
+    U[User] --> W[React + Vite Client]
+    U --> A[Android App via Capacitor]
+
+    W --> API[Express API]
+    A --> API
+
+    W <--> S[Socket.IO]
+    A <--> S
+
+    API --> AUTH[Authentication and Authorization]
+    API --> DB[(MySQL Database)]
+    API --> FILES[Attachment Storage]
+
+    S --> MSG[Real-Time Messaging]
+    S --> CALL[Call Signaling]
+
+    MSG --> DB
+    AUTH --> DB
+    CALL --> W
+    CALL --> A
+```
+
+### Communication flow
+
+1. The user interacts with the React interface or Android client.
+2. HTTP requests handle authentication and application operations.
+3. Socket.IO delivers real-time events between connected clients.
+4. Express handles backend logic and validates authenticated requests.
+5. MySQL stores users, messages, groups, and related application records.
+6. The backend manages uploaded attachments and call-related operations.
+
+The diagram represents the application's main logical components rather than every internal implementation detail.
+
+---
+
+## 📁 Project Structure
+
+```text
+Chat-App/
+├── chatapp/                 # React + Vite frontend
+│   ├── src/                 # Application source code
+│   ├── public/              # Static assets
+│   ├── android/             # Native Android project
+│   ├── package.json         # Frontend dependencies and scripts
+│   └── .env                 # Local frontend configuration
+│
+├── chatserver/              # Express + Socket.IO backend
+│   ├── server.js            # Server entry point
+│   ├── uploads/             # Uploaded attachments
+│   ├── package.json         # Backend dependencies and scripts
+│   └── .env                 # Database and server configuration
+│
+├── Caddyfile                # Reverse-proxy configuration
+├── LICENSE                  # MIT License
+├── .gitignore
+└── README.md
+```
+
+The exact contents of individual directories may evolve as the project develops.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+Install the following before starting the application:
+
+- Node.js 18 or newer.
+- npm.
+- MySQL 8 or a compatible MySQL server.
+- Git.
+- A modern browser.
+
+Email verification and password recovery require working SMTP credentials. Google sign-in requires a configured Google OAuth client.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/Anshul-sys32/Chat-App.git
+cd Chat-App
+```
+
+### 2. Configure the database
+
+Create a MySQL database:
+
+```sql
+CREATE DATABASE chatapp;
+```
+
+Configure the backend environment in `chatserver/.env`:
 
 ```dotenv
+PORT=5175
+NODE_ENV=development
+
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=your_mysql_password
+DB_NAME=chatapp
+
+JWT_SECRET=your_long_random_secret
+GOOGLE_CLIENT_ID=your_google_oauth_client_id
+
+FRONTEND_ORIGIN=http://localhost:5174
+
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=your-smtp-user
-SMTP_PASS=your-smtp-password
+SMTP_USER=your_smtp_username
+SMTP_PASS=your_smtp_password
 MAIL_FROM=NFaNG <no-reply@example.com>
 ```
 
-`SMTP_SECURE=true` is typically used with port 465. The six-digit OTP expires
-after 10 minutes, allows five failed attempts, and can be resent no more than
-once per minute.
+Use the environment variable names expected by the checked-out backend version. Configure a strong, private JWT signing secret and valid credentials for your environment.
 
-The login page also provides **Forgot password?**. It sends a separate
-six-digit reset OTP, expires it after 10 minutes, limits failed attempts, and
-allows the user to set a new password after verification.
+The server initializes the required database tables at startup.
 
-Set `chatapp/.env` to the server URL for `VITE_API_URL`, `VITE_SERVER_URL`, and `VITE_SOCKET_URL`. These URLs must be reachable from the browser; `localhost` and a private LAN address refer to the phone itself when the app is opened on Android.
+**Security:** Never commit `.env` files, passwords, private signing keys, or OAuth secrets to GitHub.
 
-### Test from Android with VS Code port forwarding
+### 3. Install and start the backend
 
-Forward both the Vite port (`5174`) and API server port (`5175`) in VS Code. Use the HTTPS forwarded address for port `5175` in the frontend configuration:
+Open a terminal in the repository root:
 
-```dotenv
-VITE_API_URL=https://<your-5175-forwarded-address>
-VITE_SERVER_URL=https://<your-5175-forwarded-address>
-VITE_SOCKET_URL=https://<your-5175-forwarded-address>
-```
-
-For example, if VS Code gives port `5175` the address `https://example-5175.inc1.devtunnels.ms`, use that address for all three values. Restart Vite after changing its environment file. Ensure both forwarded ports are accessible from the phone. The backend tunnel is needed for API requests and Socket.IO; forwarding only port `5174` is not enough. The server currently accepts requests from all origins; because credentialed browser requests cannot use the literal `*` CORS header, it reflects each request's origin.
-
-Video calls require a secure browser context. Use HTTPS when opening the app on Android or another device; an HTTP LAN address (such as `http://192.168...`) does not allow camera and microphone access. Localhost is permitted for development. The browser must also be granted camera and microphone permissions.
-
-The app provides matching dark and light themes. Switch themes from the sun/moon
-button in the chat sidebar; the selection is saved in the browser and also applies
-to the sign-in and administration pages.
-
-### Android app
-
-The React client is packaged as an Android app with Capacitor. Install Android
-Studio with Android SDK Platform 36 and configure `chatapp/.env` with the
-production HTTPS API and Socket.IO URLs before building; Android devices cannot
-reach a development machine through `localhost`.
-
-```sh
-cd chatapp
+```bash
+cd chatserver
 npm install
-npm run android:sync
-npm run android:open
+npm run dev
 ```
 
-In Android Studio, build and run the `app` configuration on an emulator or
-connected device. `npm run android:sync` builds the React app and copies its web
-assets into the native project. Camera and microphone permissions are declared
-for video/audio calls. The current Google sign-in uses browser-based Google
-Identity Services; Google may block this flow in embedded WebViews, so native
-Google sign-in needs a dedicated Android OAuth integration.
+The backend is configured to use port `5175` in the development setup above. Check your environment configuration and terminal output if you use another port.
 
-### Host on an IPv6 address
+### 4. Configure the frontend
 
-The development servers can bind to IPv6 using the settings in `chatapp/.env` and `chatserver/.env`. IPv6 literals in URLs must be enclosed in square brackets. Vite's development server is for development only; it may serve the page but does not ensure the app's API and Socket.IO connections work externally.
+In a second terminal:
 
-For external hosting, build the frontend and serve it from the API server so the app, API, and Socket.IO share one origin and port:
-
-```sh
-cd chatapp && npm run build
-cd ../chatserver && npm start
+```bash
+cd Chat-App/chatapp
 ```
 
-Then open `http://[IPV6_ADDRESS]:5175`. Forward/allow inbound TCP port `5175` through the host firewall and router/ISP IPv6 firewall. This avoids a separate public route to Vite port `5174`. The address must be assigned to the host and globally reachable from the client network.
-
-These development servers use plain HTTP. Login and chat can work over IPv6 HTTP, but browsers require HTTPS for camera and microphone access, so audio/video calls need a TLS-enabled public origin (typically a reverse proxy with a valid certificate and DNS hostname). Do not expose the Vite development server as a production deployment.
-
-### HTTPS with Caddy and DuckDNS
-
-The root `Caddyfile` configures Caddy to reverse-proxy `xyz.duckdns.org` to the app server on port `5175`. Build the frontend first, then make sure DuckDNS has an AAAA record pointing to this host's public IPv6 address. Caddy is installed as a system service on this machine and imports `/etc/caddy/conf.d/*`; install and activate the site with:
-
-```sh
-sudo install -m 0644 Caddyfile /etc/caddy/conf.d/xyz.caddy
-sudo systemctl enable --now caddy
-```
-
-Allow inbound TCP ports `80` and `443` through the host and router IPv6 firewalls. Caddy will obtain and renew a publicly trusted certificate when DNS resolves to this host and it can complete ACME validation. Then open `https://xyz.duckdns.org`. Keep the app server on port `5175`; Caddy terminates HTTPS and proxies API, page, and Socket.IO/WebRTC signaling traffic to it.
-
-### Chat attachments
-
-Direct and group chats support image, video, audio, and PDF attachments up to
-50 MB each (five files per message). The Express backend stores uploads in
-`chatserver/uploads` and serves them through the existing Caddy reverse proxy;
-back up this directory along with the MySQL database. Keep it on persistent
-storage, and share the same directory between app instances if you run more
-than one. Profile and group images support JPEG, PNG, GIF, WebP, and AVIF up to
-5 MB. Upload URLs are unguessable but publicly retrievable by anyone who has the
-URL.
-Conversation history opens at the latest messages and loads older messages in
-50-message pages as you scroll upward.
-Messages can be replied to from the Reply action; on Android, swipe a message
-to the right to select it as the reply target. Replies retain a quoted sender
-and preview, including when the original message is outside the loaded history
-or has been deleted.
-
-The chat sidebar separates users into **Local Users** (people with whom the
-current account has exchanged direct messages) and **Global Users** (all other
-active accounts). Direct-message unread counts are persisted per conversation,
-increase for incoming messages while another conversation is open, and clear
-when that conversation is opened.
-Global users are fetched in 30-user pages as the list is scrolled. Administrators
-can search notification recipients by entering multiple exact usernames separated
-by commas.
-Administrators can manage custom stickers from the Admin panel by adding
-approved HTTPS image URLs. Users can select these stickers from the composer;
-messages store the sticker ID and render the approved image in web and Android
-clients.
-The sticker picker includes All, Favorites, and Recent categories. The Create
-sticker shortcut opens Flaticon stickers; users should import only assets they
-are permitted to use by pasting an HTTPS image URL.
-
-## Run locally
-
-```sh
-cd chatserver && npm install && npm run dev
-cd chatapp && npm install && npm run dev
-```
-
-## Authentication and account administration
-
-Set a private signing key and a Google OAuth 2.0 Web client ID in `chatserver/.env`:
+Create or update `chatapp/.env`:
 
 ```dotenv
-JWT_SECRET=<long-random-secret>
-GOOGLE_CLIENT_ID=<google-web-client-id>
+VITE_API_URL=http://localhost:5175
+VITE_SERVER_URL=http://localhost:5175
+VITE_SOCKET_URL=http://localhost:5175
 ```
 
-In Google Cloud, configure the OAuth client as a Web application and add the app's
-origins (for example, `http://localhost:5174` and the production HTTPS origin) to
-its authorized JavaScript origins. The login page fetches the public client ID from
-the server at runtime, so a frontend rebuild is not needed when configuring it.
-The server verifies Google's signed credential before issuing the app's JWT. It
-stores the verified Google subject, email, display name, and profile image URL on
-the corresponding user row. Existing accounts with the same verified email are
-linked; subsequent sign-ins resolve by Google's stable subject identifier.
+These URLs should point to the backend server reachable by the browser. Use the correct host and protocol for your environment.
 
-New password and Google accounts are created with `pending` status and cannot sign
-in until an administrator approves them. To bootstrap the first administrator,
-register the account, then run this statement in the configured MySQL database:
+### 5. Install and run the frontend
+
+From the `chatapp` directory:
+
+```bash
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite, typically:
+
+```text
+http://localhost:5174
+```
+
+You should now be able to access the application. Features such as email verification and Google sign-in require their respective services to be configured.
+
+---
+
+## 🔑 Authentication Configuration
+
+### Email verification
+
+Configure a working SMTP provider in `chatserver/.env`. The application uses six-digit verification codes during registration and password recovery.
+
+Verification codes expire after a limited period and have restrictions on failed attempts and resend frequency.
+
+### Google sign-in
+
+Create a Google OAuth 2.0 client configured as a Web application in the Google Cloud Console.
+
+Add the appropriate development and production origins to the authorized JavaScript origins. Set the resulting client ID in the backend environment and follow the application's server-side credential verification flow.
+
+### Administrator access
+
+Newly registered accounts require administrator approval before they can sign in.
+
+To bootstrap the first administrator, register the intended account and update its role and status directly in the configured database:
 
 ```sql
 UPDATE users
@@ -165,36 +296,142 @@ SET role = 'admin', status = 'active'
 WHERE email = 'admin@example.com';
 ```
 
-After signing in, administrators can approve, suspend, reactivate, change roles,
-or delete accounts from the Admin panel. They can also manage group memberships
-and group-level roles from the Admin panel or Groups sidebar. Server-side JWT verification and
-current account/role checks protect the API; client-side route restrictions are
-only a navigation aid.
+Replace the example email with the account you intend to administer. Run this operation only against your own database and only after verifying the account.
 
-Users can edit their username and email from the profile button at the bottom of
-the chat sidebar, including uploading or changing their profile image. Images
-appear in user lists, group member lists, and conversation headers. Group admins
-can change a group's image from its management panel; group images appear in the
-group list and conversation header. Changing an existing password requires the
-current password; OAuth-only accounts can set a password without one.
-Administrators can edit any account's username/email, profile image, or set a
-replacement password from the Admin panel.
-Passwords are hashed before storage and are never returned by profile endpoints.
+---
 
-Administrators can send persistent notifications to all active users or selected
-users from the Administration page. Users receive them in the chat header's
-notification inbox; unread notifications remain available after reconnecting.
-Administrators can also add, edit, and remove the rotating quotes shown beneath
-NFaNG on the sign-in page. The dark theme uses a near-black grid background and
-a pointer-following glow; light mode remains available from the chat sidebar.
-During audio and video calls, the call panel provides an audio output selector.
-Browsers use supported output devices through `setSinkId`; the Android
-Capacitor client uses native routing for speaker, earpiece, wired/Bluetooth
-headsets, USB audio, and other detected outputs.
-The sidebar also includes Call History, where users can open a recent
-conversation, delete an individual call record, or clear their entire call
-history.
+## 📱 Android Application
 
-On startup, the server migrates existing message tables to add `is_deleted` and
-attachment metadata columns, makes usernames unique, converts legacy inactive
-accounts to suspended, and permits OAuth-only accounts without passwords.
+The React client can be packaged as a native Android application using Capacitor.
+
+### Requirements
+
+- Android Studio.
+- Android SDK Platform 36.
+- The Node.js dependencies required by the frontend.
+- A reachable backend URL.
+
+### Build and synchronize
+
+From the `chatapp` directory:
+
+```bash
+npm install
+npm run android:sync
+npm run android:open
+```
+
+Open the Android project in Android Studio and run the application on an emulator or connected device.
+
+Before building, configure `chatapp/.env` with the appropriate API and Socket.IO URLs. A phone cannot use the development computer's `localhost` address to reach the backend.
+
+Camera and microphone features require permissions and a secure browser context or suitable native configuration. Google sign-in may also require a dedicated native OAuth flow for reliable operation inside an embedded WebView.
+
+---
+
+## 🌐 Deployment
+
+The project includes a Caddy reverse-proxy configuration for hosting the application behind HTTPS.
+
+A typical deployment involves:
+
+1. Building the React frontend.
+2. Serving the built frontend and backend through the configured server.
+3. Configuring MySQL and production environment variables.
+4. Setting up a domain and DNS records.
+5. Configuring HTTPS and reverse proxying through Caddy.
+6. Ensuring the server can accept the required HTTP and WebSocket connections.
+7. Persisting and backing up the database and uploaded files.
+
+For the current single-origin deployment setup:
+
+```bash
+cd chatapp
+npm install
+npm run build
+
+cd ../chatserver
+npm install
+npm start
+```
+
+Configure Caddy to proxy the public HTTPS hostname to the backend server port configured for the deployment.
+
+**Important:** The Vite development server is intended for development, not production hosting. Use the built frontend for deployment, protect all secrets, and configure appropriate production access controls and network rules.
+
+---
+
+## 🧪 Development Notes
+
+- Run the backend and frontend in separate terminals during local development.
+- Verify database credentials before starting the backend.
+- Configure SMTP before testing email-dependent flows.
+- Check browser permissions when testing camera and microphone functionality.
+- Use HTTPS for remote browser-based audio and video calling.
+- Keep uploaded files on persistent storage and back them up alongside the database.
+- Test authorization and account status enforcement on the server, not only in the frontend.
+
+---
+
+## 🔒 Security and Privacy
+
+The application handles account information, conversations, uploaded files, and authentication credentials.
+
+- Use strong environment-specific secrets.
+- Never expose database credentials or private keys in frontend variables.
+- Keep the backend's authorization checks enabled for protected operations.
+- Restrict production CORS origins to trusted application origins.
+- Configure HTTPS for public deployments.
+- Back up the database and attachment directory securely.
+- Review uploaded-file access rules before storing sensitive information.
+
+Attachment URLs may be accessible to anyone who obtains the URL, so avoid treating an unguessable URL as a replacement for access control.
+
+---
+
+## 🗺️ Future Scope
+
+Potential areas for continued improvement include:
+
+- Message search and richer conversation filters.
+- Enhanced delivery and read-status indicators.
+- More robust reconnection and offline behavior.
+- Improved mobile notifications.
+- Expanded accessibility and responsive design.
+- Additional automated tests for authentication, messaging, and group permissions.
+- More comprehensive deployment and operational monitoring.
+
+These are possible extensions, not claims that the features are already implemented.
+
+---
+
+## 🤝 Contributing
+
+Contributions and suggestions are welcome.
+
+1. Fork the repository.
+2. Create a feature branch.
+3. Implement and test your changes.
+4. Commit your changes with a descriptive message.
+5. Push the branch and open a pull request.
+
+Please avoid including secrets, local environment files, database dumps, or personal attachments in contributions.
+
+## 📄 License
+
+This project is licensed under the **MIT License**. See [`LICENSE`](LICENSE) for the full license text.
+
+## 👨‍💻 Author
+
+**Anshul Chauhan**
+
+- GitHub: [@Anshul-sys32](https://github.com/Anshul-sys32)
+- Repository: [Chat-App](https://github.com/Anshul-sys32/Chat-App)
+
+---
+
+<p align="center">
+  <strong>Built with React, Node.js, Socket.IO, and MySQL.</strong>
+  <br />
+  Designed to bring real-time communication to web and Android.
+</p>
