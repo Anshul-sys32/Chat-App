@@ -3,7 +3,9 @@ const multer = require("multer");
 const { randomUUID } = require("node:crypto");
 
 const uploadDirectory = path.resolve(__dirname, "../uploads");
+const stickerDirectory = path.join(uploadDirectory, "stickers");
 const maxFileSize = 50 * 1024 * 1024;
+const maxStickerFileSize = 8 * 1024 * 1024;
 const avatarMaxFileSize = 5 * 1024 * 1024;
 const allowedAvatarTypes = new Map([
   ["image/jpeg", ".jpg"],
@@ -26,6 +28,13 @@ const allowedUploadTypes = new Map([
   ["audio/wav", ".wav"],
   ["audio/webm", ".webm"],
   ["application/pdf", ".pdf"],
+]);
+const allowedStickerTypes = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/avif",
 ]);
 
 const upload = multer({
@@ -62,10 +71,24 @@ const avatarUpload = multer({
   },
 });
 
+const stickerUpload = multer({
+	storage: multer.memoryStorage(),
+	limits: { fileSize: maxStickerFileSize, files: 1 },
+	fileFilter: (_req, file, callback) => {
+		if (!allowedStickerTypes.has(file.mimetype)) {
+			return callback(new Error("Choose a JPEG, PNG, GIF, WebP, or AVIF sticker image."));
+		}
+		return callback(null, true);
+	},
+});
+
 module.exports = {
   upload,
   avatarUpload,
+  stickerUpload,
   uploadDirectory,
+  stickerDirectory,
   allowedUploadTypes,
   maxFileSize,
+  maxStickerFileSize,
 };

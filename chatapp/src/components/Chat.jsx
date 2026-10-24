@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
@@ -8,6 +8,7 @@ import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
 import Avatar from './Avatar';
+import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const MAX_FILES_PER_MESSAGE = 5;
@@ -70,10 +71,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [openBulkMenu, setOpenBulkMenu] = useState(false);
   const [pendingForward, setPendingForward] = useState(null);
   const [stickers, setStickers] = useState([]);
+  const [stickerCategories, setStickerCategories] = useState(['General']);
+  const [stickerSources, setStickerSources] = useState({});
+  const stickerSourcesRef = React.useRef({});
   const [showStickers, setShowStickers] = useState(false);
   const [showAddSticker, setShowAddSticker] = useState(false);
   const [stickerName, setStickerName] = useState('');
-  const [stickerUrl, setStickerUrl] = useState('');
+  const [stickerUploadCategory, setStickerUploadCategory] = useState('General');
+  const [newStickerCategory, setNewStickerCategory] = useState('');
   const [stickerFile, setStickerFile] = useState(null);
   const [stickerError, setStickerError] = useState('');
   const [stickerCategory, setStickerCategory] = useState('all');
@@ -81,6 +86,21 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [recentStickerIds, setRecentStickerIds] = useState([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
   const replyDrag = React.useRef(null);
+
+  const applyStickerCatalog = useCallback((catalog) => {
+    setStickers(catalog.stickers);
+    setStickerCategories(catalog.categories);
+    Object.entries(stickerSourcesRef.current).forEach(([source, objectUrl]) => {
+      if (catalog.sources[source] !== objectUrl) URL.revokeObjectURL(objectUrl);
+    });
+    stickerSourcesRef.current = catalog.sources;
+    setStickerSources(catalog.sources);
+  }, []);
+
+  const refreshStickerCatalog = useCallback(async () => {
+    const catalog = await loadStickerCatalog(API_URL, localStorage.getItem('token'), stickerSourcesRef.current);
+    applyStickerCatalog(catalog);
+  }, [applyStickerCatalog]);
 
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -100,11 +120,31 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   }, [selectedChat?._id, pendingForward]);
 
   useEffect(() => {
-    axios.get(`${API_URL}/api/stickers`, {
-      headers: { Authorization: `******'token') || ''}` },
-      withCredentials: true,
-    }).then(({ data }) => setStickers(Array.isArray(data) ? data : []))
+    let active = true;
+    loadStickerCatalog(API_URL, localStorage.getItem('token'))
+      .then((catalog) => {
+        if (active) applyStickerCatalog(catalog);
+        else releaseStickerSources(catalog.sources);
+      })
       .catch((error) => console.error('Could not load stickers:', error));
+    return () => {
+      active = false;
+      releaseStickerSources(stickerSourcesRef.current);
+      stickerSourcesRef.current = {};
+    };
+  }, [user?._id, applyStickerCatalog]);
+
+  useEffect(() => {
+    const handleStickerCatalogUpdate = () => {
+      refreshStickerCatalog().catch((error) => console.error('Could not refresh sticker catalog:', error));
+    };
+    Socket.on('sticker-catalog-updated', handleStickerCatalogUpdate);
+    return () => Socket.off('sticker-catalog-updated', handleStickerCatalogUpdate);
+  }, [user?._id, refreshStickerCatalog]);
+
+  useEffect(() => () => {
+    releaseStickerSources(stickerSourcesRef.current);
+    stickerSourcesRef.current = {};
   }, []);
 
   useEffect(() => {
@@ -497,31 +537,26 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   };
 
   const addSticker = async () => {
-    if (!stickerName.trim() || !stickerUrl.trim() && !stickerFile) {
-      setStickerError('Enter a sticker name and HTTPS image URL, or choose an image file.');
+    if (!stickerName.trim() || !stickerFile) {
+      setStickerError('Enter a sticker name and choose an image or GIF file.');
+      return;
+    }
+    if (stickerFile.size > 8 * 1024 * 1024) {
+      setStickerError('Sticker files must be 8 MB or smaller.');
       return;
     }
     setStickerError('');
     try {
       const formData = new FormData();
       formData.append('name', stickerName.trim());
-      let endpoint = '/api/stickers';
-      if (stickerFile) {
-        formData.append('sticker', stickerFile);
-        endpoint = '/api/stickers/upload';
-      } else {
-        formData.append('imageUrl', stickerUrl.trim());
-      }
-      const { data } = await axios.post(`${API_URL}${endpoint}`, stickerFile ? formData : {
-        name: stickerName.trim(),
-        imageUrl: stickerUrl.trim(),
-      }, {
+      formData.append('category', stickerUploadCategory);
+      formData.append('sticker', stickerFile);
+      await axios.post(`${API_URL}/api/stickers/upload`, formData, {
         headers: { Authorization: `******'token') || ''}` },
         withCredentials: true,
       });
-      setStickers((current) => [...current, data]);
+      await refreshStickerCatalog();
       setStickerName('');
-      setStickerUrl('');
       setStickerFile(null);
       setShowAddSticker(false);
     } catch (error) {
@@ -535,17 +570,34 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         headers: { Authorization: `******'token') || ''}` },
         withCredentials: true,
       });
-      setStickers((current) => current.filter((item) => String(item._id) !== String(sticker._id)));
+      await refreshStickerCatalog();
       setFavoriteStickerIds((current) => current.filter((id) => id !== String(sticker._id)));
       setRecentStickerIds((current) => current.filter((id) => id !== String(sticker._id)));
     } catch (error) {
       setStickerError(error.response?.data?.message || 'Could not remove sticker.');
     }
   };
+  const createStickerCategory = async () => {
+    const name = newStickerCategory.trim();
+    if (!name) return;
+    try {
+      const { data } = await axios.post(`${API_URL}/api/sticker-categories`, { name }, {
+        headers: { Authorization: `******'token') || ''}` },
+        withCredentials: true,
+      });
+      await refreshStickerCatalog();
+      setStickerUploadCategory(data.name);
+      setStickerCategory(data.name);
+      setNewStickerCategory('');
+      setStickerError('');
+    } catch (error) {
+      setStickerError(error.response?.data?.message || 'Could not create sticker category.');
+    }
+  };
   const displayedStickers = stickers.filter((sticker) => {
     if (stickerCategory === 'favorites') return favoriteStickerIds.includes(String(sticker._id));
     if (stickerCategory === 'recent') return recentStickerIds.includes(String(sticker._id));
-    return true;
+    return stickerCategory === 'all' || sticker.category === stickerCategory;
   }).sort((a, b) => {
     if (stickerCategory !== 'recent') return 0;
     return recentStickerIds.indexOf(String(a._id)) - recentStickerIds.indexOf(String(b._id));
@@ -554,7 +606,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     [message.stickerUrl, stickers.find((sticker) => String(sticker._id) === String(message.stickerId))?.imageUrl]
       .find(Boolean)
   );
-  const resolveStickerUrl = (url) => url?.startsWith('/uploads/') ? `${API_URL}${url}` : url;
+  const resolveStickerUrl = (url) => stickerSources[url] || (url?.startsWith('/uploads/') ? `${API_URL}${url}` : '');
   const jumpToMessage = (message) => {
     if (!message) return;
     setHighlightedMessageId(String(message._id));
@@ -879,13 +931,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   )}
                   {m.stickerId && !m.isDeleted && (
                     <a
-                      href={getStickerUrl(m) || '#'}
-                      target="_blank"
-                      rel="noreferrer"
                       hidden={Boolean(getStickerUrl(m))}
                       className="mt-1 block text-xs text-teal-200 underline"
                     >
-                      Sticker unavailable. Open source
+                      Sticker unavailable.
                     </a>
                   )}
                   {(m.replyToId || (!m.isDeleted && getAttachments(m).length > 0)) && (
@@ -993,8 +1042,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               </button>
               {showStickers && (
                 <div className="absolute bottom-12 left-0 z-40 w-64 rounded-xl border border-white/15 bg-slate-950 p-3 shadow-xl">
-                  <div className="mb-2 flex gap-1 border-b border-white/10 pb-2">
-                    {['all', 'favorites', 'recent'].map((category) => (
+                  <div className="mb-2 flex flex-wrap gap-1 border-b border-white/10 pb-2">
+                    {['all', 'favorites', 'recent', ...stickerCategories].map((category) => (
                       <button type="button" key={category} onClick={() => setStickerCategory(category)} className={`rounded px-2 py-1 text-[11px] capitalize ${stickerCategory === category ? 'bg-teal-500 text-slate-950' : 'text-white/70 hover:bg-white/10'}`}>
                         {category === 'all' ? 'All' : category}
                       </button>
@@ -1004,14 +1053,18 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     <button type="button" onClick={() => setShowAddSticker((current) => !current)} className="rounded bg-teal-500 px-2 py-1 text-[11px] font-semibold text-slate-950">
                       {showAddSticker ? 'Close add' : 'Add sticker'}
                     </button>
-                    <a href="https://www.flaticon.com/stickers" target="_blank" rel="noreferrer" className="text-[11px] text-white/70 underline">
-                      Create sticker
-                    </a>
+                    <span className="text-[11px] text-white/50">Images and GIFs</span>
                   </div>
                   {showAddSticker && (
                     <div className="mb-2 space-y-2 border-b border-white/10 pb-2 text-left">
                       <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="w-full rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
-                      <input value={stickerUrl} onChange={(event) => setStickerUrl(event.target.value)} type="url" placeholder="Direct HTTPS image URL" className="w-full rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
+                      <select value={stickerUploadCategory} onChange={(event) => setStickerUploadCategory(event.target.value)} className="w-full rounded border border-white/20 bg-slate-900 px-2 py-1 text-xs text-white">
+                        {stickerCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+                      </select>
+                      <div className="flex gap-1">
+                        <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
+                        <button type="button" onClick={createStickerCategory} className="rounded border border-white/20 px-2 text-[11px]">Add category</button>
+                      </div>
                       <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="w-full text-[11px] text-white/70" />
                       {stickerError && <p className="text-xs text-rose-300">{stickerError}</p>}
                       <button type="button" onClick={addSticker} className="rounded bg-teal-500 px-2 py-1 text-[11px] font-semibold text-slate-950">Add</button>

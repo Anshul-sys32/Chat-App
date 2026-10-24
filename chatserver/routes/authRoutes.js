@@ -20,7 +20,8 @@ const User = require("../models/User");
 const { pool } = require("../config/db");
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
-const { upload, avatarUpload, uploadDirectory } = require("../utils/uploads");
+const { upload, avatarUpload, uploadDirectory, stickerUpload } = require("../utils/uploads");
+const { optimizeSticker, storeSticker, removeStickerFile } = require("../utils/stickers");
 
 const removeUploadedFiles = async (files) => Promise.all((files || []).map((file) =>
 	fs.unlink(file.path).catch((error) => {
@@ -80,103 +81,116 @@ const getGroupRole = async (groupId, userId) => {
 
 const validId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 
-router.get("/stickers", protect, async (_req, res) => {
+const bumpStickerCatalogRevision = async (req) => {
+	await pool.execute("UPDATE sticker_catalog_state SET revision = revision + 1 WHERE id = 1");
+	const [[catalog]] = await pool.execute("SELECT revision FROM sticker_catalog_state WHERE id = 1");
+	req.app.get("io")?.emit("sticker-catalog-updated", { revision: Number(catalog.revision) });
+};
+
+const createSticker = async (req, res, ownerId) => {
+	if (!req.file) return res.status(400).json({ message: "Choose a sticker image or GIF to upload." });
+	const name = String(req.body.name || "").trim();
+	const categoryName = String(req.body.category || "General").trim() || "General";
+	if (!name || name.length > 100) return res.status(400).json({ message: "Provide a sticker name (up to 100 characters)." });
+	if (categoryName.length > 60) return res.status(400).json({ message: "Sticker categories must be 60 characters or shorter." });
+	let optimized;
 	try {
-		const [stickers] = await pool.execute(
-			"SELECT id AS _id, owner_id AS ownerId, name, image_url AS imageUrl FROM stickers ORDER BY name, id"
+		optimized = await optimizeSticker(req.file.buffer);
+	} catch (error) {
+		return res.status(400).json({ message: error.message || "Could not process sticker image." });
+	}
+	let stored;
+	try {
+		const [categories] = await pool.execute("SELECT id FROM sticker_categories WHERE name = ? LIMIT 1", [categoryName]);
+		if (!categories.length) return res.status(400).json({ message: "Create this sticker category before uploading." });
+		stored = await storeSticker(optimized.buffer);
+		const [result] = await pool.execute(
+			"INSERT INTO stickers (owner_id, category_id, name, image_url, media_type) VALUES (?, ?, ?, ?, 'image/webp')",
+			[ownerId, categories[0].id, name, stored.url]
 		);
-		res.json(stickers);
+		await bumpStickerCatalogRevision(req);
+		return res.status(201).json({ _id: result.insertId, ownerId, name, category: categoryName, imageUrl: stored.url, mediaType: "image/webp", animated: optimized.animated });
+	} catch (error) {
+		if (stored) await removeStickerFile(stored.url).catch(() => {});
+		console.error("Create sticker error:", error);
+		return res.status(500).json({ message: "Could not save sticker." });
+	}
+};
+
+const stickerUploadHandler = (req, res, next) => {
+	stickerUpload.single("sticker")(req, res, (error) => {
+		if (error) return res.status(400).json({ message: error.message || "Could not upload sticker." });
+		return next();
+	});
+};
+
+router.get("/stickers", protect, async (req, res) => {
+	try {
+		const [[catalog]] = await pool.execute("SELECT revision FROM sticker_catalog_state WHERE id = 1");
+		const revision = Number(catalog?.revision || 1);
+		const etag = `\"stickers-${revision}\"`;
+		res.set("ETag", etag);
+		res.set("Cache-Control", "private, no-cache");
+		if (req.get("If-None-Match") === etag) return res.status(304).end();
+		const [stickers] = await pool.execute(
+			`SELECT s.id AS _id, s.owner_id AS ownerId, s.name, s.image_url AS imageUrl,
+			        s.media_type AS mediaType, c.name AS category
+			 FROM stickers s LEFT JOIN sticker_categories c ON c.id = s.category_id
+			 WHERE s.image_url LIKE '/uploads/%'
+			 ORDER BY c.name, s.name, s.id`
+		);
+		const [categories] = await pool.execute("SELECT name FROM sticker_categories ORDER BY name");
+		return res.json({ revision, stickers, categories: categories.map((category) => category.name) });
 	} catch (error) {
 		console.error("Fetch stickers error:", error);
-		res.status(500).json({ message: "Failed to load stickers." });
+		return res.status(500).json({ message: "Failed to load stickers." });
 	}
 });
 
-router.post("/stickers", protect, async (req, res) => {
+router.post("/sticker-categories", protect, async (req, res) => {
 	const name = String(req.body.name || "").trim();
-	const imageUrl = String(req.body.imageUrl || "").trim();
-	if (!name || name.length > 100 || !/^https:\/\//i.test(imageUrl) || imageUrl.length > 1000) {
-		return res.status(400).json({ message: "Provide a name and a valid HTTPS sticker URL." });
+	if (!name || name.length > 60) return res.status(400).json({ message: "Category names must be 1 to 60 characters." });
+	if (["all", "favorites", "recent"].includes(name.toLowerCase())) {
+		return res.status(400).json({ message: "Choose a category name other than all, favorites, or recent." });
 	}
 	try {
-		const [result] = await pool.execute("INSERT INTO stickers (owner_id, name, image_url) VALUES (?, ?, ?)", [req.user.id, name, imageUrl]);
-		res.status(201).json({ _id: result.insertId, ownerId: req.user.id, name, imageUrl });
+		const [result] = await pool.execute("INSERT IGNORE INTO sticker_categories (name, created_by) VALUES (?, ?)", [name, req.user.id]);
+		if (result.affectedRows) await bumpStickerCatalogRevision(req);
+		const [[category]] = await pool.execute("SELECT name FROM sticker_categories WHERE name = ? LIMIT 1", [name]);
+		return res.status(result.affectedRows ? 201 : 200).json({ name: category.name });
 	} catch (error) {
-		console.error("Create user sticker error:", error);
-		res.status(500).json({ message: "Failed to add sticker." });
+		console.error("Create sticker category error:", error);
+		return res.status(500).json({ message: "Could not create sticker category." });
 	}
 });
 
-router.post("/stickers/upload", protect, (req, res, next) => {
-	upload.single("sticker")(req, res, async (error) => {
-		if (error) {
-			await removeUploadedFiles(req.file ? [req.file] : []);
-			return res.status(400).json({ message: error.message || "Could not upload sticker." });
-		}
-		next();
-	});
-}, async (req, res) => {
-	if (!req.file) return res.status(400).json({ message: "Choose a sticker image to upload." });
-	const name = String(req.body.name || "").trim();
-	if (!name || name.length > 100) {
-		await removeUploadedFiles([req.file]);
-		return res.status(400).json({ message: "Provide a sticker name." });
-	}
-	try {
-		const imageUrl = `/uploads/${req.file.filename}`;
-		const [result] = await pool.execute("INSERT INTO stickers (owner_id, name, image_url) VALUES (?, ?, ?)", [req.user.id, name, imageUrl]);
-		res.status(201).json({ _id: result.insertId, ownerId: req.user.id, name, imageUrl });
-	} catch (error) {
-		await removeUploadedFiles([req.file]);
-		console.error("Upload sticker error:", error);
-		res.status(500).json({ message: "Failed to save uploaded sticker." });
-	}
-});
+router.post("/stickers/upload", protect, stickerUploadHandler, (req, res) => createSticker(req, res, req.user.id));
+router.delete("/stickers/:stickerId", protect, async (req, res) => deleteSticker(req, res, false));
+router.post("/admin/stickers", protect, requireAdmin, stickerUploadHandler, (req, res) => createSticker(req, res, null));
+router.delete("/admin/stickers/:stickerId", protect, requireAdmin, async (req, res) => deleteSticker(req, res, true));
 
-router.delete("/stickers/:stickerId", protect, async (req, res) => {
+async function deleteSticker(req, res, admin) {
 	const stickerId = Number(req.params.stickerId);
 	if (!validId(stickerId)) return res.status(400).json({ message: "Invalid sticker id." });
 	try {
-		const [result] = await pool.execute(
-			"DELETE FROM stickers WHERE id = ? AND owner_id = ?",
-			[stickerId, req.user.id]
-		);
-		if (!result.affectedRows) return res.status(404).json({ message: "Sticker not found." });
-		res.status(204).end();
-	} catch (error) {
-		console.error("Delete user sticker error:", error);
-		res.status(500).json({ message: "Failed to remove sticker." });
-	}
-});
-
-router.post("/admin/stickers", protect, requireAdmin, async (req, res) => {
-	const name = String(req.body.name || "").trim();
-	const imageUrl = String(req.body.imageUrl || "").trim();
-	if (!name || name.length > 100 || !/^https:\/\//i.test(imageUrl) || imageUrl.length > 1000) {
-		return res.status(400).json({ message: "Provide a name and a valid HTTPS sticker URL." });
-	}
-	try {
-		const [result] = await pool.execute("INSERT INTO stickers (name, image_url) VALUES (?, ?)", [name, imageUrl]);
-		res.status(201).json({ _id: result.insertId, name, imageUrl });
-	} catch (error) {
-		console.error("Create sticker error:", error);
-		res.status(500).json({ message: "Failed to create sticker." });
-	}
-});
-
-router.delete("/admin/stickers/:stickerId", protect, requireAdmin, async (req, res) => {
-	const stickerId = Number(req.params.stickerId);
-	if (!Number.isSafeInteger(stickerId) || stickerId < 1) {
-		return res.status(400).json({ message: "Invalid sticker id." });
-	}
-	try {
+		const [rows] = await pool.execute("SELECT id, owner_id AS ownerId, image_url AS imageUrl FROM stickers WHERE id = ? LIMIT 1", [stickerId]);
+		const sticker = rows[0];
+		if (!sticker || !admin && Number(sticker.ownerId) !== Number(req.user.id)) {
+			return res.status(404).json({ message: "Sticker not found." });
+		}
 		await pool.execute("DELETE FROM stickers WHERE id = ?", [stickerId]);
-		res.status(204).end();
+		await bumpStickerCatalogRevision(req);
+		const [[{ usedByMessages }]] = await pool.execute(
+			"SELECT (SELECT COUNT(*) FROM messages WHERE sticker_id = ?) + (SELECT COUNT(*) FROM group_messages WHERE sticker_id = ?) AS usedByMessages",
+			[stickerId, stickerId]
+		);
+		if (!usedByMessages) await removeStickerFile(sticker.imageUrl);
+		return res.status(204).end();
 	} catch (error) {
 		console.error("Delete sticker error:", error);
-		res.status(500).json({ message: "Failed to delete sticker." });
+		return res.status(500).json({ message: "Failed to remove sticker." });
 	}
-});
+}
 const canManageGroup = async (groupId, user) =>
 	user.role === "admin" || await getGroupRole(groupId, user.id) === "admin";
 const requireGroupAvatarAdmin = async (req, res, next) => {
@@ -665,7 +679,7 @@ router.get("/messages/:userId", protect, async (req, res) => {
 							CASE WHEN messages.is_deleted THEN 'This message was deleted' ELSE messages.content END AS content,
 							CASE WHEN messages.is_deleted THEN NULL ELSE messages.attachments END AS attachments,
 							messages.is_deleted AS isDeleted, messages.reply_to_id AS replyToId,
-							messages.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
+							messages.sticker_id AS stickerId, COALESCE(messages.sticker_url, stickers.image_url) AS stickerUrl,
 							reply_user.username AS replySenderName,
 							CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 							messages.created_at AS timestamp
@@ -986,7 +1000,7 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
-					gm.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
+					gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
 					reply_user.username AS replySenderName,
 					CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 					gm.created_at AS timestamp

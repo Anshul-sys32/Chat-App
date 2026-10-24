@@ -5,7 +5,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const { uploadDirectory } = require("./utils/uploads");
+const { uploadDirectory, stickerDirectory } = require("./utils/uploads");
 const { connectDB } = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
@@ -34,6 +34,17 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json());
 fs.mkdirSync(uploadDirectory, { recursive: true });
+fs.mkdirSync(stickerDirectory, { recursive: true });
+app.use("/uploads/stickers", express.static(stickerDirectory, {
+  dotfiles: "deny",
+  index: false,
+  maxAge: "1y",
+  immutable: true,
+  setHeaders: (res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  },
+}));
 app.use("/uploads", express.static(uploadDirectory, {
   dotfiles: "deny",
   index: false,

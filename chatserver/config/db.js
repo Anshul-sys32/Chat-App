@@ -136,14 +136,51 @@ const connectDB = async () => {
       ) ENGINE=InnoDB
     `);
     await connection.query(`
+      CREATE TABLE IF NOT EXISTS sticker_categories (
+        id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(60) NOT NULL,
+        created_by INT UNSIGNED NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY sticker_categories_name_unique (name),
+        CONSTRAINT sticker_categories_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB
+    `);
+    await connection.query("INSERT IGNORE INTO sticker_categories (name) VALUES ('General')");
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS sticker_catalog_state (
+        id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+        revision BIGINT UNSIGNED NOT NULL DEFAULT 1
+      ) ENGINE=InnoDB
+    `);
+    await connection.query("INSERT IGNORE INTO sticker_catalog_state (id, revision) VALUES (1, 1)");
+    await connection.query(`
       CREATE TABLE IF NOT EXISTS stickers (
         id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         owner_id INT UNSIGNED NULL,
+        category_id INT UNSIGNED NULL,
         name VARCHAR(100) NOT NULL,
         image_url VARCHAR(1000) NOT NULL,
+        media_type VARCHAR(40) NOT NULL DEFAULT 'image/webp',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB
     `);
+    for (const [column, definition] of [
+      ["category_id", "INT UNSIGNED NULL"],
+      ["media_type", "VARCHAR(40) NOT NULL DEFAULT 'image/webp'"],
+    ]) {
+      const [columns] = await connection.execute(
+        `SELECT COUNT(*) AS count FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = 'stickers' AND column_name = ?`,
+        [column]
+      );
+      if (!columns[0].count) await connection.query(`ALTER TABLE stickers ADD COLUMN ${column} ${definition}`);
+    }
+    await connection.query(
+      "UPDATE stickers SET category_id = (SELECT id FROM sticker_categories WHERE name = 'General' LIMIT 1) WHERE category_id IS NULL"
+    );
+    await connection.query(
+      "UPDATE stickers SET media_type = 'image/webp' WHERE image_url LIKE '/uploads/%' AND media_type IS NULL"
+    );
     const [stickerOwnerColumn] = await connection.execute(
       `SELECT COUNT(*) AS count FROM information_schema.columns
        WHERE table_schema = DATABASE() AND table_name = 'stickers' AND column_name = 'owner_id'`
@@ -178,6 +215,13 @@ const connectDB = async () => {
     );
     if (!messageStickerColumn[0].count) {
       await connection.query("ALTER TABLE messages ADD COLUMN sticker_id INT UNSIGNED NULL");
+    }
+    const [messageStickerUrlColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'messages' AND column_name = 'sticker_url'`
+    );
+    if (!messageStickerUrlColumn[0].count) {
+      await connection.query("ALTER TABLE messages ADD COLUMN sticker_url VARCHAR(1000) NULL");
     }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS chat_groups (
@@ -258,6 +302,13 @@ const connectDB = async () => {
     );
     if (!groupStickerColumn[0].count) {
       await connection.query("ALTER TABLE group_messages ADD COLUMN sticker_id INT UNSIGNED NULL");
+    }
+    const [groupStickerUrlColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'group_messages' AND column_name = 'sticker_url'`
+    );
+    if (!groupStickerUrlColumn[0].count) {
+      await connection.query("ALTER TABLE group_messages ADD COLUMN sticker_url VARCHAR(1000) NULL");
     }
     const [groupMessageAttachmentsColumn] = await connection.execute(
         `SELECT COUNT(*) AS count FROM information_schema.columns

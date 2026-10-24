@@ -34,8 +34,11 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   const [editingQuoteText, setEditingQuoteText] = useState("");
   const [quoteError, setQuoteError] = useState("");
   const [stickers, setStickers] = useState([]);
+  const [stickerCategories, setStickerCategories] = useState(["General"]);
   const [stickerName, setStickerName] = useState("");
-  const [stickerUrl, setStickerUrl] = useState("");
+  const [stickerCategory, setStickerCategory] = useState("General");
+  const [newStickerCategory, setNewStickerCategory] = useState("");
+  const [stickerFile, setStickerFile] = useState(null);
 
   const loadUsers = useCallback(async () => {
     setError("");
@@ -92,7 +95,10 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
 
   useEffect(() => {
     axios.get(`${API_URL}/api/stickers`, authConfig())
-      .then(({ data }) => setStickers(data))
+      .then(({ data }) => {
+        setStickers(data.stickers || []);
+        setStickerCategories(data.categories || ["General"]);
+      })
       .catch((requestError) => setError(requestError.response?.data?.message || "Could not load stickers."));
   }, []);
 
@@ -208,13 +214,42 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
 
   const addSticker = async (event) => {
     event.preventDefault();
+    if (!stickerFile) {
+      setError("Choose an image or GIF file for the sticker.");
+      return;
+    }
+    if (stickerFile.size > 8 * 1024 * 1024) {
+      setError("Sticker files must be 8 MB or smaller.");
+      return;
+    }
     try {
-      const { data } = await axios.post(`${API_URL}/api/admin/stickers`, { name: stickerName, imageUrl: stickerUrl }, authConfig());
-      setStickers((current) => [...current, data]);
+      const formData = new FormData();
+      formData.append("name", stickerName.trim());
+      formData.append("category", stickerCategory);
+      formData.append("sticker", stickerFile);
+      await axios.post(`${API_URL}/api/admin/stickers`, formData, authConfig());
+      const { data } = await axios.get(`${API_URL}/api/stickers`, authConfig());
+      setStickers(data.stickers || []);
+      setStickerCategories(data.categories || ["General"]);
       setStickerName("");
-      setStickerUrl("");
+      setStickerFile(null);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Could not add sticker.");
+    }
+  };
+
+  const addStickerCategory = async () => {
+    const name = newStickerCategory.trim();
+    if (!name) return;
+    try {
+      const { data } = await axios.post(`${API_URL}/api/sticker-categories`, { name }, authConfig());
+      const { data: catalog } = await axios.get(`${API_URL}/api/stickers`, authConfig());
+      setStickers(catalog.stickers || []);
+      setStickerCategories(catalog.categories || ["General"]);
+      setStickerCategory(data.name);
+      setNewStickerCategory("");
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not create sticker category.");
     }
   };
 
@@ -374,16 +409,23 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
         </section>
         <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Custom stickers</h2>
-          <p className="mt-1 text-sm text-white/60">Add approved HTTPS image URLs. These stickers are available to all users on web and Android.</p>
-          <form onSubmit={addSticker} className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <p className="mt-1 text-sm text-white/60">Upload an image or GIF. Stickers are resized, compressed, and shared with web and Android clients.</p>
+          <form onSubmit={addSticker} className="mt-4 grid gap-2 sm:grid-cols-2">
             <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
-            <input value={stickerUrl} onChange={(event) => setStickerUrl(event.target.value)} required type="url" placeholder="https://example.com/sticker.png" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
+            <select value={stickerCategory} onChange={(event) => setStickerCategory(event.target.value)} className="rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white">
+              {stickerCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+            </select>
+            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="min-w-0 text-sm text-white/70" />
             <button type="submit" className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27]">Add sticker</button>
           </form>
+          <div className="mt-3 flex gap-2">
+            <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
+            <button type="button" onClick={addStickerCategory} className="rounded-lg border border-white/15 px-3 py-2 text-sm">Add category</button>
+          </div>
           <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
             {stickers.map((sticker) => (
               <li key={sticker._id} className="relative rounded-lg border border-white/10 p-2">
-                <img src={sticker.imageUrl} alt={sticker.name} className="mx-auto h-16 w-16 object-contain" />
+                <img src={`${API_URL}${sticker.imageUrl}`} alt={sticker.name} className="mx-auto h-16 w-16 object-contain" />
                 <p className="truncate text-center text-xs text-white/70">{sticker.name}</p>
                 <button type="button" onClick={() => deleteSticker(sticker)} className="mt-1 w-full text-xs text-rose-200">Remove</button>
               </li>

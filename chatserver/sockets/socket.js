@@ -117,19 +117,19 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "The message being replied to was not found." });
         }
         const [sticker] = Number.isSafeInteger(stickerId) && stickerId > 0
-          ? await pool.execute("SELECT id FROM stickers WHERE id = ?", [stickerId])
+          ? await pool.execute("SELECT id, image_url AS imageUrl FROM stickers WHERE id = ?", [stickerId])
           : [[]];
         if (messagePayload.stickerId !== undefined && !sticker.length) {
           return socket.emit("message-error", { message: "That sticker is not available." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO messages (sender_id, receiver_id, content, attachments, reply_to_id, sticker_id) VALUES (?, ?, ?, ?, ?, ?)",
-          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null]
+          "INSERT INTO messages (sender_id, receiver_id, content, attachments, reply_to_id, sticker_id, sticker_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [Number(socket.userId), receiverId, typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null]
         );
         const [rows] = await pool.execute(
           `SELECT messages.id AS _id, messages.sender_id AS sender, messages.receiver_id AS receiver,
                   messages.content, messages.attachments, messages.reply_to_id AS replyToId,
-                  messages.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
+                  messages.sticker_id AS stickerId, COALESCE(messages.sticker_url, stickers.image_url) AS stickerUrl,
                   reply_user.username AS replySenderName,
                   CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
                   messages.created_at AS timestamp
@@ -194,19 +194,19 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "The message being replied to was not found." });
         }
         const [sticker] = Number.isSafeInteger(stickerId) && stickerId > 0
-          ? await pool.execute("SELECT id FROM stickers WHERE id = ?", [stickerId])
+          ? await pool.execute("SELECT id, image_url AS imageUrl FROM stickers WHERE id = ?", [stickerId])
           : [[]];
         if (messagePayload.stickerId !== undefined && !sticker.length) {
           return socket.emit("message-error", { message: "That sticker is not available." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, sender_id, content, attachments, reply_to_id, sticker_id) VALUES (?, ?, ?, ?, ?, ?)",
-          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null]
+          "INSERT INTO group_messages (group_id, sender_id, content, attachments, reply_to_id, sticker_id, sticker_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null]
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
                   u.username AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
-                  gm.sticker_id AS stickerId, stickers.image_url AS stickerUrl,
+                  gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
                   reply_user.username AS replySenderName,
                   CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
                   gm.is_deleted AS isDeleted,
