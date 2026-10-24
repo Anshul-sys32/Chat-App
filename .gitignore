@@ -57,3 +57,5 @@ client_secret*.json
 *.swp
 *.swo
 ss
+graphify-out
+.gitignore
