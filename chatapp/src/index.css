@@ -161,6 +161,26 @@ body {
   color: var(--theme-text);
 }
 
+.notification-panel-enter {
+  transform-origin: top right;
+  animation: notification-panel-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.notification-item-enter {
+  animation: notification-item-enter 220ms ease-out both;
+  animation-delay: calc(var(--notification-index, 0) * 24ms);
+}
+
+@keyframes notification-panel-enter {
+  from { opacity: 0; transform: translateY(-7px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes notification-item-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .chat-bubble-own {
   color: #fff;
   background: #0f887b;
@@ -198,6 +218,11 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .notification-panel-enter,
+  .notification-item-enter {
+    animation: none;
+  }
+
   .message-reply-highlight::before {
     animation: none;
     opacity: 0.35;

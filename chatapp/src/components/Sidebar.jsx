@@ -63,6 +63,14 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
         </button>
       </div>
 
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        tabIndex={isOpen ? 0 : -1}
+        onClick={onCloseSidebar}
+        className={`fixed inset-0 z-[35] bg-black/35 transition-opacity duration-300 ease-in-out ${isOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
+      />
+
       {/* Sidebar Container */}
       <div
         style={{
@@ -71,7 +79,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
           height: 'calc(var(--app-height, 100dvh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))',
           transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
         }}
-        className="theme-sidebar fixed left-0 top-0 z-40 flex min-h-0 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-in-out"
+        className={`theme-sidebar fixed left-0 top-0 z-40 flex min-h-0 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-in-out ${isOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
       >
         {/* Left Nav Icons */}
         <div className="glass-rail relative z-20 flex w-16 flex-col items-center space-y-4 py-10">

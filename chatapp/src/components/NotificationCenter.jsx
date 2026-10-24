@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { FaBell, FaCheckDouble } from "react-icons/fa";
 import Socket from "../Socket";
@@ -14,6 +14,8 @@ export default function NotificationCenter() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [error, setError] = useState("");
+  const containerRef = useRef(null);
+  const triggerRef = useRef(null);
 
   const loadNotifications = useCallback(async () => {
     setError("");
@@ -38,6 +40,23 @@ export default function NotificationCenter() {
     Socket.on("notification", receiveNotification);
     return () => Socket.off("notification", receiveNotification);
   }, [loadNotifications]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const closeOnOutsidePointer = (event) => {
+      if (containerRef.current?.contains(event.target) || triggerRef.current?.contains(event.target)) return;
+      setIsOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
 
   const markRead = async (notificationId) => {
     try {
@@ -73,8 +92,9 @@ export default function NotificationCenter() {
   };
 
   return (
-    <div className={`relative ${isOpen ? "z-[60]" : ""}`}>
+    <div ref={containerRef} className={`relative ${isOpen ? "z-[60]" : ""}`}>
       <button
+      ref={triggerRef}
         type="button"
         onClick={() => setIsOpen((open) => !open)}
         aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
@@ -97,7 +117,7 @@ export default function NotificationCenter() {
             right: "max(0.75rem, env(safe-area-inset-right))",
             maxHeight: "min(32rem, calc(var(--app-height, 100dvh) - 5.5rem - env(safe-area-inset-bottom)))",
           }}
-          className="theme-sidebar fixed z-[70] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 shadow-2xl"
+          className="notification-panel-enter theme-sidebar fixed z-[70] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 shadow-2xl"
         >
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Notifications</h2>
@@ -116,8 +136,8 @@ export default function NotificationCenter() {
             <p className="theme-muted py-8 text-center text-sm">You’re all caught up.</p>
           ) : (
             <ul className="mt-2 space-y-2">
-              {notifications.map((notification) => (
-                <li key={notification._id}>
+              {notifications.map((notification, index) => (
+                <li key={notification._id} style={{ "--notification-index": Math.min(index, 8) }} className="notification-item-enter">
                   <button
                     type="button"
                     onClick={() => !notification.isRead && markRead(notification._id)}
