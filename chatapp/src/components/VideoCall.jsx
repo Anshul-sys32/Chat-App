@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FaExpand, FaPhone, FaPhoneSlash, FaVolumeUp, FaWindowMinimize } from "react-icons/fa";
 import Socket from "../Socket";
 import { listAudioRoutes, selectAudioRoute } from "../audioRouting";
+import { readMediaDevicePreferences, saveMediaDevicePreferences } from "../mediaDevicePreferences";
 import axios from "axios";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
@@ -64,9 +65,17 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     const loadRoutes = async () => {
       try {
         const routes = await listAudioRoutes();
+        const preferredRouteId = readMediaDevicePreferences().audioOutputId;
+        const preferredRoute = routes.find((route) => route.id === preferredRouteId);
+        const availableSelectedRoute = routes.find((route) => route.id === selectedAudioRoute);
+        const routeToUse = preferredRoute || availableSelectedRoute || routes[0];
         if (active) {
           setAudioRoutes(routes);
-          if (routes.length && !selectedAudioRoute) setSelectedAudioRoute(routes[0].id);
+          if (routeToUse && selectedAudioRoute !== routeToUse.id) setSelectedAudioRoute(routeToUse.id);
+        }
+        const mediaElements = [remoteAudio.current, remoteVideo.current].filter(Boolean);
+        if (active && preferredRoute && mediaElements.length) {
+          await selectAudioRoute(preferredRoute.id, mediaElements);
         }
       } catch (routeError) {
         if (active) setAudioRouteError(routeError.message || "Could not load audio outputs.");
@@ -87,6 +96,8 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     try {
       await selectAudioRoute(routeId, [remoteAudio.current, remoteVideo.current]);
       setSelectedAudioRoute(routeId);
+      const currentPreferences = readMediaDevicePreferences();
+      saveMediaDevicePreferences(undefined, { ...currentPreferences, audioOutputId: routeId });
     } catch (routeError) {
       setAudioRouteError(routeError.message || "Could not switch audio output.");
     }
@@ -101,9 +112,14 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
           : "Calls require a secure HTTPS connection. Open this app over HTTPS and allow microphone access.";
         throw new Error(message);
       }
+      const devicePreferences = readMediaDevicePreferences();
       localStream.current = await mediaDevices.getUserMedia({
-        video: mediaType === "video",
-        audio: true,
+        video: mediaType === "video" ? {
+          ...(devicePreferences.videoInputId ? { deviceId: { ideal: devicePreferences.videoInputId } } : {}),
+        } : false,
+        audio: devicePreferences.audioInputId
+          ? { deviceId: { ideal: devicePreferences.audioInputId } }
+          : true,
       });
     }
     setHasLocalMedia(true);

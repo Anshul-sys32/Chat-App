@@ -8,7 +8,8 @@ import {
   FaShieldAlt,
   FaMoon,
   FaSun,
-  FaPhone
+  FaPhone,
+  FaCog,
 } from 'react-icons/fa';
 import UserList from './UserList';
 import GroupList from './GroupList';
@@ -16,6 +17,7 @@ import Socket from '../Socket';
 import ProfileEditor from './ProfileEditor';
 import Avatar from './Avatar';
 import CallHistory from './CallHistory';
+import MediaDeviceSettings from './MediaDeviceSettings';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
@@ -39,6 +41,8 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
         return <GroupList search={search} onSelectGroup={handleSelectChat} />;
       case 'calls':
         return <CallHistory onStartChat={handleSelectChat} />;
+      case 'settings':
+        return <MediaDeviceSettings userId={user?._id} />;
       default:
         return null;
     }
@@ -119,6 +123,12 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
               onClick={() => setActiveTab('calls')}
               active={activeTab === 'calls'}
             />
+            <IconButton
+              icon={<FaCog />}
+              label="Settings"
+              onClick={() => setActiveTab('settings')}
+              active={activeTab === 'settings'}
+            />
             {user?.role === 'admin' && <IconButton
               icon={<FaShieldAlt />}
               label="Admin"
@@ -138,13 +148,13 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
         <div className="theme-sidebar-panel glass-panel relative z-0 flex h-full min-h-0 w-[calc(100vw-4rem)] flex-col overflow-hidden border-l-0 sm:w-72">
           {/* Search Input + List */}
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
-            <input
+            {activeTab !== 'settings' && <input
               type="text"
               placeholder="Search..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               className="glass-input theme-text mb-4 w-full rounded-lg p-2.5 placeholder:opacity-60 focus:outline-none focus:ring-2 focus:ring-teal-300/60"
-            />
+            />}
             {renderContent()}
           </div>
 

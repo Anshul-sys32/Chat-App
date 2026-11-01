@@ -3,6 +3,7 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
+const { createMessageNotifications } = require("../services/messageNotifications");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 const {
@@ -162,6 +163,9 @@ const initSocket = (httpServer) => {
           [result.insertId]
         );
         const message = rows[0];
+        createMessageNotifications({ type: "direct", message, io }).catch((error) => {
+          console.error("Direct message notification error:", error.message);
+        });
         for (const socketId of connectedUsers.get(String(receiverId)) || []) {
           io.to(socketId).emit("receive-message", message);
         }
@@ -239,6 +243,9 @@ const initSocket = (httpServer) => {
            WHERE gm.id = ?`,
           [result.insertId]
         );
+        createMessageNotifications({ type: "group", message: rows[0], io }).catch((error) => {
+          console.error("Group message notification error:", error.message);
+        });
         io.to(`group:${id}`).emit("group-message", rows[0]);
         socket.emit("group-message", rows[0]);
       } catch (error) {

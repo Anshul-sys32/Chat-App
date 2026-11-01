@@ -7,6 +7,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { uploadDirectory, stickerDirectory, voiceDirectory } = require("./utils/uploads");
 const { connectDB } = require("./config/db");
+const { runMigrations } = require("./utils/migrations");
 const { cleanupAbandonedVoiceUploads } = require("./utils/voiceCleanup");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
@@ -19,6 +20,7 @@ const frontendDist = path.resolve(__dirname, "../chatapp/dist");
 
 // Initialize SQL tables before accepting requests.
 connectDB().then(async () => {
+  await runMigrations();
   await cleanupAbandonedVoiceUploads().catch((error) => {
     console.error("Voice upload cleanup failed:", error.message);
   });
@@ -32,7 +34,7 @@ connectDB().then(async () => {
     console.log(`✅ Server running on http://${HOST.includes(":") ? `[${HOST}]` : HOST}:${PORT}`)
   );
 }).catch((err) => {
-  console.error("❌ MySQL connection failed:", err.message);
+  console.error("❌ Database startup failed:", err.message);
   process.exit(1);
 });
 

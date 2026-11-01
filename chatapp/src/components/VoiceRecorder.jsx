@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FaMicrophone, FaPause, FaPlay, FaStop, FaTrash } from "react-icons/fa";
+import { readMediaDevicePreferences } from "../mediaDevicePreferences";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const FORMAT_OPTIONS = [
@@ -64,7 +65,10 @@ export default function VoiceRecorder({ onRecorded, onClose, maxDurationSeconds 
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredMicrophone = readMediaDevicePreferences().audioInputId;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: preferredMicrophone ? { deviceId: { ideal: preferredMicrophone } } : true,
+      });
       if (requestId !== requestIdRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;

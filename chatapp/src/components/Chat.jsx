@@ -4,11 +4,12 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCopy, FaEllipsisV, FaMicrophone, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaBell, FaBellSlash, FaCopy, FaEllipsisV, FaMicrophone, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
 import VoiceRecorder from './VoiceRecorder';
+import VoiceMessagePlayer from './VoiceMessagePlayer';
 import Avatar from './Avatar';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 
@@ -51,6 +52,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [voicePreviewUrl, setVoicePreviewUrl] = useState('');
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [conversationMuted, setConversationMuted] = useState(false);
+  const [conversationMuteLoading, setConversationMuteLoading] = useState(false);
+  const [conversationMuteSaving, setConversationMuteSaving] = useState(false);
+  const [conversationMuteError, setConversationMuteError] = useState('');
   const fileInputRef = React.useRef(null);
   const [messages, setMessages] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -406,6 +411,70 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
   const selectedChatRef = React.useRef(selectedChat);
   selectedChatRef.current = selectedChat;
+  const conversationMuteRequestRef = React.useRef(0);
+
+  useEffect(() => {
+    conversationMuteRequestRef.current += 1;
+    setConversationMuteSaving(false);
+    if (!selectedChat?._id) {
+      setConversationMuted(false);
+      setConversationMuteLoading(false);
+      setConversationMuteError('');
+      return undefined;
+    }
+    let active = true;
+    const conversationType = selectedChat.type === 'group' ? 'group' : 'direct';
+    setConversationMuteLoading(true);
+    setConversationMuteError('');
+    axios.get(`${API_URL}/api/conversations/${conversationType}/${selectedChat._id}/notification-preferences`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      withCredentials: true,
+    }).then(({ data }) => {
+      if (active) setConversationMuted(Boolean(data.muted));
+    }).catch((error) => {
+      if (active) setConversationMuteError(error.response?.data?.message || 'Could not load mute settings.');
+    }).finally(() => {
+      if (active) setConversationMuteLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedChat?._id, selectedChat?.type]);
+
+  const toggleConversationMute = async () => {
+    const chat = selectedChatRef.current;
+    if (!chat?._id || conversationMuteLoading || conversationMuteSaving) return;
+    const requestId = conversationMuteRequestRef.current;
+    const conversationType = chat.type === 'group' ? 'group' : 'direct';
+    const muted = !conversationMuted;
+    setConversationMuteSaving(true);
+    setConversationMuteError('');
+    try {
+      const { data } = await axios.patch(
+        `${API_URL}/api/conversations/${conversationType}/${chat._id}/notification-preferences`,
+        { muted },
+        {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+          withCredentials: true,
+        }
+      );
+      if (requestId === conversationMuteRequestRef.current) setConversationMuted(Boolean(data.muted));
+    } catch (error) {
+      if (requestId === conversationMuteRequestRef.current) {
+        setConversationMuteError(error.response?.data?.message || 'Could not update mute settings.');
+      }
+    } finally {
+      if (requestId === conversationMuteRequestRef.current) setConversationMuteSaving(false);
+    }
+  };
+
+  const navigateToNotificationTarget = ({ targetType, targetId, targetName }) => {
+    const id = Number(targetId);
+    if (!Number.isSafeInteger(id) || id < 1) return;
+    if (targetType === 'group') {
+      onSelectChat({ _id: id, type: 'group', name: targetName || 'Group' });
+      return;
+    }
+    onSelectChat({ _id: id, type: 'user', username: targetName || 'User' });
+  };
 
   useEffect(() => {
     if (!selectedChat?._id) {
@@ -859,7 +928,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <h1 className="theme-text truncate text-lg font-semibold">
               {selectedChat?.name || selectedChat?.username || 'Choose a conversation'}
             </h1>
-            {selectedChat?.type === 'group' && (
+            {selectedChat?.type === 'group' && selectedChat.members != null && (
               <p className="theme-muted mt-0.5 text-xs">{selectedChat.members} members · {selectedChat.role}</p>
             )}
           </div>
@@ -891,7 +960,18 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               </>
             ) : (
               <>
-            <NotificationCenter />
+            <NotificationCenter onNavigate={navigateToNotificationTarget} />
+            <button
+              type="button"
+              onClick={toggleConversationMute}
+              disabled={!selectedChat || conversationMuteLoading || conversationMuteSaving}
+              title={conversationMuted ? 'Unmute conversation notifications' : 'Mute conversation notifications'}
+              aria-label={conversationMuted ? 'Unmute conversation notifications' : 'Mute conversation notifications'}
+              aria-pressed={conversationMuted}
+              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-30"
+            >
+              {conversationMuted ? <FaBellSlash /> : <FaBell />}
+            </button>
             <button
               onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
               title="Start Audio Call"
@@ -914,6 +994,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             )}
           </div>
         </header>
+
+        {conversationMuteError && <p role="alert" className="theme-muted px-4 py-1 text-xs text-rose-400">{conversationMuteError}</p>}
 
         {/* Main chat area */}
         <main
@@ -1137,10 +1219,18 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       ) : attachment.mimeType.startsWith('audio/') ? (
                         <div className="max-w-full">
                           {attachment.duration && <span className="mb-1 block text-xs font-medium">Voice message · {Math.ceil(attachment.duration)}s</span>}
-                          <audio controls preload="metadata" crossOrigin="use-credentials" className="max-w-full">
-                          <source src={`${API_URL}${attachment.url}`} type={attachment.mimeType} />
-                          Your browser cannot play this audio.
-                          </audio>
+                          {attachment.url.startsWith('/api/voice-media/') ? (
+                            <VoiceMessagePlayer
+                              src={`${API_URL}${attachment.url}`}
+                              mimeType={attachment.mimeType}
+                              duration={attachment.duration}
+                            />
+                          ) : (
+                            <audio controls preload="metadata" className="max-w-full">
+                              <source src={`${API_URL}${attachment.url}`} type={attachment.mimeType} />
+                              Your browser cannot play this audio.
+                            </audio>
+                          )}
                         </div>
                       ) : (
                         <a

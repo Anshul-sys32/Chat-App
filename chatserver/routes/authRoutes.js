@@ -22,6 +22,14 @@ const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
 const { parseFile } = require("music-metadata");
 const {
+	getNotificationPreferences,
+	updateNotificationPreferences,
+} = require("../controllers/notificationPreferencesController");
+const {
+	getConversationNotificationPreferences,
+	updateConversationNotificationPreferences,
+} = require("../controllers/conversationNotificationPreferencesController");
+const {
 	upload,
 	avatarUpload,
 	uploadDirectory,
@@ -341,6 +349,18 @@ router.get("/auth/me", protect, (req, res) => res.json({
 		googlePicture: req.user.googlePicture || null,
 	},
 }));
+router.get("/notifications/preferences", protect, getNotificationPreferences);
+router.patch("/notifications/preferences", protect, updateNotificationPreferences);
+router.get(
+	"/conversations/:type/:id/notification-preferences",
+	protect,
+	getConversationNotificationPreferences
+);
+router.patch(
+	"/conversations/:type/:id/notification-preferences",
+	protect,
+	updateConversationNotificationPreferences
+);
 router.get("/notifications", protect, async (req, res) => {
 	try {
 		const [[{ unreadCount }]] = await pool.execute(
@@ -349,7 +369,9 @@ router.get("/notifications", protect, async (req, res) => {
 		);
 		const [notifications] = await pool.execute(
 			`SELECT n.id AS _id, n.title, n.body, n.is_read AS isRead,
-			        n.created_at AS timestamp, u.username AS senderName
+			        n.category, n.target_type AS targetType, n.target_id AS targetId,
+			        n.target_name AS targetName, n.created_at AS timestamp,
+			        u.username AS senderName
 			 FROM notifications n
 			 LEFT JOIN users u ON u.id = n.sender_id
 			 WHERE n.user_id = ?
@@ -452,7 +474,9 @@ router.post("/admin/notifications", protect, requireAdmin, async (req, res) => {
 		if (io) {
 			const [savedNotifications] = await pool.execute(
 				`SELECT n.id AS _id, n.user_id AS userId, n.title, n.body,
-				        n.is_read AS isRead, n.created_at AS timestamp,
+				        n.is_read AS isRead, n.category,
+				        n.target_type AS targetType, n.target_id AS targetId,
+				        n.target_name AS targetName, n.created_at AS timestamp,
 				        u.username AS senderName
 				 FROM notifications n JOIN users u ON u.id = n.sender_id
 				 WHERE n.batch_id = ? ORDER BY n.id`,

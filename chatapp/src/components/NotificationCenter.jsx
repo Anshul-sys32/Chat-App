@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { FaBell, FaCheckDouble } from "react-icons/fa";
+import { FaBell, FaCheckDouble, FaCog, FaVolumeUp } from "react-icons/fa";
 import Socket from "../Socket";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
@@ -8,34 +8,146 @@ const authConfig = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
   withCredentials: true,
 });
+const DEFAULT_PREFERENCES = {
+  browserNotifications: false,
+  notificationSounds: false,
+  directMessages: true,
+  groupMessages: true,
+};
 
-export default function NotificationCenter() {
+export default function NotificationCenter({ onNavigate }) {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
   const [error, setError] = useState("");
   const containerRef = useRef(null);
   const triggerRef = useRef(null);
+  const preferencesRef = useRef(preferences);
+  const receivedNotificationIdsRef = useRef(new Set());
+  const audioContextRef = useRef(null);
+  const onNavigateRef = useRef(onNavigate);
+  preferencesRef.current = preferences;
+  onNavigateRef.current = onNavigate;
 
   const loadNotifications = useCallback(async () => {
     setError("");
     try {
       const { data } = await axios.get(`${API_URL}/api/notifications`, authConfig());
       setNotifications(data.notifications);
+      data.notifications.forEach((notification) => {
+        receivedNotificationIdsRef.current.add(String(notification._id));
+      });
       setUnreadCount(Number(data.unreadCount) || 0);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Could not load notifications.");
     }
   }, []);
 
+  const playNotificationSound = () => {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return false;
+    try {
+      const context = audioContextRef.current || new AudioContextClass();
+      audioContextRef.current = context;
+      const play = () => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(740, context.currentTime);
+        oscillator.frequency.setValueAtTime(980, context.currentTime + 0.09);
+        gain.gain.setValueAtTime(0.0001, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.2);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.21);
+        oscillator.onended = () => {
+          oscillator.disconnect();
+          gain.disconnect();
+        };
+      };
+      if (context.state === "suspended") context.resume().then(play).catch(() => {});
+      else play();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const updatePreference = async (preference, enabled) => {
+    setError("");
+    if (preference === "browserNotifications" && enabled) {
+      if (!("Notification" in window)) {
+        setError("Browser notifications are not supported on this device.");
+        return;
+      }
+      let permission = Notification.permission;
+      if (permission === "default") permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setError(permission === "denied"
+          ? "Browser notifications are blocked. Change this site’s permission in browser settings."
+          : "Browser notification permission was not granted.");
+        return;
+      }
+    }
+    if (preference === "notificationSounds" && enabled) playNotificationSound();
+    try {
+      const { data } = await axios.patch(
+        `${API_URL}/api/notifications/preferences`,
+        { [preference]: enabled },
+        authConfig()
+      );
+      setPreferences(data.preferences);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not save notification preferences.");
+    }
+  };
+
   useEffect(() => {
     loadNotifications();
+    axios.get(`${API_URL}/api/notifications/preferences`, authConfig())
+      .then(({ data }) => setPreferences(data.preferences))
+      .catch((requestError) => {
+        setError(requestError.response?.data?.message || "Could not load notification preferences.");
+      })
+      .finally(() => setPreferencesLoading(false));
     const receiveNotification = (notification) => {
+      const notificationId = String(notification?._id || "");
+      if (notificationId && receivedNotificationIdsRef.current.has(notificationId)) return;
+      if (notificationId) receivedNotificationIdsRef.current.add(notificationId);
       setNotifications((current) => [
         notification,
         ...current.filter((item) => String(item._id) !== String(notification._id)),
       ].slice(0, 50));
       if (!notification.isRead) setUnreadCount((count) => count + 1);
+      if (document.visibilityState === "hidden"
+        && preferencesRef.current.browserNotifications
+        && "Notification" in window && Notification.permission === "granted") {
+        try {
+          const systemNotification = new Notification(notification.title, {
+            body: notification.body,
+            tag: notificationId || undefined,
+          });
+          systemNotification.onclick = () => {
+            window.focus();
+            systemNotification.close();
+            if (notification.targetType && notification.targetId) {
+              onNavigateRef.current?.({
+                targetType: notification.targetType,
+                targetId: notification.targetId,
+                targetName: notification.targetName,
+              });
+            }
+          };
+        } catch (notificationError) {
+          setError(notificationError.message || "Could not show a browser notification.");
+        }
+      }
+      if (preferencesRef.current.notificationSounds) playNotificationSound();
     };
     Socket.on("notification", receiveNotification);
     return () => Socket.off("notification", receiveNotification);
@@ -91,6 +203,18 @@ export default function NotificationCenter() {
     }
   };
 
+  const openNotification = async (notification) => {
+    if (!notification.isRead) await markRead(notification._id);
+    if (notification.targetType && notification.targetId) {
+      onNavigate?.({
+        targetType: notification.targetType,
+        targetId: notification.targetId,
+        targetName: notification.targetName,
+      });
+    }
+    setIsOpen(false);
+  };
+
   return (
     <div ref={containerRef} className={`relative ${isOpen ? "z-[60]" : ""}`}>
       <button
@@ -121,17 +245,86 @@ export default function NotificationCenter() {
         >
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Notifications</h2>
-            {unreadCount > 0 && (
+            <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={markAllRead}
-                className="inline-flex items-center gap-1 text-xs text-teal-500 hover:underline"
+                onClick={() => setIsSettingsOpen((open) => !open)}
+                aria-label="Notification settings"
+                aria-expanded={isSettingsOpen}
+                title="Notification settings"
+                className="theme-muted hover:text-teal-500"
               >
-                <FaCheckDouble size={11} /> Mark all read
+                <FaCog />
               </button>
-            )}
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={markAllRead}
+                  className="inline-flex items-center gap-1 text-xs text-teal-500 hover:underline"
+                >
+                  <FaCheckDouble size={11} /> Mark all read
+                </button>
+              )}
+            </div>
           </div>
           {error && <p role="alert" className="mt-2 text-xs text-rose-400">{error}</p>}
+          {isSettingsOpen && (
+            <div aria-label="Notification preferences" className="mt-3 space-y-3 border-y border-white/10 py-3">
+              <p className="theme-muted text-xs font-semibold uppercase">Message alerts</p>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={preferences.directMessages}
+                  disabled={preferencesLoading}
+                  onChange={(event) => updatePreference("directMessages", event.target.checked)}
+                  className="accent-teal-500"
+                />
+                Direct messages
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={preferences.groupMessages}
+                  disabled={preferencesLoading}
+                  onChange={(event) => updatePreference("groupMessages", event.target.checked)}
+                  className="accent-teal-500"
+                />
+                Group messages
+              </label>
+              <p className="theme-muted text-xs font-semibold uppercase">Delivery</p>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={preferences.browserNotifications}
+                  disabled={preferencesLoading}
+                  onChange={(event) => updatePreference("browserNotifications", event.target.checked)}
+                  className="mt-1 accent-teal-500"
+                />
+                <span>
+                  Browser notifications
+                  <span className="theme-muted mt-0.5 block text-xs">Show alerts while this app is open in a hidden tab. Closed-app delivery requires optional push setup.</span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={preferences.notificationSounds}
+                  disabled={preferencesLoading}
+                  onChange={(event) => updatePreference("notificationSounds", event.target.checked)}
+                  className="accent-teal-500"
+                />
+                Notification sounds
+              </label>
+              <button
+                type="button"
+                onClick={playNotificationSound}
+                disabled={preferencesLoading}
+                className="inline-flex items-center gap-2 text-xs text-teal-500 hover:underline disabled:opacity-50"
+              >
+                <FaVolumeUp /> Preview sound
+              </button>
+            </div>
+          )}
           {notifications.length === 0 ? (
             <p className="theme-muted py-8 text-center text-sm">You’re all caught up.</p>
           ) : (
@@ -140,7 +333,7 @@ export default function NotificationCenter() {
                 <li key={notification._id} style={{ "--notification-index": Math.min(index, 8) }} className="notification-item-enter">
                   <button
                     type="button"
-                    onClick={() => !notification.isRead && markRead(notification._id)}
+                    onClick={() => openNotification(notification)}
                     className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${
                       notification.isRead ? "border-white/5 opacity-75" : "border-teal-400/30 bg-teal-400/5"
                     }`}
