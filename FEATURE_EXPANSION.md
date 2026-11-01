@@ -11,8 +11,8 @@ Status values: Not started, In progress, Implemented, Tested, Blocked.
 - Files: Multer stores uploads on local disk. The upload API checks the target conversation and the socket handler checks file ownership and presence. `/uploads` is currently served as static public content, so URLs are not private attachment authorization.
 - Mobile: Capacitor packages the same Vite web app. Android native project and audio-routing plugin exist. The Capacitor WebView bridge maps `getUserMedia` capture requests to runtime microphone/camera permission prompts; Android packaging passes, while physical-device media verification remains open.
 - Android microphone permissions: `AndroidManifest.xml` declares `RECORD_AUDIO` and `CAMERA`; the installed Capacitor `BridgeWebChromeClient` requests Android runtime permissions when WebView `getUserMedia` is initiated. The voice recorder requests capture only after the user presses Start, so this existing bridge handles the native permission prompt without a duplicate plugin.
-- Database: `connectDB()` retains the existing idempotent startup DDL for compatibility. A separate ordered migration runner and ledger now apply new schema changes after that initializer; a live database migration has not yet been run in this work session.
-- Tests: Frontend has build and lint scripts but no test framework. Backend uses Node's built-in test runner, currently covering notification preferences and migration behavior without a live MySQL server.
+- Database: `connectDB()` retains the existing idempotent startup DDL for compatibility. A separate ordered migration runner and ledger now apply additive migrations after that initializer; live database migration has not yet been run in this work session.
+- Tests: Frontend has build and lint scripts but no test framework. Backend uses Node's built-in test runner with mocked unit coverage for notifications, preferences, migrations, and community permission policies.
 
 ## Relevant Existing Functionality
 
@@ -26,8 +26,8 @@ Status values: Not started, In progress, Implemented, Tested, Blocked.
 
 - Existing upload URLs are publicly retrievable. New private voice media is stored outside the static upload tree and fetched only through authenticated message-membership checks.
 - The first voice slice adds recording controls, duration metadata, server duration limits, and protected playback. Custom playback speed and waveform/progress controls remain, and end-to-end browser/device verification has not yet been done.
-- Message notifications now cover direct and group messages with persisted categories, unique source-message deduplication, and conversation targets. Call/meeting/community producers, per-channel settings, browser push delivery, and notification delivery records remain.
-- Group membership currently has only admin/member roles. Community channels, post permissions, moderation, voting, and searchable structured content need backend-enforced capabilities, not client-only checks.
+- Message notifications now cover direct and group messages, including channel targets, with persisted categories, unique source-message deduplication, and conversation navigation. Call/meeting producers, per-channel preferences, browser push delivery, and delivery records remain.
+- Group membership has admin/member roles. Typed groups, leader-managed channels, channel-scoped messages, and admins-only posting are implemented. Structured posts, Markdown/code rendering, Q&A, voting, accepted answers, tags, reports, and moderation remain.
 - Meetings need new persistent models, authorization, timezone handling, invitation state, and an idempotent background job. There is no scheduler or queue dependency configured.
 - Multi-party WebRTC mesh does not scale reliably. An SFU (for example, LiveKit) needs deployment and credentials; it should be chosen and configured before claiming conferencing is complete.
 - CORS and deployment configuration should be rechecked before adding notification/media origins. No new external service is assumed for the initial slice.
@@ -37,7 +37,7 @@ Status values: Not started, In progress, Implemented, Tested, Blocked.
 - Migration strategy: ordered, additive JavaScript migrations use a `schema_migrations` ledger and a MySQL advisory lock. They run after the legacy startup initializer and can also be applied with `npm --prefix chatserver run db:migrate`; do not rebuild or drop existing tables. Migration execution against the configured database must be performed only after confirming the environment points to the intended database.
 - Voice messages reuse the existing message attachment representation. New recordings are stored in a private directory with a membership-checked range-capable media route. Duration, byte size, MIME, and sender-owned filename are validated.
 - Preferences/notifications: validated user-level browser/sound/direct/group preferences now reuse the existing notification table and `notification` Socket.IO event. Message targets and source IDs are stored for navigation and deduplication.
-- Calls/meetings/communities: add separate domain tables and REST services for durable operations, then use authenticated Socket.IO events for state changes after shared service authorization.
+- Calls/meetings/communities: typed groups and channel APIs now use dedicated shared capability/access services; structured posts, meetings, and SFU calls still need separate domain services and authorization.
 - Event names should follow current kebab-case conventions and be scoped to authenticated user or authorized group rooms. Do not broadcast private data globally.
 
 ## Dependencies and Configuration
@@ -74,11 +74,11 @@ Status values: Not started, In progress, Implemented, Tested, Blocked.
 - The notification center requests browser-notification permission only after a user enables the setting, displays supported browser alerts only while the app tab is hidden, and plays a generated previewable tone only when enabled. Admin, direct-message, and group-message events are supported; call, meeting, and community producers are not yet wired.
 - Closed-app delivery is not implemented. Android native notification behavior is not claimed by the browser Notification API integration.
 - Message notifications are created after successful direct/group message persistence, use only active direct recipients/current active group members with the corresponding preference enabled, persist through the existing notification table, and emit to recipient-specific Socket.IO rooms.
-- Notification history and realtime payloads include category and optional target metadata. Selecting an in-app or browser notification opens the direct conversation or group.
+- Notification history and realtime payloads include category and optional target metadata. Selecting a supported in-app or browser notification opens the direct conversation, group, or community channel.
 - The second additive migration adds direct/group preference flags, notification category/target/source fields, and a unique `(user_id, category, source_message_id)` key. Existing administrative notifications remain `system` notifications through the migration default.
 - `GET/PATCH /api/conversations/:type/:id/notification-preferences` reads or changes a user-scoped mute flag after verifying direct conversation availability or current group membership. Muted recipients still receive messages but no persistent notification.
 - The third additive migration creates `conversation_notification_preferences` with a user/type/conversation composite key. Notification recipient queries exclude muted conversations before persistence and realtime delivery.
-- Migration runner, preference controllers, and direct/group notification behavior have ten database-mocked unit tests. The migrations have not been applied to a live MySQL database in this work session.
+- Migration runner, preference controllers, and direct/group notification behavior have database-mocked unit tests. The migrations have not been applied to a live MySQL database in this work session.
 
 ## Implemented Slice: Media Device Settings
 
@@ -87,19 +87,29 @@ Status values: Not started, In progress, Implemented, Tested, Blocked.
 - Saved microphone/camera IDs are applied as `ideal` WebRTC and voice-recording constraints so unavailable devices fall back to platform defaults. Saved speaker routes reuse the existing browser/Capacitor audio-routing abstraction on calls.
 - Device selection has build/lint coverage only; real browser and Android device switching still need manual verification.
 
+## Implemented Slice: Typed Groups And Community Channels
+
+- `standard` and `community` group types are centralized in `services/groupCapabilities.js`. Existing groups remain standard by default. Community creation transactionally adds a `general` channel.
+- Leader-managed channel APIs support listing, creating, editing name/description/posting mode/order, and archiving while protecting `general` and retaining channel messages. Channel count is capped at 100.
+- `group_messages.channel_id` scopes community history and Socket.IO rooms. Channel joins, history reads, sends, reply references, uploads, and voice uploads verify group membership and channel activity; `admins` channels reject non-leader posting server-side.
+- Community channels are available from the existing group UI. Message alerts include channel targets. Member removal clears both the group room and all channel rooms.
+- This is a channel/messaging foundation, not a complete technical community: Markdown/syntax highlighting, structured questions/answers, voting, accepted answers, tags, reports, and moderation remain unimplemented.
+- The fourth additive migration adds group type, channels, channel-scoped messages, and channel notification targets. It has not been applied to a live database here.
+- Community removal revokes the user's base group room and all channel rooms; switching conversations leaves previous channel rooms. This prevents delivery of messages from stale private channel subscriptions.
+
 ## Feature Checklist
 
 | Feature | Status | Notes |
 |---|---|---|
 | Repository architecture audit | Implemented | Verified entry points, persistence, uploads, realtime, Capacitor, scripts, and test gaps. |
 | Feature implementation document | Implemented | This tracked file records current decisions and acceptance criteria. |
-| Versioned database migration foundation | In progress | Ordered ledger/lock runner, three additive migrations, explicit command, and rollback functions exist; live database application remains unverified. |
+| Versioned database migration foundation | In progress | Ordered ledger/lock runner, four additive migrations, explicit command, and rollback functions exist; live database application remains unverified. |
 | Persistent user and conversation settings | In progress | Browser/sound/direct/group preferences, per-chat mute, and device-local microphone/camera/speaker preferences exist; broader profile/privacy/chat settings remain. |
 | Categorized notifications and notification preferences | In progress | Direct/group message alerts, opt-outs, deduplication, and navigation are implemented; call/meeting/community producers and push delivery remain. |
 | Voice recording, preview, and message integration | In progress | Direct/group attachment-backed persistence and UI are coded; browser/device behavior and end-to-end send are not yet tested. |
 | Protected voice storage, duration validation, playback, and cleanup | In progress | Private disk path, parser-based duration check, authenticated message-membership route, cleanup, and custom streaming playback controls are coded; integration/Android device tests remain. |
-| Typed groups, channels, and community content | Not started | Requires centralized capabilities and server-side policies. |
+| Typed groups, channels, and community content | In progress | `standard`/`community`, leader-managed channels, channel-isolated history/messages/uploads/notifications, and server-enforced posting permissions exist; structured posts, Markdown/code rendering, Q&A, voting, and moderation remain. |
 | Multi-party calling and participant invitations | Not started | Existing implementation is direct-call signaling; SFU choice/deployment is unresolved. |
 | Scheduled meetings and reminders | Not started | No meeting schema, scheduler, or queue currently exists. |
-| Automated backend/frontend test coverage | In progress | Backend now runs ten built-in Node tests for preferences, migrations, mute authorization, and message notification delivery; live database integration and frontend interaction tests remain. |
+| Automated backend/frontend test coverage | In progress | Backend now runs fourteen built-in Node tests covering preferences, migrations, mute authorization, notification delivery, and community channel permissions; live database integration and frontend interaction tests remain. |
 | Android feature verification | In progress | Capacitor sync and Gradle debug APK build pass; microphone permission, recording, and protected playback still need emulator/device testing. |

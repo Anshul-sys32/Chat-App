@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaPlus, FaUserMinus, FaUsers } from 'react-icons/fa';
+import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaHashtag, FaPlus, FaUserMinus, FaUsers } from 'react-icons/fa';
 import Socket from '../Socket';
 import Avatar from './Avatar';
 
@@ -15,6 +15,10 @@ export default function GroupList({ search = '', onSelectGroup }) {
   const [members, setMembers] = useState([]);
   const [users, setUsers] = useState([]);
   const [name, setName] = useState('');
+  const [groupType, setGroupType] = useState('standard');
+  const [channels, setChannels] = useState([]);
+  const [newChannelName, setNewChannelName] = useState('');
+  const [channelPostingMode, setChannelPostingMode] = useState('members');
   const [newMemberId, setNewMemberId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -84,12 +88,27 @@ export default function GroupList({ search = '', onSelectGroup }) {
         ? { ...member, profilePicture }
         : member));
     };
+    const handleChannelCreated = (channel) => {
+      if (String(activeGroup?._id) !== String(channel.groupId)) return;
+      setChannels((previous) => previous.some((item) => String(item._id) === String(channel._id))
+        ? previous
+        : [...previous, channel].sort((a, b) => a.sortOrder - b.sortOrder));
+    };
+    const handleChannelUpdated = (channel) => {
+      setChannels((previous) => previous.map((item) => String(item._id) === String(channel._id) ? channel : item));
+    };
+    const handleChannelArchived = ({ channelId }) => {
+      setChannels((previous) => previous.filter((item) => String(item._id) !== String(channelId)));
+    };
     Socket.on('group-member-removed', handleRemoved);
     Socket.on('group-role-updated', handleRoleChange);
     Socket.on('group-member-added', handleMemberAdded);
     Socket.on('group-member-changed', handleMemberChanged);
     Socket.on('group-picture-updated', handleGroupPicture);
     Socket.on('profile-picture-updated', handleProfilePicture);
+    Socket.on('group-channel-created', handleChannelCreated);
+    Socket.on('group-channel-updated', handleChannelUpdated);
+    Socket.on('group-channel-archived', handleChannelArchived);
     return () => {
       Socket.off('group-member-removed', handleRemoved);
       Socket.off('group-role-updated', handleRoleChange);
@@ -97,17 +116,24 @@ export default function GroupList({ search = '', onSelectGroup }) {
       Socket.off('group-member-changed', handleMemberChanged);
       Socket.off('group-picture-updated', handleGroupPicture);
       Socket.off('profile-picture-updated', handleProfilePicture);
+      Socket.off('group-channel-created', handleChannelCreated);
+      Socket.off('group-channel-updated', handleChannelUpdated);
+      Socket.off('group-channel-archived', handleChannelArchived);
     };
   }, [currentUser?._id, activeGroup?._id, groups]);
 
   const refreshMembers = async (group) => {
     setError('');
     try {
-      const [memberResponse, userResponse] = await Promise.all([
+      const [memberResponse, userResponse, channelResponse] = await Promise.all([
         axios.get(`${apiUrl}/api/groups/${group._id}/members`, authConfig()),
         axios.get(`${apiUrl}/api/users`, authConfig()),
+        group.groupType === 'community'
+          ? axios.get(`${apiUrl}/api/groups/${group._id}/channels`, authConfig())
+          : Promise.resolve({ data: { channels: [] } }),
       ]);
       setMembers(memberResponse.data);
+      setChannels(channelResponse.data.channels || []);
       setUsers(userResponse.data.filter((candidate) =>
         !memberResponse.data.some((member) => String(member._id) === String(candidate._id))
       ));
@@ -120,6 +146,7 @@ export default function GroupList({ search = '', onSelectGroup }) {
     const next = activeGroup?._id === group._id ? null : group;
     setActiveGroup(next);
     if (next) await refreshMembers(next);
+    else setChannels([]);
   };
 
   const createGroup = async (event) => {
@@ -127,12 +154,54 @@ export default function GroupList({ search = '', onSelectGroup }) {
     if (!name.trim()) return;
     setError('');
     try {
-      const { data } = await axios.post(`${apiUrl}/api/groups`, { name }, authConfig());
+      const { data } = await axios.post(`${apiUrl}/api/groups`, { name, groupType }, authConfig());
       setGroups((previous) => [...previous, data]);
       setName('');
+      setGroupType('standard');
       await showManagement(data);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not create group.');
+    }
+  };
+
+  const createChannel = async (event) => {
+    event.preventDefault();
+    if (!activeGroup || !newChannelName.trim()) return;
+    setError('');
+    try {
+      const { data } = await axios.post(
+        `${apiUrl}/api/groups/${activeGroup._id}/channels`,
+        { name: newChannelName, postingMode: channelPostingMode },
+        authConfig()
+      );
+      setChannels((previous) => [...previous, data].sort((a, b) => a.sortOrder - b.sortOrder));
+      setNewChannelName('');
+      setChannelPostingMode('members');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not create channel.');
+    }
+  };
+
+  const updateChannelPostingMode = async (channel, postingMode) => {
+    try {
+      const { data } = await axios.patch(
+        `${apiUrl}/api/groups/${activeGroup._id}/channels/${channel._id}`,
+        { postingMode },
+        authConfig()
+      );
+      setChannels((previous) => previous.map((item) => String(item._id) === String(data._id) ? data : item));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not update channel permissions.');
+    }
+  };
+
+  const archiveChannel = async (channel) => {
+    if (!activeGroup || !window.confirm(`Archive #${channel.slug}? Its messages will be retained.`)) return;
+    try {
+      await axios.delete(`${apiUrl}/api/groups/${activeGroup._id}/channels/${channel._id}`, authConfig());
+      setChannels((previous) => previous.filter((item) => String(item._id) !== String(channel._id)));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not archive channel.');
     }
   };
 
@@ -209,6 +278,15 @@ export default function GroupList({ search = '', onSelectGroup }) {
           className="min-w-0 flex-1 rounded-md border border-gray-600 bg-gray-900/70 px-2.5 py-2 text-sm text-white outline-none transition focus:border-cyan-400"
           aria-label="New group name"
         />
+        <select
+          value={groupType}
+          onChange={(event) => setGroupType(event.target.value)}
+          aria-label="Group type"
+          className="max-w-[108px] rounded-md border border-gray-600 bg-gray-900 px-1.5 text-xs text-white"
+        >
+          <option value="standard">Standard</option>
+          <option value="community">Community</option>
+        </select>
         <button type="submit" disabled={!name.trim()} className="grid aspect-square place-items-center rounded-md bg-cyan-600 text-white transition hover:bg-cyan-500 disabled:opacity-40" title="Create group" aria-label="Create group">
           <FaPlus size={11} />
         </button>
@@ -221,9 +299,11 @@ export default function GroupList({ search = '', onSelectGroup }) {
               <Avatar src={group.avatarUrl} name={group.name} group className="h-9 w-9 text-sm" />
               <button
                 type="button"
-                onClick={() => onSelectGroup?.({ ...group, type: 'group' })}
+                onClick={() => group.groupType === 'community'
+                  ? showManagement(group)
+                  : onSelectGroup?.({ ...group, type: 'group' })}
                 className="min-w-0 flex-1 text-left"
-                title={`Open ${group.name}`}
+                title={group.groupType === 'community' ? `Open channels in ${group.name}` : `Open ${group.name}`}
               >
                 <span className="block truncate text-sm font-semibold">{group.name}</span>
                 <span className="mt-0.5 flex items-center gap-1 text-[11px] text-white/55">
@@ -242,6 +322,83 @@ export default function GroupList({ search = '', onSelectGroup }) {
             </div>
             {activeGroup?._id === group._id && (
               <div className="border-t border-gray-600 px-2.5 py-2.5">
+                {group.groupType === 'community' && (
+                  <section className="mb-3 border-b border-white/10 pb-3" aria-label={`${group.name} channels`}>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[11px] font-semibold uppercase text-gray-300">Channels</span>
+                      <span className="text-[10px] text-gray-400">{channels.length}</span>
+                    </div>
+                    {group.role === 'admin' && (
+                      <form onSubmit={createChannel} className="mb-2 space-y-1.5">
+                        <input
+                          value={newChannelName}
+                          onChange={(event) => setNewChannelName(event.target.value)}
+                          maxLength={60}
+                          placeholder="Channel name"
+                          aria-label="New channel name"
+                          className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1.5 text-xs text-white"
+                        />
+                        <div className="flex gap-1">
+                          <select
+                            value={channelPostingMode}
+                            onChange={(event) => setChannelPostingMode(event.target.value)}
+                            aria-label="Channel posting permissions"
+                            className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-900 px-1.5 py-1.5 text-[11px] text-white"
+                          >
+                            <option value="members">All members can post</option>
+                            <option value="admins">Leaders only</option>
+                          </select>
+                          <button type="submit" disabled={!newChannelName.trim()} className="grid w-7 place-items-center rounded bg-cyan-600 text-white disabled:opacity-40" aria-label="Create channel" title="Create channel">
+                            <FaPlus size={10} />
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                    <ul className="space-y-1">
+                      {channels.map((channel) => (
+                        <li key={channel._id} className="flex items-center gap-1 rounded bg-gray-900/60 px-2 py-1">
+                          <button
+                            type="button"
+                            onClick={() => onSelectGroup?.({
+                              ...group,
+                              type: 'group',
+                              channelId: channel._id,
+                              channelName: channel.name,
+                            })}
+                            className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs hover:text-teal-300"
+                            title={`Open ${channel.name}`}
+                          >
+                            <FaHashtag className="shrink-0 text-[10px]" />
+                            <span className="truncate">{channel.name}</span>
+                          </button>
+                          {group.role === 'admin' && (
+                            <>
+                              <select
+                                value={channel.postingMode}
+                                onChange={(event) => updateChannelPostingMode(channel, event.target.value)}
+                                aria-label={`${channel.name} posting permissions`}
+                                className="max-w-[74px] rounded bg-gray-700 px-1 py-0.5 text-[9px] text-white"
+                              >
+                                <option value="members">Members</option>
+                                <option value="admins">Leaders</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => archiveChannel(channel)}
+                                disabled={channel.slug === 'general' || channels.length < 2}
+                                aria-label={`Archive ${channel.name}`}
+                                title="Archive channel"
+                                className="grid h-6 w-6 place-items-center rounded text-gray-400 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-30"
+                              >
+                                <FaArchive size={10} />
+                              </button>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-[11px] font-semibold uppercase text-gray-300">Members</span>
                   <span className="text-[10px] text-gray-400">{group.role === 'admin' ? 'Admin controls' : 'View only'}</span>

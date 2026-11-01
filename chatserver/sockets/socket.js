@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
 const { createMessageNotifications } = require("../services/messageNotifications");
+const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 const {
@@ -179,14 +180,29 @@ const initSocket = (httpServer) => {
     socket.on("join-group", async (payload = {}) => {
       const { groupId } = payload || {};
       const id = Number(groupId);
+      const requestedChannelId = payload?.channelId === undefined ? null : Number(payload.channelId);
       if (!Number.isSafeInteger(id) || id < 1) return;
       try {
-        const [memberships] = await pool.execute(
-          "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
-          [id, Number(socket.userId)]
-        );
-        if (memberships.length || socket.userRole === "admin") socket.join(`group:${id}`);
-        else socket.emit("message-error", { message: "You are not a member of this group." });
+        for (const room of Array.from(socket.rooms)) {
+          if (/^group:\d+:channel:\d+$/.test(room)) socket.leave(room);
+        }
+        const group = await getGroupAccess(id, Number(socket.userId));
+        if (!canAccessGroup(group, socket.userRole)) {
+          return socket.emit("message-error", { message: "You are not a member of this group." });
+        }
+        if (group.groupType === "community") {
+          if (!Number.isSafeInteger(requestedChannelId) || requestedChannelId < 1) {
+            return socket.emit("message-error", { message: "Choose a community channel." });
+          }
+          const channel = await getActiveChannel(id, requestedChannelId);
+          if (!channel) return socket.emit("message-error", { message: "Channel not found." });
+          socket.join(`group:${id}`);
+          socket.join(`group:${id}:channel:${requestedChannelId}`);
+        } else if (requestedChannelId !== null) {
+          return socket.emit("message-error", { message: "Standard groups do not have channels." });
+        } else {
+          socket.join(`group:${id}`);
+        }
       } catch (error) {
         console.error("Group join DB error:", error.message);
         socket.emit("message-error", { message: "Could not join this group right now." });
@@ -200,20 +216,36 @@ const initSocket = (httpServer) => {
       const stickerId = Number(messagePayload.stickerId);
       const attachments = validateAttachments(messagePayload.attachments, socket.userId);
       const id = Number(groupId);
+      const requestedChannelId = messagePayload.channelId === undefined ? null : Number(messagePayload.channelId);
       if (!Number.isSafeInteger(id) || id < 1 || attachments === null
         || (typeof content !== "string" || !content.trim()) && !attachments.length && !(Number.isSafeInteger(stickerId) && stickerId > 0)) {
         return socket.emit("message-error", { message: "A group and message are required." });
       }
       try {
-        const [memberships] = await pool.execute(
-          "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
-          [id, Number(socket.userId)]
-        );
-        if (!memberships.length && socket.userRole !== "admin") {
+        const group = await getGroupAccess(id, Number(socket.userId));
+        if (!canAccessGroup(group, socket.userRole)) {
           return socket.emit("message-error", { message: "You are no longer a member of this group." });
         }
+        let channelId = null;
+        let channel = null;
+        if (group.groupType === "community") {
+          if (!Number.isSafeInteger(requestedChannelId) || requestedChannelId < 1) {
+            return socket.emit("message-error", { message: "Choose a community channel." });
+          }
+          channel = await getActiveChannel(id, requestedChannelId);
+          if (!channel) return socket.emit("message-error", { message: "Channel not found." });
+          if (!canPostInChannel(group, channel, socket.userRole)) {
+            return socket.emit("message-error", { message: "Only community leaders can post in this channel." });
+          }
+          channelId = channel.id;
+        } else if (requestedChannelId !== null) {
+          return socket.emit("message-error", { message: "Standard groups do not have channels." });
+        }
         const [replied] = Number.isSafeInteger(replyToId) && replyToId > 0
-          ? await pool.execute("SELECT id FROM group_messages WHERE id = ? AND group_id = ?", [replyToId, id])
+          ? await pool.execute(
+            "SELECT id FROM group_messages WHERE id = ? AND group_id = ? AND channel_id <=> ?",
+            [replyToId, id, channelId]
+          )
           : [[]];
         if (messagePayload.replyToId !== undefined && !replied.length) {
           return socket.emit("message-error", { message: "The message being replied to was not found." });
@@ -225,11 +257,12 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "That sticker is not available." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, sender_id, content, attachments, reply_to_id, sticker_id, sticker_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [id, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null]
+          "INSERT INTO group_messages (group_id, channel_id, sender_id, content, attachments, reply_to_id, sticker_id, sticker_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [id, channelId, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null]
         );
         const [rows] = await pool.execute(
-          `SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
+          `SELECT gm.id AS _id, gm.group_id AS groupId, gm.channel_id AS channelId,
+                  channel.name AS channelName, gm.sender_id AS sender,
                   u.username AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
                   gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
                   reply_user.username AS replySenderName,
@@ -237,6 +270,7 @@ const initSocket = (httpServer) => {
                   gm.is_deleted AS isDeleted,
                   gm.created_at AS timestamp
            FROM group_messages gm JOIN users u ON u.id = gm.sender_id
+           LEFT JOIN group_channels channel ON channel.id = gm.channel_id
            LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
            LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
            LEFT JOIN stickers ON stickers.id = gm.sticker_id
@@ -246,7 +280,8 @@ const initSocket = (httpServer) => {
         createMessageNotifications({ type: "group", message: rows[0], io }).catch((error) => {
           console.error("Group message notification error:", error.message);
         });
-        io.to(`group:${id}`).emit("group-message", rows[0]);
+        const roomName = channelId ? `group:${id}:channel:${channelId}` : `group:${id}`;
+        io.to(roomName).emit("group-message", rows[0]);
         socket.emit("group-message", rows[0]);
       } catch (error) {
         console.error("Group message DB error:", error.message);

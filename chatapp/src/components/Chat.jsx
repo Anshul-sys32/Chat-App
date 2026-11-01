@@ -328,6 +328,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     const handleGroupMessage = (data) => {
       if (selectedChatRef.current?.type !== 'group') return;
       if (String(data.groupId) !== String(selectedChatRef.current?._id)) return;
+      if (String(data.channelId || '') !== String(selectedChatRef.current?.channelId || '')) return;
       setMessages((previous) => previous.some((message) => message._id === data._id)
         ? previous
         : [...previous, data]);
@@ -466,11 +467,19 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }
   };
 
-  const navigateToNotificationTarget = ({ targetType, targetId, targetName }) => {
+  const navigateToNotificationTarget = ({ targetType, targetId, targetName, targetChannelId, targetChannelName }) => {
     const id = Number(targetId);
     if (!Number.isSafeInteger(id) || id < 1) return;
-    if (targetType === 'group') {
-      onSelectChat({ _id: id, type: 'group', name: targetName || 'Group' });
+    if (targetType === 'group' || targetType === 'channel') {
+      onSelectChat({
+        _id: id,
+        type: 'group',
+        name: targetName || 'Group',
+        ...(targetType === 'channel' ? {
+          channelId: Number(targetChannelId),
+          channelName: targetChannelName,
+        } : {}),
+      });
       return;
     }
     onSelectChat({ _id: id, type: 'user', username: targetName || 'User' });
@@ -497,7 +506,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setMessagesLoading(true);
     scrollToLatestOnLoad.current = true;
     const joinGroup = () => {
-      if (Socket.connected) Socket.emit('join-group', { groupId: selectedChat._id });
+      if (Socket.connected) Socket.emit('join-group', {
+        groupId: selectedChat._id,
+        ...(selectedChat.channelId ? { channelId: selectedChat.channelId } : {}),
+      });
     };
     if (isGroup) {
       joinGroup();
@@ -506,8 +518,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     const loadMessages = async () => {
       setMessagesError('');
       try {
+        const historyUrl = isGroup
+          ? `${API_URL}/api/groups/${selectedChat._id}/messages${selectedChat.channelId ? `?channelId=${encodeURIComponent(selectedChat.channelId)}` : ''}`
+          : `${API_URL}/api/messages/${selectedChat._id}`;
         const { data } = await axios.get(
-          `${API_URL}/api/${isGroup ? `groups/${selectedChat._id}/messages` : `messages/${selectedChat._id}`}`,
+          historyUrl,
           { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
         );
         if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') {
@@ -517,11 +532,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         setMessagesHasMore(data.hasMore);
         if (active) {
           setMessages((current) => {
-            const messagePrefix = isGroup ? `group:${chatId}:` : `direct:${currentUserId}:${chatId}:`;
+            const messagePrefix = isGroup
+              ? `group:${chatId}:${selectedChat.channelId || 'standard'}:`
+              : `direct:${currentUserId}:${chatId}:`;
             const byId = new Map(data.messages.map((message) => [`${messagePrefix}${message._id}`, message]));
             current.forEach((message) => {
               const belongsToConversation = isGroup
                 ? String(message.groupId) === chatId
+                  && String(message.channelId || '') === String(selectedChat.channelId || '')
                 : (
                   String(message.sender) === currentUserId && String(message.receiver) === chatId
                 ) || (
@@ -563,7 +581,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       window.removeEventListener('online', refreshWhenVisible);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [selectedChat?._id, selectedChat?.type, messagesAttempt, user?._id]);
+  }, [selectedChat?._id, selectedChat?.type, selectedChat?.channelId, messagesAttempt, user?._id]);
 
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
@@ -596,14 +614,19 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         `${API_URL}/api/${isGroup ? `groups/${chat._id}/messages` : `messages/${chat._id}`}`,
         {
           headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-          params: { before: String(oldestMessage._id), limit: 50 },
+          params: {
+            before: String(oldestMessage._id),
+            limit: 50,
+            ...(isGroup && chat.channelId ? { channelId: chat.channelId } : {}),
+          },
         }
       );
       if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') {
         throw new Error('The server returned an invalid message history.');
       }
       const currentChat = selectedChatRef.current;
-      if (!currentChat || String(currentChat._id) !== chatId || currentChat.type !== chat.type) return;
+      if (!currentChat || String(currentChat._id) !== chatId || currentChat.type !== chat.type
+        || String(currentChat.channelId || '') !== String(chat.channelId || '')) return;
       pendingScrollAdjustment.current = { height: previousHeight, top: previousTop };
       setMessages((current) => {
         const existingIds = new Set(current.map((message) => String(message._id)));
@@ -654,6 +677,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         const formData = new FormData();
         formData.append('type', chat.type === 'group' ? 'group' : 'direct');
         formData.append('targetId', chat._id);
+        if (chat.type === 'group' && chat.channelId) formData.append('channelId', chat.channelId);
         formData.append('file', voiceFile);
         const { data } = await axios.post(`${API_URL}/api/voice-uploads`, formData, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
@@ -665,6 +689,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         const formData = new FormData();
         formData.append('type', chat.type === 'group' ? 'group' : 'direct');
         formData.append('targetId', chat._id);
+        if (chat.type === 'group' && chat.channelId) formData.append('channelId', chat.channelId);
         selectedFiles.forEach((file) => formData.append('files', file));
         const { data } = await axios.post(`${API_URL}/api/uploads`, formData, {
           headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
@@ -679,7 +704,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       };
 
       if (chat.type === 'group') {
-        Socket.emit('group-message', { ...payload, groupId: chat._id });
+        Socket.emit('group-message', {
+          ...payload,
+          groupId: chat._id,
+          ...(chat.channelId ? { channelId: chat.channelId } : {}),
+        });
       } else {
         Socket.emit('send-message', { ...payload, receiver: chat._id });
       }
@@ -698,7 +727,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     if (!selectedChat || !Socket.connected) return;
     const payload = { content: '', stickerId: sticker._id };
     Socket.emit(selectedChat.type === 'group' ? 'group-message' : 'send-message', selectedChat.type === 'group'
-      ? { ...payload, groupId: selectedChat._id }
+      ? { ...payload, groupId: selectedChat._id, ...(selectedChat.channelId ? { channelId: selectedChat.channelId } : {}) }
       : { ...payload, receiver: selectedChat._id });
     const key = `sticker-preferences-${user?._id || 'guest'}`;
     const recent = [String(sticker._id), ...recentStickerIds.filter((id) => String(id) !== String(sticker._id))].slice(0, 30);
@@ -928,8 +957,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <h1 className="theme-text truncate text-lg font-semibold">
               {selectedChat?.name || selectedChat?.username || 'Choose a conversation'}
             </h1>
-            {selectedChat?.type === 'group' && selectedChat.members != null && (
-              <p className="theme-muted mt-0.5 text-xs">{selectedChat.members} members · {selectedChat.role}</p>
+            {selectedChat?.type === 'group' && (selectedChat.channelName || selectedChat.members != null) && (
+              <p className="theme-muted mt-0.5 text-xs">
+                {selectedChat.channelName ? `# ${selectedChat.channelName}` : `${selectedChat.members} members · ${selectedChat.role}`}
+              </p>
             )}
           </div>
           <div className="relative flex shrink-0 items-center justify-end gap-1 sm:gap-4">

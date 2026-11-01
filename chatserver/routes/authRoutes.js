@@ -30,6 +30,19 @@ const {
 	updateConversationNotificationPreferences,
 } = require("../controllers/conversationNotificationPreferencesController");
 const {
+	listChannels,
+	createChannel,
+	updateChannel,
+	archiveChannel,
+} = require("../controllers/groupChannelController");
+const { isGroupType } = require("../services/groupCapabilities");
+const {
+	getGroupAccess,
+	getActiveChannel,
+	canAccessGroup,
+	validateGroupMessageTarget,
+} = require("../services/groupAccess");
+const {
 	upload,
 	avatarUpload,
 	uploadDirectory,
@@ -370,7 +383,8 @@ router.get("/notifications", protect, async (req, res) => {
 		const [notifications] = await pool.execute(
 			`SELECT n.id AS _id, n.title, n.body, n.is_read AS isRead,
 			        n.category, n.target_type AS targetType, n.target_id AS targetId,
-			        n.target_name AS targetName, n.created_at AS timestamp,
+			        n.target_name AS targetName, n.target_channel_id AS targetChannelId,
+			        n.target_channel_name AS targetChannelName, n.created_at AS timestamp,
 			        u.username AS senderName
 			 FROM notifications n
 			 LEFT JOIN users u ON u.id = n.sender_id
@@ -476,7 +490,8 @@ router.post("/admin/notifications", protect, requireAdmin, async (req, res) => {
 				`SELECT n.id AS _id, n.user_id AS userId, n.title, n.body,
 				        n.is_read AS isRead, n.category,
 				        n.target_type AS targetType, n.target_id AS targetId,
-				        n.target_name AS targetName, n.created_at AS timestamp,
+				        n.target_name AS targetName, n.target_channel_id AS targetChannelId,
+				        n.target_channel_name AS targetChannelName, n.created_at AS timestamp,
 				        u.username AS senderName
 				 FROM notifications n JOIN users u ON u.id = n.sender_id
 				 WHERE n.batch_id = ? ORDER BY n.id`,
@@ -566,13 +581,10 @@ router.post("/voice-uploads", protect, (req, res, next) => {
 	}
 	try {
 		if (groupId) {
-			const [memberships] = await pool.execute(
-				"SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
-				[groupId, req.user.id]
-			);
-			if (!memberships.length && req.user.role !== "admin") {
+			const target = await validateGroupMessageTarget(groupId, req.user, req.body.channelId);
+			if (target.status) {
 				await removeUploadedFiles([req.file]);
-				return res.status(403).json({ message: "You are not a member of this group." });
+				return res.status(target.status).json({ message: target.message });
 			}
 		} else {
 			const [recipients] = await pool.execute(
@@ -675,13 +687,10 @@ router.post("/uploads", protect, (req, res, next) => {
 	}
 	try {
 		if (groupId) {
-			const [memberships] = await pool.execute(
-				"SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
-				[groupId, req.user.id]
-			);
-			if (!memberships.length && req.user.role !== "admin") {
+			const target = await validateGroupMessageTarget(groupId, req.user, req.body.channelId);
+			if (target.status) {
 				await removeUploadedFiles(files);
-				return res.status(403).json({ message: "You are not a member of this group." });
+				return res.status(target.status).json({ message: target.message });
 			}
 		} else {
 			const [recipients] = await pool.execute(
@@ -910,13 +919,13 @@ router.get("/groups", protect, async (req, res) => {
 		const [groups] = req.user.role === "admin"
 			? await pool.execute(
 				`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
-				        'admin' AS role, COUNT(m.user_id) AS members
+				        g.group_type AS groupType, 'admin' AS role, COUNT(m.user_id) AS members
 				 FROM chat_groups g LEFT JOIN group_members m ON m.group_id = g.id
 				 GROUP BY g.id, g.name, g.avatar_url ORDER BY g.name`
 			)
 			: await pool.execute(
 				`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
-				        mine.role, COUNT(m.user_id) AS members
+				        g.group_type AS groupType, mine.role, COUNT(m.user_id) AS members
 				 FROM chat_groups g
 				 JOIN group_members mine ON mine.group_id = g.id AND mine.user_id = ?
 				 JOIN group_members m ON m.group_id = g.id
@@ -932,22 +941,34 @@ router.get("/groups", protect, async (req, res) => {
 });
 router.post("/groups", protect, async (req, res) => {
 	const name = req.body.name?.trim();
+	const groupType = req.body.groupType || "standard";
 	if (!name || name.length > 100) {
 		return res.status(400).json({ message: "Group name must be between 1 and 100 characters." });
+	}
+	if (!isGroupType(groupType)) {
+		return res.status(400).json({ message: "Group type must be standard or community." });
 	}
 	const connection = await pool.getConnection();
 	try {
 		await connection.beginTransaction();
 		const [result] = await connection.execute(
-			"INSERT INTO chat_groups (name, created_by) VALUES (?, ?)",
-			[name, req.user.id]
+			"INSERT INTO chat_groups (name, created_by, group_type) VALUES (?, ?, ?)",
+			[name, req.user.id, groupType]
 		);
 		await connection.execute(
 			"INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'admin')",
 			[result.insertId, req.user.id]
 		);
+		if (groupType === "community") {
+			await connection.execute(
+				`INSERT INTO group_channels
+				 (group_id, name, slug, description, posting_mode, sort_order, created_by)
+				 VALUES (?, 'general', 'general', 'General discussion', 'members', 0, ?)`,
+				[result.insertId, req.user.id]
+			);
+		}
 		await connection.commit();
-		res.status(201).json({ _id: result.insertId, name, avatarUrl: null, members: 1, role: "admin" });
+		res.status(201).json({ _id: result.insertId, name, groupType, avatarUrl: null, members: 1, role: "admin" });
 	} catch (err) {
 		await connection.rollback();
 		console.error("Create group error:", err);
@@ -956,6 +977,11 @@ router.post("/groups", protect, async (req, res) => {
 		connection.release();
 	}
 });
+
+router.get("/groups/:groupId/channels", protect, listChannels);
+router.post("/groups/:groupId/channels", protect, createChannel);
+router.patch("/groups/:groupId/channels/:channelId", protect, updateChannel);
+router.delete("/groups/:groupId/channels/:channelId", protect, archiveChannel);
 
 router.get("/groups/:groupId/members", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
@@ -1121,8 +1147,15 @@ router.delete("/groups/:groupId/members/:userId", protect, async (req, res) => {
 		await pool.execute("DELETE FROM group_members WHERE group_id = ? AND user_id = ?", [groupId, userId]);
 		const io = req.app.get("io");
 		if (io) {
+			const [channels] = await pool.execute(
+				"SELECT id FROM group_channels WHERE group_id = ?",
+				[groupId]
+			);
 			io.in(`user:${userId}`).emit("group-member-removed", { groupId });
 			io.in(`user:${userId}`).socketsLeave(`group:${groupId}`);
+			for (const channel of channels) {
+				io.in(`user:${userId}`).socketsLeave(`group:${groupId}:channel:${channel.id}`);
+			}
 			io.to(`group:${groupId}`).emit("group-member-changed", { groupId, userId });
 		}
 		res.status(204).end();
@@ -1135,6 +1168,11 @@ router.delete("/groups/:groupId/members/:userId", protect, async (req, res) => {
 router.get("/groups/:groupId/messages", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
 	if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id" });
+	let channelId = null;
+	if (req.query.channelId !== undefined) {
+		if (!validId(req.query.channelId)) return res.status(400).json({ message: "Invalid channel id." });
+		channelId = Number(req.query.channelId);
+	}
 	const beforeId = req.query.before === undefined ? null : String(req.query.before);
 	if (beforeId !== null && !/^\d+$/.test(beforeId)) {
 		return res.status(400).json({ message: "Invalid message cursor." });
@@ -1142,11 +1180,21 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 	const parsedLimit = Number(req.query.limit || 50);
 	const limit = Number.isSafeInteger(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
 	try {
-		if (req.user.role !== "admin" && !await getGroupRole(groupId, req.user.id)) {
+		const group = await getGroupAccess(groupId, req.user.id);
+		if (!group) return res.status(404).json({ message: "Group not found." });
+		if (!canAccessGroup(group, req.user.role)) {
 			return res.status(403).json({ message: "You are not a member of this group." });
+		}
+		if (group.groupType === "community") {
+			if (!channelId) return res.status(400).json({ message: "Choose a community channel." });
+			const channel = await getActiveChannel(groupId, channelId);
+			if (!channel) return res.status(404).json({ message: "Channel not found." });
+		} else if (channelId !== null) {
+			return res.status(400).json({ message: "Standard groups do not have channels." });
 		}
 		const [rows] = await pool.execute(
 			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
+					gm.channel_id AS channelId,
 					u.username AS senderName,
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
@@ -1161,11 +1209,11 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
 				 LEFT JOIN group_message_hidden_for reply_hidden ON reply_hidden.message_id = reply_message.id AND reply_hidden.user_id = ?
 			 LEFT JOIN stickers ON stickers.id = gm.sticker_id
-				 WHERE gm.group_id = ?
+				 WHERE gm.group_id = ? AND gm.channel_id <=> ?
 				   AND NOT EXISTS (SELECT 1 FROM group_message_hidden_for hidden WHERE hidden.message_id = gm.id AND hidden.user_id = ?)
 				   AND (? IS NULL OR gm.id < ?)
 			 ORDER BY gm.id DESC LIMIT ?`,
-			[req.user.id, groupId, req.user.id, beforeId, beforeId, limit + 1]
+			[req.user.id, groupId, channelId, req.user.id, beforeId, beforeId, limit + 1]
 		);
 		const hasMore = rows.length > limit;
 		const messages = rows.slice(0, limit).reverse();

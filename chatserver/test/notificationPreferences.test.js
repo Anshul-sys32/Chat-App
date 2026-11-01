@@ -13,6 +13,9 @@ const {
   updateConversationNotificationPreferences,
 } = require("../controllers/conversationNotificationPreferencesController");
 const conversationPreferencesMigration = require("../migrations/202611010003_conversation_notification_preferences");
+const communityMigration = require("../migrations/202611010004_group_channels");
+const { validateGroupMessageTarget } = require("../services/groupAccess");
+const { listChannels, createChannel } = require("../controllers/groupChannelController");
 
 const createResponse = () => ({
   statusCode: 200,
@@ -123,6 +126,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010001_user_notification_preferences",
     "202611010002_message_notification_targets",
     "202611010003_conversation_notification_preferences",
+    "202611010004_group_channels",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -203,6 +207,46 @@ test("group-message notifications use member recipients and the group navigation
   assert.ok(statements[1].values.includes("Study Room"));
 });
 
+test("community channel notifications retain channel-specific navigation metadata", async () => {
+  const statements = [];
+  mock.method(pool, "execute", async (sql, values) => {
+    statements.push({ sql, values });
+    if (sql.includes("FROM group_members member")) {
+      assert.equal(values[1], 16);
+      return [[{
+        userId: 31,
+        senderName: "Ari",
+        targetName: "Dev Guild",
+        groupType: "community",
+        targetChannelName: "Rust Help",
+        notificationsEnabled: 1,
+      }], []];
+    }
+    if (sql.includes("INSERT IGNORE INTO notifications")) return [{ affectedRows: 1 }, []];
+    return [[{
+      _id: 703,
+      userId: 31,
+      targetType: "channel",
+      targetId: 20,
+      targetChannelId: 16,
+      targetChannelName: "Rust Help",
+    }], []];
+  });
+  const emitted = [];
+  const io = { to: (room) => ({ emit: (_event, notification) => emitted.push({ room, notification }) }) };
+
+  await createMessageNotifications({
+    type: "group",
+    message: { _id: 702, sender: 8, groupId: 20, channelId: 16, content: "Help" },
+    io,
+  });
+
+  assert.ok(statements[1].sql.includes("target_channel_id"));
+  assert.ok(statements[1].values.includes(16));
+  assert.ok(statements[1].values.includes("Rust Help"));
+  assert.equal(emitted[0].notification.targetType, "channel");
+});
+
 test("conversation mute settings require membership and persist the authenticated user's value", async () => {
   const statements = [];
   mock.method(pool, "execute", async (sql, values) => {
@@ -249,4 +293,55 @@ test("conversation mute migration defines a user-scoped composite key and rollba
   assert.match(statements[0], /PRIMARY KEY \(user_id, conversation_type, conversation_id\)/);
   await conversationPreferencesMigration.down(connection);
   assert.match(statements[1], /DROP TABLE IF EXISTS conversation_notification_preferences/);
+});
+
+test("community migration adds types, channels, nullable message scope, and rollback", async () => {
+  const statements = [];
+  const connection = {
+    execute: async () => [[{ count: 0 }], []],
+    query: async (sql) => statements.push(sql),
+  };
+  await communityMigration.up(connection);
+  assert.ok(statements.some((sql) => sql.includes("group_type")));
+  assert.ok(statements.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS group_channels")));
+  assert.ok(statements.some((sql) => sql.includes("FOREIGN KEY (channel_id)")));
+  await communityMigration.down(connection);
+  assert.ok(statements.some((sql) => sql.includes("DROP TABLE IF EXISTS group_channels")));
+});
+
+test("channel posting mode is enforced by the shared group policy", async () => {
+  let groupRole = "member";
+  mock.method(pool, "execute", async (sql) => {
+    if (sql.includes("FROM chat_groups group_record")) {
+      return [[{ id: 8, groupType: "community", groupRole }], []];
+    }
+    return [[{ id: 14, groupId: 8, postingMode: "admins" }], []];
+  });
+  const denied = await validateGroupMessageTarget(8, { id: 5, role: "user" }, 14);
+  assert.equal(denied.status, 403);
+  groupRole = "admin";
+  const allowed = await validateGroupMessageTarget(8, { id: 5, role: "user" }, 14);
+  assert.equal(allowed.channelId, 14);
+});
+
+test("community members can list channels but cannot create them without leader role", async () => {
+  mock.method(pool, "execute", async (sql) => {
+    if (sql.includes("FROM chat_groups group_record")) {
+      return [[{ id: 8, groupType: "community", groupRole: "member" }], []];
+    }
+    if (sql.includes("FROM group_channels")) return [[{ _id: 14, name: "general", slug: "general" }], []];
+    return [{ affectedRows: 1 }, []];
+  });
+  const listResponse = createResponse();
+  await listChannels({ user: { id: 5, role: "user" }, params: { groupId: "8" } }, listResponse);
+  assert.equal(listResponse.statusCode, 200);
+  assert.equal(listResponse.body.channels[0].slug, "general");
+
+  const createResponseValue = createResponse();
+  await createChannel({
+    user: { id: 5, role: "user" },
+    params: { groupId: "8" },
+    body: { name: "help" },
+  }, createResponseValue);
+  assert.equal(createResponseValue.statusCode, 403);
 });

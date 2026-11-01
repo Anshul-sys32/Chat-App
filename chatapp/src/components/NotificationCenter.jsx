@@ -140,6 +140,8 @@ export default function NotificationCenter({ onNavigate }) {
                 targetType: notification.targetType,
                 targetId: notification.targetId,
                 targetName: notification.targetName,
+                targetChannelId: notification.targetChannelId,
+                targetChannelName: notification.targetChannelName,
               });
             }
           };
@@ -210,6 +212,8 @@ export default function NotificationCenter({ onNavigate }) {
         targetType: notification.targetType,
         targetId: notification.targetId,
         targetName: notification.targetName,
+        targetChannelId: notification.targetChannelId,
+        targetChannelName: notification.targetChannelName,
       });
     }
     setIsOpen(false);
