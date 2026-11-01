@@ -5,8 +5,9 @@ const path = require("node:path");
 const fs = require("node:fs");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const { uploadDirectory, stickerDirectory } = require("./utils/uploads");
+const { uploadDirectory, stickerDirectory, voiceDirectory } = require("./utils/uploads");
 const { connectDB } = require("./config/db");
+const { cleanupAbandonedVoiceUploads } = require("./utils/voiceCleanup");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
 
@@ -17,7 +18,16 @@ const HOST = process.env.HOST || "::";
 const frontendDist = path.resolve(__dirname, "../chatapp/dist");
 
 // Initialize SQL tables before accepting requests.
-connectDB().then(() => {
+connectDB().then(async () => {
+  await cleanupAbandonedVoiceUploads().catch((error) => {
+    console.error("Voice upload cleanup failed:", error.message);
+  });
+  const cleanupTimer = setInterval(() => {
+    cleanupAbandonedVoiceUploads().catch((error) => {
+      console.error("Voice upload cleanup failed:", error.message);
+    });
+  }, 6 * 60 * 60 * 1000);
+  cleanupTimer.unref();
   server.listen(PORT, HOST, () =>
     console.log(`✅ Server running on http://${HOST.includes(":") ? `[${HOST}]` : HOST}:${PORT}`)
   );
@@ -35,6 +45,7 @@ app.use(cookieParser());
 app.use(express.json());
 fs.mkdirSync(uploadDirectory, { recursive: true });
 fs.mkdirSync(stickerDirectory, { recursive: true });
+fs.mkdirSync(voiceDirectory, { recursive: true });
 app.use("/uploads/stickers", express.static(stickerDirectory, {
   dotfiles: "deny",
   index: false,

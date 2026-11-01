@@ -4,7 +4,16 @@ const { randomUUID } = require("node:crypto");
 
 const uploadDirectory = path.resolve(__dirname, "../uploads");
 const stickerDirectory = path.join(uploadDirectory, "stickers");
+const voiceDirectory = path.resolve(__dirname, "../private/voice");
 const maxFileSize = 50 * 1024 * 1024;
+const configuredVoiceFileSize = Number(process.env.MAX_VOICE_MESSAGE_SIZE_BYTES);
+const maxVoiceFileSize = Number.isSafeInteger(configuredVoiceFileSize) && configuredVoiceFileSize > 0
+  ? Math.min(configuredVoiceFileSize, maxFileSize)
+  : 20 * 1024 * 1024;
+const configuredVoiceDuration = Number(process.env.MAX_VOICE_MESSAGE_SECONDS);
+const maxVoiceDurationSeconds = Number.isSafeInteger(configuredVoiceDuration) && configuredVoiceDuration > 0
+  ? Math.min(configuredVoiceDuration, 3600)
+  : 300;
 const maxStickerFileSize = 8 * 1024 * 1024;
 const avatarMaxFileSize = 5 * 1024 * 1024;
 const allowedAvatarTypes = new Map([
@@ -27,7 +36,15 @@ const allowedUploadTypes = new Map([
   ["audio/ogg", ".ogg"],
   ["audio/wav", ".wav"],
   ["audio/webm", ".webm"],
+  ["audio/mp4", ".m4a"],
   ["application/pdf", ".pdf"],
+]);
+const allowedVoiceTypes = new Map([
+  ["audio/webm", ".webm"],
+  ["audio/ogg", ".ogg"],
+  ["audio/mp4", ".m4a"],
+  ["audio/mpeg", ".mp3"],
+  ["audio/wav", ".wav"],
 ]);
 const allowedStickerTypes = new Set([
   "image/jpeg",
@@ -71,6 +88,23 @@ const avatarUpload = multer({
   },
 });
 
+const voiceUpload = multer({
+  storage: multer.diskStorage({
+    destination: voiceDirectory,
+    filename: (req, file, callback) => {
+      const extension = allowedVoiceTypes.get(file.mimetype);
+      callback(null, `${req.user.id}-voice-${randomUUID()}${extension}`);
+    },
+  }),
+  limits: { fileSize: maxVoiceFileSize, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    if (!allowedVoiceTypes.has(file.mimetype)) {
+      return callback(new Error("Choose a supported audio recording."));
+    }
+    return callback(null, true);
+  },
+});
+
 const stickerUpload = multer({
 	storage: multer.memoryStorage(),
 	limits: { fileSize: maxStickerFileSize, files: 1 },
@@ -88,7 +122,11 @@ module.exports = {
   stickerUpload,
   uploadDirectory,
   stickerDirectory,
+  voiceDirectory,
   allowedUploadTypes,
+  allowedVoiceTypes,
   maxFileSize,
+  maxVoiceFileSize,
+  maxVoiceDurationSeconds,
   maxStickerFileSize,
 };

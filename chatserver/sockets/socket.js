@@ -5,7 +5,15 @@ const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
-const { uploadDirectory, allowedUploadTypes, maxFileSize } = require("../utils/uploads");
+const {
+  uploadDirectory,
+  voiceDirectory,
+  allowedUploadTypes,
+  allowedVoiceTypes,
+  maxFileSize,
+  maxVoiceFileSize,
+  maxVoiceDurationSeconds,
+} = require("../utils/uploads");
 
 const connectedUsers = new Map();
 
@@ -13,25 +21,38 @@ const validateAttachments = (attachments, userId) => {
   if (attachments === undefined) return [];
   if (!Array.isArray(attachments) || attachments.length > 5) return null;
   const userFilePrefix = `/uploads/${userId}-`;
+  const voiceFilePrefix = `/api/voice-media/${userId}-voice-`;
   const filenamePattern = /^[a-f0-9-]{36}\.[a-z0-9]{1,10}$/i;
+  const voiceFilenamePattern = /^[a-f0-9-]{36}\.(webm|ogg|m4a|mp3|wav)$/i;
   const validated = [];
   for (const attachment of attachments) {
-    if (!attachment || typeof attachment !== "object"
-      || typeof attachment.url !== "string"
-      || !attachment.url.startsWith(userFilePrefix)) return null;
-    const filename = attachment.url.slice("/uploads/".length);
-    if (!filenamePattern.test(filename.slice(String(userId).length + 1))
-      || !existsSync(path.join(uploadDirectory, filename))
-      || typeof attachment.name !== "string" || !attachment.name.trim()
+    if (!attachment || typeof attachment !== "object" || typeof attachment.url !== "string") return null;
+    const isVoiceMessage = attachment.url.startsWith(voiceFilePrefix);
+    const filename = isVoiceMessage
+      ? attachment.url.slice("/api/voice-media/".length)
+      : attachment.url.startsWith(userFilePrefix)
+        ? attachment.url.slice("/uploads/".length)
+        : "";
+    if (!filename || typeof attachment.name !== "string" || !attachment.name.trim()
       || attachment.name.length > 255
-      || !allowedUploadTypes.has(attachment.mimeType)
       || !Number.isSafeInteger(attachment.size)
-      || attachment.size < 1 || attachment.size > maxFileSize) return null;
+      || attachment.size < 1 || attachment.size > (isVoiceMessage ? maxVoiceFileSize : maxFileSize)) return null;
+    if (isVoiceMessage) {
+      if (!voiceFilenamePattern.test(filename.slice(`${userId}-voice-`.length))
+        || !allowedVoiceTypes.has(attachment.mimeType)
+        || !Number.isSafeInteger(attachment.duration)
+        || attachment.duration < 1 || attachment.duration > maxVoiceDurationSeconds
+        || attachment.size > maxVoiceFileSize
+        || !existsSync(path.join(voiceDirectory, filename))) return null;
+    } else if (!filenamePattern.test(filename.slice(String(userId).length + 1))
+      || !allowedUploadTypes.has(attachment.mimeType)
+      || !existsSync(path.join(uploadDirectory, filename))) return null;
     validated.push({
       url: attachment.url,
       name: attachment.name,
       mimeType: attachment.mimeType,
       size: attachment.size,
+      ...(isVoiceMessage ? { duration: attachment.duration } : {}),
     });
   }
   return validated;

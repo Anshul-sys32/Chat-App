@@ -4,10 +4,11 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCopy, FaEllipsisV, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCopy, FaEllipsisV, FaMicrophone, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
+import VoiceRecorder from './VoiceRecorder';
 import Avatar from './Avatar';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 
@@ -33,7 +34,8 @@ const getAttachments = (message) => {
   }
   return Array.isArray(attachments)
     ? attachments.filter((attachment) => attachment && typeof attachment.url === 'string'
-      && attachment.url.startsWith('/uploads/') && typeof attachment.mimeType === 'string')
+      && (attachment.url.startsWith('/uploads/') || attachment.url.startsWith('/api/voice-media/'))
+      && typeof attachment.mimeType === 'string')
     : [];
 };
 
@@ -45,6 +47,9 @@ const formatFileSize = (size) => {
 export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, theme, onToggleTheme }) {
   const [msg, setMsg] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [voiceFile, setVoiceFile] = useState(null);
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState('');
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const fileInputRef = React.useRef(null);
   const [messages, setMessages] = useState([]);
@@ -92,6 +97,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const replyDrag = React.useRef(null);
   const suppressMessageClick = React.useRef(false);
   const [replySwipe, setReplySwipe] = useState({ messageId: null, offset: 0, dragging: false });
+
+  useEffect(() => {
+    if (!voiceFile) {
+      setVoicePreviewUrl('');
+      return undefined;
+    }
+    const url = URL.createObjectURL(voiceFile);
+    setVoicePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [voiceFile]);
 
   useEffect(() => () => {
     if (replyDrag.current?.timer) window.clearTimeout(replyDrag.current.timer);
@@ -543,7 +558,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const selectFiles = (event) => {
     const incomingFiles = Array.from(event.target.files || []);
     event.target.value = '';
-    if (selectedFiles.length + incomingFiles.length > MAX_FILES_PER_MESSAGE) {
+    if (selectedFiles.length + incomingFiles.length + (voiceFile ? 1 : 0) > MAX_FILES_PER_MESSAGE) {
       window.alert(`You can send up to ${MAX_FILES_PER_MESSAGE} files per message.`);
       return;
     }
@@ -557,7 +572,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
   const sendMessage = async (event) => {
     event.preventDefault();
-    if ((!msg.trim() && !selectedFiles.length) || !selectedChat?._id || isSending) return;
+    if ((!msg.trim() && !selectedFiles.length && !voiceFile) || !selectedChat?._id || isSending) return;
     if (!Socket.connected) {
       setSocketConnected(false);
       return;
@@ -566,6 +581,17 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setIsSending(true);
     try {
       let attachments = [];
+      if (voiceFile) {
+        const formData = new FormData();
+        formData.append('type', chat.type === 'group' ? 'group' : 'direct');
+        formData.append('targetId', chat._id);
+        formData.append('file', voiceFile);
+        const { data } = await axios.post(`${API_URL}/api/voice-uploads`, formData, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+          withCredentials: true,
+        });
+        attachments.push(data);
+      }
       if (selectedFiles.length) {
         const formData = new FormData();
         formData.append('type', chat.type === 'group' ? 'group' : 'direct');
@@ -575,7 +601,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
           withCredentials: true,
         });
-        attachments = data;
+        attachments = [...attachments, ...data];
       }
       const payload = {
         content: msg.trim(),
@@ -590,6 +616,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       }
       setMsg('');
       setSelectedFiles([]);
+      setVoiceFile(null);
       setReplyTo(null);
     } catch (error) {
       window.alert(error.response?.data?.message || 'Could not upload the selected files.');
@@ -1108,10 +1135,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                           Your browser cannot play this video.
                         </video>
                       ) : attachment.mimeType.startsWith('audio/') ? (
-                        <audio controls preload="metadata" className="max-w-full">
+                        <div className="max-w-full">
+                          {attachment.duration && <span className="mb-1 block text-xs font-medium">Voice message · {Math.ceil(attachment.duration)}s</span>}
+                          <audio controls preload="metadata" crossOrigin="use-credentials" className="max-w-full">
                           <source src={`${API_URL}${attachment.url}`} type={attachment.mimeType} />
                           Your browser cannot play this audio.
-                        </audio>
+                          </audio>
+                        </div>
                       ) : (
                         <a
                           href={`${API_URL}${attachment.url}`}
@@ -1232,6 +1262,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowVoiceRecorder(true)}
+              disabled={!selectedChat || isSending}
+              className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-50"
+              title="Record a voice message"
+              aria-label="Record a voice message"
+            >
+              <FaMicrophone />
+            </button>
             <input
               value={msg}
               onChange={(e) => setMsg(e.target.value)}
@@ -1268,11 +1308,26 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <button
               className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"
-              disabled={!selectedChat || (!msg.trim() && !selectedFiles.length) || !socketConnected || isSending}
+              disabled={!selectedChat || (!msg.trim() && !selectedFiles.length && !voiceFile) || !socketConnected || isSending}
             >
               {isSending ? 'Sending…' : 'Send'}
             </button>
           </form>
+          {voiceFile && (
+            <div className="mx-auto mt-2 flex max-w-4xl items-center gap-2 rounded-lg border border-teal-300/30 px-3 py-2">
+              <span className="shrink-0 text-xs font-medium">Voice preview</span>
+              {voicePreviewUrl && <audio controls preload="metadata" src={voicePreviewUrl} className="min-w-0 flex-1" />}
+              <button
+                type="button"
+                onClick={() => setVoiceFile(null)}
+                disabled={isSending}
+                aria-label="Remove voice recording"
+                className="shrink-0 text-sm text-rose-300"
+              >
+                Remove
+              </button>
+            </div>
+          )}
           {selectedFiles.length > 0 && (
             <ul className="mx-auto mt-2 flex max-w-4xl flex-wrap gap-2" aria-label="Selected attachments">
               {selectedFiles.map((file, index) => (
@@ -1292,6 +1347,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </ul>
           )}
         </footer>
+
+        {showVoiceRecorder && (
+          <VoiceRecorder
+            maxDurationSeconds={Number.isSafeInteger(Number(import.meta.env.VITE_MAX_VOICE_MESSAGE_SECONDS))
+              && Number(import.meta.env.VITE_MAX_VOICE_MESSAGE_SECONDS) > 0
+              ? Math.min(Number(import.meta.env.VITE_MAX_VOICE_MESSAGE_SECONDS), 3600)
+              : 300}
+            onClose={() => setShowVoiceRecorder(false)}
+            onRecorded={(file) => {
+              if (selectedFiles.length >= MAX_FILES_PER_MESSAGE) {
+                window.alert(`You can send up to ${MAX_FILES_PER_MESSAGE} files per message.`);
+                return;
+              }
+              setVoiceFile(file);
+              setShowVoiceRecorder(false);
+            }}
+          />
+        )}
 
         {/* Video Call Modal */}
         {isAdminOpen && user?.role === 'admin' && (

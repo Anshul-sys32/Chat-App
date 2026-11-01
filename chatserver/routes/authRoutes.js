@@ -20,7 +20,17 @@ const User = require("../models/User");
 const { pool } = require("../config/db");
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
-const { upload, avatarUpload, uploadDirectory, stickerUpload } = require("../utils/uploads");
+const { parseFile } = require("music-metadata");
+const {
+	upload,
+	avatarUpload,
+	uploadDirectory,
+	stickerUpload,
+	voiceUpload,
+	voiceDirectory,
+	allowedVoiceTypes,
+	maxVoiceDurationSeconds,
+} = require("../utils/uploads");
 const { optimizeSticker, storeSticker, removeStickerFile } = require("../utils/stickers");
 
 const removeUploadedFiles = async (files) => Promise.all((files || []).map((file) =>
@@ -512,6 +522,111 @@ router.delete("/admin/login-quotes/:quoteId", protect, requireAdmin, async (req,
 		res.status(500).json({ message: "Could not delete login quote." });
 	}
 });
+router.post("/voice-uploads", protect, (req, res, next) => {
+	voiceUpload.single("file")(req, res, async (error) => {
+		if (error) {
+			await removeUploadedFiles(req.file ? [req.file] : []);
+			const message = error.code === "LIMIT_FILE_SIZE"
+				? "Voice recordings exceed the configured size limit."
+				: error.message;
+			return res.status(400).json({ message });
+		}
+		return next();
+	});
+}, async (req, res) => {
+	const groupId = req.body.type === "group" ? Number(req.body.targetId) : null;
+	const receiverId = req.body.type === "direct" ? Number(req.body.targetId) : null;
+	if (!req.file || !["direct", "group"].includes(req.body.type) || !validId(req.body.targetId)) {
+		await removeUploadedFiles(req.file ? [req.file] : []);
+		return res.status(400).json({ message: "Choose a conversation and record a voice message." });
+	}
+	try {
+		if (groupId) {
+			const [memberships] = await pool.execute(
+				"SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
+				[groupId, req.user.id]
+			);
+			if (!memberships.length && req.user.role !== "admin") {
+				await removeUploadedFiles([req.file]);
+				return res.status(403).json({ message: "You are not a member of this group." });
+			}
+		} else {
+			const [recipients] = await pool.execute(
+				"SELECT id FROM users WHERE id = ? AND status = 'active' LIMIT 1",
+				[receiverId]
+			);
+			if (!recipients.length || receiverId === Number(req.user.id)) {
+				await removeUploadedFiles([req.file]);
+				return res.status(404).json({ message: "That recipient is not available." });
+			}
+		}
+		const metadata = await parseFile(req.file.path, { duration: true });
+		const durationSeconds = Number(metadata.format.duration);
+		if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > maxVoiceDurationSeconds) {
+			await removeUploadedFiles([req.file]);
+			return res.status(400).json({ message: `Voice recordings must be ${maxVoiceDurationSeconds} seconds or shorter.` });
+		}
+		return res.status(201).json({
+			url: `/api/voice-media/${path.basename(req.file.filename)}`,
+			name: `Voice message (${Math.ceil(durationSeconds)}s)`,
+			mimeType: req.file.mimetype,
+			size: req.file.size,
+			duration: Math.ceil(durationSeconds),
+		});
+	} catch (error) {
+		await removeUploadedFiles([req.file]);
+		console.error("Voice upload error:", error);
+		return res.status(400).json({ message: "This recording could not be validated as supported audio." });
+	}
+});
+
+router.get("/voice-media/:filename", protect, async (req, res) => {
+	const filename = path.basename(req.params.filename || "");
+	if (!/^\d+-voice-[a-f0-9-]{36}\.(webm|ogg|m4a|mp3|wav)$/i.test(filename)) {
+		return res.status(404).json({ message: "Voice recording not found." });
+	}
+	const mediaUrl = `/api/voice-media/${filename}`;
+	try {
+		const [[directMessage]] = await pool.execute(
+			`SELECT 1 FROM messages
+			 WHERE is_deleted = FALSE AND JSON_SEARCH(attachments, 'one', ?) IS NOT NULL
+			   AND (sender_id = ? OR receiver_id = ?)
+			   AND NOT EXISTS (
+				 SELECT 1 FROM direct_message_hidden_for hidden
+				 WHERE hidden.message_id = messages.id AND hidden.user_id = ?
+			   ) LIMIT 1`,
+			[mediaUrl, req.user.id, req.user.id, req.user.id]
+		);
+		let authorized = Boolean(directMessage);
+		if (!authorized) {
+			const [[groupMessage]] = await pool.execute(
+				`SELECT 1 FROM group_messages gm
+				 LEFT JOIN group_members gmbr ON gmbr.group_id = gm.group_id AND gmbr.user_id = ?
+				 WHERE gm.is_deleted = FALSE AND JSON_SEARCH(gm.attachments, 'one', ?) IS NOT NULL
+				   AND (gmbr.user_id IS NOT NULL OR ? = 'admin')
+				 LIMIT 1`,
+				[req.user.id, mediaUrl, req.user.role]
+			);
+			authorized = Boolean(groupMessage);
+		}
+		if (!authorized) return res.status(404).json({ message: "Voice recording not found." });
+		const filePath = path.join(voiceDirectory, filename);
+		const mimeType = [...allowedVoiceTypes.entries()].find(([, extension]) => filename.endsWith(extension))?.[0];
+		return res.sendFile(filePath, {
+			headers: {
+				"Cache-Control": "private, no-store",
+				"X-Content-Type-Options": "nosniff",
+				"Content-Type": mimeType || "application/octet-stream",
+			},
+		}, (error) => {
+			if (error && !res.headersSent) res.status(error.statusCode || 404).end();
+		});
+	} catch (error) {
+		console.error("Voice media authorization error:", error);
+		return res.status(500).json({ message: "Could not load this voice recording." });
+	}
+});
+
 router.post("/uploads", protect, (req, res, next) => {
 	upload.array("files", 5)(req, res, async (error) => {
 		if (error) {
