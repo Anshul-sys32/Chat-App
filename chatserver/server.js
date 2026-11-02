@@ -9,6 +9,7 @@ const { uploadDirectory, stickerDirectory, voiceDirectory } = require("./utils/u
 const { connectDB } = require("./config/db");
 const { runMigrations } = require("./utils/migrations");
 const { cleanupAbandonedVoiceUploads } = require("./utils/voiceCleanup");
+const { sendMeetingReminders } = require("./services/meetingReminders");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
 
@@ -30,6 +31,15 @@ connectDB().then(async () => {
     });
   }, 6 * 60 * 60 * 1000);
   cleanupTimer.unref();
+  const meetingReminderTimer = setInterval(() => {
+    sendMeetingReminders(app.get("io")).catch((error) => {
+      console.error("Meeting reminder delivery failed:", error.message);
+    });
+  }, 60 * 1000);
+  meetingReminderTimer.unref();
+  sendMeetingReminders(app.get("io")).catch((error) => {
+    console.error("Initial meeting reminder delivery failed:", error.message);
+  });
   server.listen(PORT, HOST, () =>
     console.log(`✅ Server running on http://${HOST.includes(":") ? `[${HOST}]` : HOST}:${PORT}`)
   );

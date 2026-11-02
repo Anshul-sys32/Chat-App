@@ -243,6 +243,23 @@ router.post("/register/verify", verifySignup);
 router.post("/register/resend", resendSignupOtp);
 router.post("/password-reset/request", requestPasswordReset);
 router.post("/password-reset/confirm", resetPassword);
+router.post("/call-invitees", protect, async (req, res) => {
+	const identifier = typeof req.body.identifier === "string" ? req.body.identifier.trim() : "";
+	if (!identifier || identifier.length > 255) return res.status(400).json({ message: "Enter a username or email." });
+	try {
+		const [users] = await pool.execute(
+			`SELECT id AS _id, username, email FROM users
+			 WHERE status = 'active' AND id <> ?
+			   AND (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)) LIMIT 1`,
+			[req.user.id, identifier, identifier]
+		);
+		if (!users.length) return res.status(404).json({ message: "No active user matches that username or email." });
+		return res.json(users[0]);
+	} catch (error) {
+		console.error("Call invitee lookup error:", error);
+		return res.status(500).json({ message: "Could not find that person." });
+	}
+});
 router.get("/call-history", protect, async (req, res) => {
 	try {
 		const [calls] = await pool.execute(
@@ -326,6 +343,165 @@ router.delete("/call-history", protect, async (req, res) => {
 		res.status(500).json({ message: "Could not clear call history." });
 	}
 });
+
+router.get("/meetings", protect, async (req, res) => {
+	try {
+		const [meetings] = await pool.execute(
+			`SELECT meeting.id AS _id, meeting.title, meeting.description,
+			        DATE_FORMAT(meeting.scheduled_at, '%Y-%m-%dT%H:%i:%s.000Z') AS scheduledAt,
+			        meeting.status,
+			        meeting.organizer_id AS organizerId, organizer.username AS organizerName,
+			        participant.status AS invitationStatus,
+			        (meeting.organizer_id = ?) AS isOrganizer
+			 FROM scheduled_meetings meeting
+			 JOIN users organizer ON organizer.id = meeting.organizer_id
+			 LEFT JOIN meeting_participants participant
+			   ON participant.meeting_id = meeting.id AND participant.user_id = ?
+			 WHERE meeting.organizer_id = ? OR participant.user_id = ?
+			 ORDER BY meeting.scheduled_at ASC LIMIT 100`,
+			[req.user.id, req.user.id, req.user.id, req.user.id]
+		);
+		res.json(meetings);
+	} catch (error) {
+		console.error("List meetings error:", error);
+		res.status(500).json({ message: "Could not load meetings." });
+	}
+});
+
+router.post("/meetings", protect, async (req, res) => {
+	const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+	const description = typeof req.body.description === "string" ? req.body.description.trim() : "";
+	const scheduledTime = typeof req.body.scheduledAt === "string" ? Date.parse(req.body.scheduledAt) : NaN;
+	const invitees = Array.isArray(req.body.invitees) ? [...new Set(req.body.invitees.map((item) => String(item).trim()).filter(Boolean))] : [];
+	if (!title || title.length > 120 || description.length > 1000 || !Number.isFinite(scheduledTime)
+		|| scheduledTime <= Date.now() || invitees.length > 30) {
+		return res.status(400).json({ message: "Enter a title, a future date, and up to 30 invitees." });
+	}
+	const connection = await pool.getConnection();
+	const scheduledAtUtc = new Date(scheduledTime).toISOString().slice(0, 19).replace("T", " ");
+	try {
+		await connection.beginTransaction();
+		const [meetingResult] = await connection.execute(
+			"INSERT INTO scheduled_meetings (organizer_id, title, description, scheduled_at) VALUES (?, ?, ?, ?)",
+			[req.user.id, title, description, scheduledAtUtc]
+		);
+		const meetingId = Number(meetingResult.insertId);
+		const inviteNotifications = [];
+		for (const identifier of invitees) {
+			const [users] = await connection.execute(
+				`SELECT id AS userId, username FROM users WHERE status = 'active'
+				 AND (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)) LIMIT 1`,
+				[identifier, identifier]
+			);
+			const invitee = users[0];
+			if (!invitee || Number(invitee.userId) === Number(req.user.id)) continue;
+			await connection.execute(
+				"INSERT IGNORE INTO meeting_participants (meeting_id, user_id, status) VALUES (?, ?, 'invited')",
+				[meetingId, invitee.userId]
+			);
+			const [existing] = await connection.execute(
+				"SELECT status FROM meeting_participants WHERE meeting_id = ? AND user_id = ?",
+				[meetingId, invitee.userId]
+			);
+			if (existing[0]?.status !== "invited") continue;
+			const batchId = randomUUID();
+			const [notification] = await connection.execute(
+				`INSERT INTO notifications
+				 (batch_id, user_id, sender_id, title, body, category, target_type, target_id, target_name)
+				 VALUES (?, ?, ?, ?, ?, 'meeting_invite', 'meeting_invite', ?, ?)`,
+				[batchId, invitee.userId, req.user.id, `Meeting invitation: ${title}`,
+					`${req.user.username} invited you to a meeting on ${new Date(scheduledTime).toISOString()}.`, meetingId, title]
+			);
+			inviteNotifications.push({
+				userId: Number(invitee.userId),
+				notification: {
+					_id: notification.insertId,
+					userId: Number(invitee.userId),
+					title: `Meeting invitation: ${title}`,
+					body: `${req.user.username} invited you to a meeting on ${new Date(scheduledTime).toISOString()}.`,
+					category: "meeting_invite",
+					targetType: "meeting_invite",
+					targetId: meetingId,
+					targetName: title,
+					invitationStatus: "invited",
+					isRead: 0,
+					senderName: req.user.username,
+				},
+			});
+		}
+		await connection.commit();
+		for (const item of inviteNotifications) req.app.get("io")?.in(`user:${item.userId}`).emit("notification", item.notification);
+		return res.status(201).json({ _id: meetingId, title, description, scheduledAt: new Date(scheduledTime).toISOString(), status: "scheduled", invitees: inviteNotifications.length });
+	} catch (error) {
+		await connection.rollback().catch(() => {});
+		console.error("Create meeting error:", error);
+		return res.status(500).json({ message: "Could not schedule the meeting." });
+	} finally {
+		connection.release();
+	}
+});
+
+router.patch("/meetings/:meetingId/invitation", protect, async (req, res) => {
+	const meetingId = Number(req.params.meetingId);
+	const action = req.body.action;
+	if (!validId(meetingId) || !["accept", "decline"].includes(action)) {
+		return res.status(400).json({ message: "Choose accept or decline." });
+	}
+	try {
+		const [result] = await pool.execute(
+			`UPDATE meeting_participants SET status = ?, responded_at = NOW()
+			 WHERE meeting_id = ? AND user_id = ? AND status = 'invited'`,
+			[action === "accept" ? "accepted" : "declined", meetingId, req.user.id]
+		);
+		if (!result.affectedRows) return res.status(404).json({ message: "This meeting invitation is no longer available." });
+		const [meetings] = await pool.execute(
+			"SELECT title, DATE_FORMAT(scheduled_at, '%Y-%m-%dT%H:%i:%s.000Z') AS scheduledAt FROM scheduled_meetings WHERE id = ?",
+			[meetingId]
+		);
+		await pool.execute(
+			`UPDATE notifications SET title = ?, body = ?, is_read = TRUE
+			 WHERE user_id = ? AND category = 'meeting_invite' AND target_id = ?`,
+			[action === "accept" ? `You accepted ${meetings[0].title}` : `You declined ${meetings[0].title}`,
+				action === "accept" ? "You are on the attendee list." : "You declined this meeting invitation.", req.user.id, meetingId]
+		);
+		return res.json({ meetingId, status: action === "accept" ? "accepted" : "declined" });
+	} catch (error) {
+		console.error("Respond to meeting invitation error:", error);
+		return res.status(500).json({ message: "Could not respond to the meeting invitation." });
+	}
+});
+
+router.delete("/meetings/:meetingId", protect, async (req, res) => {
+	const meetingId = Number(req.params.meetingId);
+	if (!validId(meetingId)) return res.status(400).json({ message: "Invalid meeting id." });
+	try {
+		const [result] = await pool.execute(
+			"UPDATE scheduled_meetings SET status = 'cancelled' WHERE id = ? AND organizer_id = ? AND status = 'scheduled'",
+			[meetingId, req.user.id]
+		);
+		if (!result.affectedRows) return res.status(404).json({ message: "Scheduled meeting not found." });
+		const [participants] = await pool.execute("SELECT user_id AS userId FROM meeting_participants WHERE meeting_id = ?", [meetingId]);
+		const [[meeting]] = await pool.execute("SELECT title FROM scheduled_meetings WHERE id = ?", [meetingId]);
+		for (const participant of participants) {
+			const [notification] = await pool.execute(
+				`INSERT INTO notifications (batch_id, user_id, sender_id, title, body, category, target_type, target_id, target_name)
+				 VALUES (?, ?, ?, ?, ?, 'meeting_cancelled', 'meeting', ?, ?)`,
+				[randomUUID(), participant.userId, req.user.id, "Meeting cancelled", `${meeting.title} was cancelled.`, meetingId, meeting.title]
+			);
+			req.app.get("io")?.in(`user:${participant.userId}`).emit("notification", {
+				_id: notification.insertId, userId: participant.userId, title: "Meeting cancelled",
+				body: `${meeting.title} was cancelled.`, category: "meeting_cancelled", targetType: "meeting",
+				targetId: meetingId, targetName: meeting.title, isRead: 0, senderName: req.user.username,
+				timestamp: new Date().toISOString(),
+			});
+		}
+		return res.status(204).end();
+	} catch (error) {
+		console.error("Cancel meeting error:", error);
+		return res.status(500).json({ message: "Could not cancel the meeting." });
+	}
+});
+
 router.post("/login", login);
 router.get("/oauth/config", (_req, res) => {
 	res.set("Cache-Control", "no-store");
@@ -384,10 +560,16 @@ router.get("/notifications", protect, async (req, res) => {
 			`SELECT n.id AS _id, n.title, n.body, n.is_read AS isRead,
 			        n.category, n.target_type AS targetType, n.target_id AS targetId,
 			        n.target_name AS targetName, n.target_channel_id AS targetChannelId,
-			        n.target_channel_name AS targetChannelName, n.created_at AS timestamp,
+				                n.target_channel_name AS targetChannelName, n.created_at AS timestamp,
+				        COALESCE(group_invitation.status, meeting_participant.status) AS invitationStatus,
 			        u.username AS senderName
 			 FROM notifications n
 			 LEFT JOIN users u ON u.id = n.sender_id
+				 LEFT JOIN group_invitations group_invitation ON group_invitation.notification_id = n.id
+				 LEFT JOIN meeting_participants meeting_participant
+				   ON meeting_participant.meeting_id = n.target_id
+				  AND meeting_participant.user_id = n.user_id
+				  AND n.category = 'meeting_invite'
 			 WHERE n.user_id = ?
 			 ORDER BY n.created_at DESC, n.id DESC
 			 LIMIT 50`,
@@ -397,6 +579,64 @@ router.get("/notifications", protect, async (req, res) => {
 	} catch (error) {
 		console.error("Fetch notifications error:", error);
 		res.status(500).json({ message: "Failed to get notifications." });
+	}
+});
+
+router.patch("/notifications/:notificationId/meeting-invite", protect, async (req, res) => {
+	const notificationId = Number(req.params.notificationId);
+	const action = req.body.action;
+	if (!validId(notificationId) || !["accept", "decline"].includes(action)) {
+		return res.status(400).json({ message: "Choose accept or decline." });
+	}
+	try {
+		const [rows] = await pool.execute(
+			`SELECT meeting.id AS meetingId, meeting.title, meeting.organizer_id AS organizerId,
+			        organizer.username AS organizerName, meeting.scheduled_at AS scheduledAt
+			 FROM notifications notification
+			 JOIN scheduled_meetings meeting ON meeting.id = notification.target_id
+			 JOIN users organizer ON organizer.id = meeting.organizer_id
+			 JOIN meeting_participants participant
+			   ON participant.meeting_id = meeting.id AND participant.user_id = notification.user_id
+			 WHERE notification.id = ? AND notification.user_id = ?
+			   AND notification.category = 'meeting_invite' AND participant.status = 'invited'
+			   AND meeting.status = 'scheduled' LIMIT 1`,
+			[notificationId, req.user.id]
+		);
+		const invitation = rows[0];
+		if (!invitation) return res.status(404).json({ message: "This meeting invitation is no longer available." });
+		const invitationStatus = action === "accept" ? "accepted" : "declined";
+		const title = action === "accept" ? `You accepted ${invitation.title}` : `You declined ${invitation.title}`;
+		const body = action === "accept" ? "You are on the attendee list." : "You declined this meeting invitation.";
+		await pool.execute(
+			"UPDATE meeting_participants SET status = ?, responded_at = NOW() WHERE meeting_id = ? AND user_id = ? AND status = 'invited'",
+			[invitationStatus, invitation.meetingId, req.user.id]
+		);
+		await pool.execute(
+			"UPDATE notifications SET title = ?, body = ?, is_read = TRUE WHERE id = ? AND user_id = ?",
+			[title, body, notificationId, req.user.id]
+		);
+		const responseTitle = action === "accept" ? "Meeting invitation accepted" : "Meeting invitation declined";
+		const responseBody = `${req.user.username} ${action === "accept" ? "accepted" : "declined"} your invitation to ${invitation.title}.`;
+		const [response] = await pool.execute(
+			`INSERT INTO notifications (batch_id, user_id, sender_id, title, body, category, target_type, target_id, target_name)
+			 VALUES (?, ?, ?, ?, ?, 'meeting_response', 'meeting', ?, ?)`,
+			[randomUUID(), invitation.organizerId, req.user.id, responseTitle, responseBody, invitation.meetingId, invitation.title]
+		);
+		const io = req.app.get("io");
+		io?.in(`user:${req.user.id}`).emit("notification", {
+			_id: notificationId, userId: req.user.id, title, body, category: "meeting_invite",
+			targetType: "meeting_invite", targetId: invitation.meetingId, targetName: invitation.title,
+			invitationStatus, isRead: 1, senderName: invitation.organizerName, timestamp: new Date().toISOString(),
+		});
+		io?.in(`user:${invitation.organizerId}`).emit("notification", {
+			_id: response.insertId, userId: invitation.organizerId, title: responseTitle, body: responseBody,
+			category: "meeting_response", targetType: "meeting", targetId: invitation.meetingId,
+			targetName: invitation.title, isRead: 0, senderName: req.user.username, timestamp: new Date().toISOString(),
+		});
+		return res.json({ meetingId: invitation.meetingId, status: invitationStatus });
+	} catch (error) {
+		console.error("Respond to meeting invitation error:", error);
+		return res.status(500).json({ message: "Could not respond to the meeting invitation." });
 	}
 });
 router.patch("/notifications/read-all", protect, async (req, res) => {
@@ -916,26 +1156,38 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 });
 router.get("/groups", protect, async (req, res) => {
 	try {
-		const [groups] = req.user.role === "admin"
-			? await pool.execute(
-				`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
-				        g.group_type AS groupType, 'admin' AS role, COUNT(m.user_id) AS members
-				 FROM chat_groups g LEFT JOIN group_members m ON m.group_id = g.id
-				 GROUP BY g.id, g.name, g.avatar_url ORDER BY g.name`
-			)
-			: await pool.execute(
-				`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
-				        g.group_type AS groupType, mine.role, COUNT(m.user_id) AS members
-				 FROM chat_groups g
-				 JOIN group_members mine ON mine.group_id = g.id AND mine.user_id = ?
-				 JOIN group_members m ON m.group_id = g.id
-				 GROUP BY g.id, g.name, g.avatar_url, mine.role
-				 ORDER BY g.name`,
-				[req.user.id]
-			);
+		const [groups] = await pool.execute(
+			`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
+			        g.group_type AS groupType, g.is_active AS isActive,
+			        mine.role, COUNT(m.user_id) AS members
+			 FROM chat_groups g
+			 JOIN group_members mine ON mine.group_id = g.id AND mine.user_id = ?
+			 JOIN group_members m ON m.group_id = g.id
+			 WHERE g.is_active = TRUE
+			 GROUP BY g.id, g.name, g.avatar_url, g.group_type, g.is_active, mine.role
+			 ORDER BY g.name`,
+			[req.user.id]
+		);
 		res.json(groups);
 	} catch (err) {
 		console.error("Fetch groups error:", err);
+		res.status(500).json({ message: "Failed to get groups" });
+	}
+});
+
+router.get("/admin/groups", protect, requireAdmin, async (_req, res) => {
+	try {
+		const [groups] = await pool.execute(
+			`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
+			        g.group_type AS groupType, g.is_active AS isActive,
+			        'admin' AS role, COUNT(m.user_id) AS members
+			 FROM chat_groups g LEFT JOIN group_members m ON m.group_id = g.id
+			 GROUP BY g.id, g.name, g.avatar_url, g.group_type, g.is_active
+			 ORDER BY g.is_active DESC, g.name`
+		);
+		res.json(groups);
+	} catch (error) {
+		console.error("Fetch admin groups error:", error);
 		res.status(500).json({ message: "Failed to get groups" });
 	}
 });
@@ -952,7 +1204,7 @@ router.post("/groups", protect, async (req, res) => {
 	try {
 		await connection.beginTransaction();
 		const [result] = await connection.execute(
-			"INSERT INTO chat_groups (name, created_by, group_type) VALUES (?, ?, ?)",
+				"INSERT INTO chat_groups (name, created_by, group_type, is_active) VALUES (?, ?, ?, TRUE)",
 			[name, req.user.id, groupType]
 		);
 		await connection.execute(
@@ -968,7 +1220,7 @@ router.post("/groups", protect, async (req, res) => {
 			);
 		}
 		await connection.commit();
-		res.status(201).json({ _id: result.insertId, name, groupType, avatarUrl: null, members: 1, role: "admin" });
+		res.status(201).json({ _id: result.insertId, name, groupType, isActive: 1, avatarUrl: null, members: 1, role: "admin" });
 	} catch (err) {
 		await connection.rollback();
 		console.error("Create group error:", err);
@@ -981,20 +1233,34 @@ router.post("/groups", protect, async (req, res) => {
 router.patch("/groups/:groupId", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
 	const groupType = req.body.groupType;
-	if (!validId(groupId) || !isGroupType(groupType)) {
-		return res.status(400).json({ message: "Group type must be standard or community." });
+	const name = typeof req.body.name === "string" ? req.body.name.trim() : undefined;
+	const isActive = req.body.isActive;
+	if (!validId(groupId) || name !== undefined && (!name || name.length > 100)
+		|| groupType !== undefined && !isGroupType(groupType)
+		|| isActive !== undefined && ![true, false, 0, 1].includes(isActive)) {
+		return res.status(400).json({ message: "Invalid group update." });
 	}
 	try {
 		if (!await canManageGroup(groupId, req.user)) {
-			return res.status(403).json({ message: "Only group admins can change the group type." });
+			return res.status(403).json({ message: "Only group admins can edit this group." });
 		}
 		const [groups] = await pool.execute(
-			"SELECT id AS _id, name, avatar_url AS avatarUrl, group_type AS groupType FROM chat_groups WHERE id = ? LIMIT 1",
+			"SELECT id AS _id, name, avatar_url AS avatarUrl, group_type AS groupType, is_active AS isActive FROM chat_groups WHERE id = ? LIMIT 1",
 			[groupId]
 		);
 		if (!groups.length) return res.status(404).json({ message: "Group not found." });
-		await pool.execute("UPDATE chat_groups SET group_type = ? WHERE id = ?", [groupType, groupId]);
-		if (groupType === "community") {
+		if (isActive !== undefined && req.user.role !== "admin") {
+			return res.status(403).json({ message: "Only a platform administrator can change group activation." });
+		}
+		const nextType = groupType ?? groups[0].groupType;
+		const nextName = name ?? groups[0].name;
+		const nextActive = isActive === undefined ? Boolean(groups[0].isActive) : Boolean(isActive);
+		const wasInactive = Number(groups[0].isActive) === 0;
+		await pool.execute(
+			"UPDATE chat_groups SET name = ?, group_type = ?, is_active = ? WHERE id = ?",
+			[nextName, nextType, nextActive, groupId]
+		);
+		if (nextType === "community") {
 			await pool.execute(
 				`INSERT IGNORE INTO group_channels
 				 (group_id, name, slug, description, posting_mode, sort_order, created_by)
@@ -1002,12 +1268,41 @@ router.patch("/groups/:groupId", protect, async (req, res) => {
 				[groupId, req.user.id]
 			);
 		}
-		const updated = { ...groups[0], groupType };
-		req.app.get("io")?.emit("group-updated", updated);
+		const updated = { ...groups[0], name: nextName, groupType: nextType, isActive: nextActive ? 1 : 0 };
+		const io = req.app.get("io");
+		io?.to(`group:${groupId}`).emit("group-updated", updated);
+		const [members] = await pool.execute("SELECT user_id AS userId FROM group_members WHERE group_id = ?", [groupId]);
+		for (const member of members) {
+			io?.in(`user:${member.userId}`).emit(wasInactive && nextActive ? "group-reactivated" : "group-updated", updated);
+		}
 		return res.json(updated);
 	} catch (error) {
-		console.error("Update group type error:", error);
-		return res.status(500).json({ message: "Could not change the group type." });
+		console.error("Update group error:", error);
+		return res.status(500).json({ message: "Could not update the group." });
+	}
+});
+
+router.delete("/groups/:groupId", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id." });
+	try {
+		if (!await canManageGroup(groupId, req.user)) {
+			return res.status(403).json({ message: "Only group leaders can deactivate this group." });
+		}
+		const [groups] = await pool.execute("SELECT id AS _id, name FROM chat_groups WHERE id = ? LIMIT 1", [groupId]);
+		if (!groups.length) return res.status(404).json({ message: "Group not found." });
+		await pool.execute("UPDATE chat_groups SET is_active = FALSE WHERE id = ?", [groupId]);
+		const [members] = await pool.execute("SELECT user_id AS userId FROM group_members WHERE group_id = ?", [groupId]);
+		const io = req.app.get("io");
+		io?.to(`group:${groupId}`).emit("group-deactivated", { groupId });
+		for (const member of members) io?.in(`user:${member.userId}`).emit("group-deactivated", { groupId });
+		io?.in(`group:${groupId}`).socketsLeave(`group:${groupId}`);
+		const [channels] = await pool.execute("SELECT id FROM group_channels WHERE group_id = ?", [groupId]);
+		for (const channel of channels) io?.in(`group:${groupId}:channel:${channel.id}`).socketsLeave(`group:${groupId}:channel:${channel.id}`);
+		return res.status(204).end();
+	} catch (error) {
+		console.error("Deactivate group error:", error);
+		return res.status(500).json({ message: "Could not deactivate the group." });
 	}
 });
 
@@ -1066,6 +1361,200 @@ router.post("/groups/:groupId/avatar", protect, requireGroupAvatarAdmin, receive
 		await removeUploadedFiles([req.file]);
 		console.error("Update group image error:", error);
 		return res.status(500).json({ message: "Could not update the group image." });
+	}
+});
+
+router.post("/groups/:groupId/invitations", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const identifier = typeof req.body.identifier === "string" ? req.body.identifier.trim() : "";
+	if (!validId(groupId) || !identifier || identifier.length > 255) {
+		return res.status(400).json({ message: "Enter a username or email address." });
+	}
+	try {
+		if (!await canManageGroup(groupId, req.user)) {
+			return res.status(403).json({ message: "Only group leaders can invite members." });
+		}
+		const [groups] = await pool.execute(
+			"SELECT id AS groupId, name, avatar_url AS avatarUrl, is_active AS isActive FROM chat_groups WHERE id = ? LIMIT 1",
+			[groupId]
+		);
+		if (!groups.length) return res.status(404).json({ message: "Group not found." });
+		if (!groups[0].isActive && req.user.role !== "admin") {
+			return res.status(409).json({ message: "Inactive groups cannot receive invitations." });
+		}
+		const [users] = await pool.execute(
+			`SELECT id AS userId, username, email FROM users
+			 WHERE status = 'active' AND (LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)) LIMIT 1`,
+			[identifier, identifier]
+		);
+		const invitee = users[0];
+		if (!invitee) return res.status(404).json({ message: "No active user matches that username or email." });
+		const [members] = await pool.execute(
+			"SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
+			[groupId, invitee.userId]
+		);
+		if (members.length) return res.status(409).json({ message: "That user is already a group member." });
+		const [pending] = await pool.execute(
+			"SELECT id FROM group_invitations WHERE group_id = ? AND invitee_id = ? AND status = 'pending' LIMIT 1",
+			[groupId, invitee.userId]
+		);
+		if (pending.length) return res.status(409).json({ message: "An invitation is already waiting for that user." });
+
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			const [invitation] = await connection.execute(
+				"INSERT INTO group_invitations (group_id, invitee_id, invited_by) VALUES (?, ?, ?)",
+				[groupId, invitee.userId, req.user.id]
+			);
+			const batchId = randomUUID();
+			const [notification] = await connection.execute(
+				`INSERT INTO notifications
+				 (batch_id, user_id, sender_id, title, body, category, target_type, target_id, target_name)
+				 VALUES (?, ?, ?, ?, ?, 'group_invite', 'group_invite', ?, ?)`,
+				[batchId, invitee.userId, req.user.id, `Invitation to join ${groups[0].name}`,
+					`${req.user.username || "A group leader"} invited you to join this group.`, groupId, groups[0].name]
+			);
+			await connection.execute(
+				"UPDATE group_invitations SET notification_id = ? WHERE id = ?",
+				[notification.insertId, invitation.insertId]
+			);
+			await connection.commit();
+			const payload = {
+				_id: notification.insertId,
+				userId: invitee.userId,
+				title: `Invitation to join ${groups[0].name}`,
+				body: `${req.user.username || "A group leader"} invited you to join this group.`,
+				category: "group_invite",
+				targetType: "group_invite",
+				targetId: groupId,
+				targetName: groups[0].name,
+				isRead: 0,
+				invitationStatus: "pending",
+				senderName: req.user.username || "A group leader",
+			};
+			req.app.get("io")?.in(`user:${invitee.userId}`).emit("notification", payload);
+			return res.status(201).json({ invitationId: invitation.insertId, invitee: { username: invitee.username, email: invitee.email } });
+		} catch (error) {
+			await connection.rollback();
+			throw error;
+		} finally {
+			connection.release();
+		}
+	} catch (error) {
+		console.error("Create group invitation error:", error);
+		return res.status(500).json({ message: "Could not send the group invitation." });
+	}
+});
+
+router.patch("/notifications/:notificationId/group-invite", protect, async (req, res) => {
+	const notificationId = Number(req.params.notificationId);
+	const action = req.body.action;
+	if (!validId(notificationId) || !["accept", "reject"].includes(action)) {
+		return res.status(400).json({ message: "Choose accept or reject." });
+	}
+	const connection = await pool.getConnection();
+	let committed = false;
+	try {
+		await connection.beginTransaction();
+		const [rows] = await connection.execute(
+			 `SELECT invitation.id, invitation.group_id AS groupId, invitation.invitee_id AS inviteeId,
+			        invitation.invited_by AS invitedBy, inviter.username AS inviterName,
+			        group_record.name, group_record.avatar_url AS avatarUrl, group_record.group_type AS groupType,
+			        group_record.is_active AS isActive
+			 FROM group_invitations invitation
+			 JOIN notifications notification ON notification.id = invitation.notification_id
+			 JOIN chat_groups group_record ON group_record.id = invitation.group_id
+			 JOIN users inviter ON inviter.id = invitation.invited_by
+			 WHERE invitation.notification_id = ? AND notification.user_id = ?
+			   AND invitation.status = 'pending' LIMIT 1`,
+			[notificationId, req.user.id]
+		);
+		const invitation = rows[0];
+		if (!invitation) {
+			await connection.rollback();
+			return res.status(404).json({ message: "This invitation is no longer available." });
+		}
+		if (action === "accept" && !invitation.isActive) {
+			await connection.rollback();
+			return res.status(409).json({ message: "This group is no longer active." });
+		}
+		const status = action === "accept" ? "accepted" : "rejected";
+		await connection.execute(
+			"UPDATE group_invitations SET status = ?, pending_slot = NULL, responded_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
+			[status, invitation.id]
+		);
+		const inviteTitle = action === "accept"
+			? `You are now a member of ${invitation.name}`
+			: `You rejected the invitation to ${invitation.name}`;
+		const inviteBody = action === "accept"
+			? `You accepted ${invitation.inviterName}'s invitation.`
+			: `You rejected ${invitation.inviterName}'s invitation.`;
+		await connection.execute(
+			"UPDATE notifications SET title = ?, body = ?, is_read = TRUE WHERE id = ? AND user_id = ?",
+			[inviteTitle, inviteBody, notificationId, req.user.id]
+		);
+		const responseTitle = action === "accept" ? "Group invitation accepted" : "Group invitation rejected";
+		const responseBody = `${req.user.username} ${action === "accept" ? "accepted" : "rejected"} your invitation to ${invitation.name}.`;
+		const responseBatchId = randomUUID();
+		const [responseNotification] = await connection.execute(
+			`INSERT INTO notifications
+			 (batch_id, user_id, sender_id, title, body, category, target_type, target_id, target_name)
+			 VALUES (?, ?, ?, ?, ?, 'group_invite_response', 'group', ?, ?)`,
+			[responseBatchId, invitation.invitedBy, req.user.id, responseTitle, responseBody, invitation.groupId, invitation.name]
+		);
+		if (action === "accept") {
+			await connection.execute(
+				"INSERT IGNORE INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')",
+				[invitation.groupId, req.user.id]
+			);
+		}
+		await connection.commit();
+		committed = true;
+		const notificationUpdate = {
+			_id: notificationId,
+			userId: req.user.id,
+			title: inviteTitle,
+			body: inviteBody,
+			category: "group_invite",
+			targetType: "group_invite",
+			targetId: invitation.groupId,
+			targetName: invitation.name,
+			isRead: 1,
+			invitationStatus: status,
+			senderName: invitation.inviterName,
+			timestamp: new Date().toISOString(),
+		};
+		const responseNotificationPayload = {
+			_id: responseNotification.insertId,
+			userId: invitation.invitedBy,
+			title: responseTitle,
+			body: responseBody,
+			category: "group_invite_response",
+			targetType: "group",
+			targetId: invitation.groupId,
+			targetName: invitation.name,
+			isRead: 0,
+			senderName: req.user.username,
+			timestamp: new Date().toISOString(),
+		};
+		const io = req.app.get("io");
+		io?.in(`user:${req.user.id}`).emit("notification", notificationUpdate);
+		io?.in(`user:${invitation.invitedBy}`).emit("notification", responseNotificationPayload);
+		if (action === "accept") {
+			const [[{ members }]] = await pool.execute("SELECT COUNT(*) AS members FROM group_members WHERE group_id = ?", [invitation.groupId]);
+			const member = { _id: req.user.id, username: req.user.username, email: req.user.email, role: "member" };
+			const event = { groupId: invitation.groupId, member, groupName: invitation.name, avatarUrl: invitation.avatarUrl, groupType: invitation.groupType, members };
+			io?.to(`group:${invitation.groupId}`).emit("group-member-added", event);
+			io?.in(`user:${req.user.id}`).emit("group-member-added", event);
+		}
+		return res.json({ notificationId, status, group: action === "accept" ? { _id: invitation.groupId, name: invitation.name, avatarUrl: invitation.avatarUrl, groupType: invitation.groupType, members: 1, role: "member" } : null });
+	} catch (error) {
+		if (!committed) await connection.rollback();
+		console.error("Respond to group invitation error:", error);
+		return res.status(500).json({ message: "Could not respond to the group invitation." });
+	} finally {
+		connection.release();
 	}
 });
 

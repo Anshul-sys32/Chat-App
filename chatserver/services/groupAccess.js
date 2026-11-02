@@ -2,7 +2,8 @@ const { pool } = require("../config/db");
 
 const getGroupAccess = async (groupId, userId) => {
   const [rows] = await pool.execute(
-    `SELECT group_record.id, group_record.name, group_record.group_type AS groupType,
+        `SELECT group_record.id, group_record.name, group_record.is_active AS isActive,
+          group_record.group_type AS groupType,
             membership.role AS groupRole
      FROM chat_groups group_record
      LEFT JOIN group_members membership
@@ -23,7 +24,8 @@ const getActiveChannel = async (groupId, channelId) => {
 };
 
 const canAccessGroup = (group, userRole) =>
-  Boolean(group?.groupRole) || userRole === "admin";
+  (group?.isActive !== 0 || userRole === "admin")
+    && (Boolean(group?.groupRole) || userRole === "admin");
 
 const canPostInChannel = (group, channel, userRole) =>
   channel?.postingMode === "members" || group?.groupRole === "admin" || userRole === "admin";

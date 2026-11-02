@@ -14,6 +14,12 @@ const {
 } = require("../controllers/conversationNotificationPreferencesController");
 const conversationPreferencesMigration = require("../migrations/202611010003_conversation_notification_preferences");
 const communityMigration = require("../migrations/202611010004_group_channels");
+const groupLifecycleMigration = require("../migrations/202611010005_group_lifecycle");
+const groupInvitationsMigration = require("../migrations/202611010006_group_invitations");
+const groupInvitationKeyMigration = require("../migrations/202611010007_group_invitation_pending_key");
+const scheduledMeetingsMigration = require("../migrations/202611010008_scheduled_meetings");
+const { canInviteToCallRoom, MAX_CALL_PARTICIPANTS } = require("../services/callRoomPolicy");
+const { sendMeetingReminders } = require("../services/meetingReminders");
 const { validateGroupMessageTarget } = require("../services/groupAccess");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
 
@@ -127,11 +133,142 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010002_message_notification_targets",
     "202611010003_conversation_notification_preferences",
     "202611010004_group_channels",
+    "202611010005_group_lifecycle",
+    "202611010006_group_invitations",
+    "202611010007_group_invitation_pending_key",
+    "202611010008_scheduled_meetings",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
   assert.equal(statements.filter((sql) => sql.includes("RELEASE_LOCK")).length, 2);
   assert.equal(releaseCount, 2);
+});
+
+test("migration runner reports the version that failed without recording it", async () => {
+  const connection = {
+    query: async () => {},
+    execute: async (sql) => {
+      if (sql.includes("GET_LOCK")) return [[{ acquired: 1 }], []];
+      if (sql.includes("SELECT version FROM schema_migrations")) return [[], []];
+      return [[{ released: 1 }], []];
+    },
+    release() {},
+  };
+  mock.method(pool, "getConnection", async () => connection);
+  const migration = require("../migrations/202611010001_user_notification_preferences");
+  const originalUp = migration.up;
+  migration.up = async () => { throw new Error("foreign-key diagnostic"); };
+  try {
+    await assert.rejects(runMigrations(), /202611010001_user_notification_preferences failed: foreign-key diagnostic/);
+  } finally {
+    migration.up = originalUp;
+  }
+});
+
+test("group lifecycle migration adds an active flag and defines rollback", async () => {
+  const statements = [];
+  const connection = {
+    execute: async () => [[{ count: 0 }], []],
+    query: async (sql) => statements.push(sql),
+  };
+  await groupLifecycleMigration.up(connection);
+  assert.match(statements[0], /ALTER TABLE chat_groups ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE/);
+  await groupLifecycleMigration.down(connection);
+  assert.match(statements[1], /ALTER TABLE chat_groups DROP COLUMN is_active/);
+});
+
+test("group invitations migration defines pending invite storage and rollback", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await groupInvitationsMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS group_invitations/);
+  assert.match(statements[0], /status ENUM\('pending', 'accepted', 'rejected'\)/);
+  assert.match(statements[0], /pending_slot TINYINT UNSIGNED NULL DEFAULT 1/);
+  assert.match(statements[0], /UNIQUE KEY group_invitations_pending_unique \(group_id, invitee_id, pending_slot\)/);
+  await groupInvitationsMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS group_invitations/);
+});
+
+test("group invitation key migration allows repeated historical responses but keeps pending unique", async () => {
+  const statements = [];
+  const executions = [];
+  const connection = {
+    execute: async (sql) => {
+      executions.push(sql);
+      if (sql.includes("duplicatePendingPairs")) return [[{ duplicatePendingPairs: 0 }], []];
+      const exists = sql.includes("group_invitations_group'") || sql.includes("group_invitations_state'") ? 1 : 0;
+      return [[{ count: exists }], []];
+    },
+    query: async (sql) => statements.push(sql),
+  };
+  await groupInvitationKeyMigration.up(connection);
+  assert.match(statements[0], /DROP INDEX group_invitations_state/);
+  assert.match(statements[1], /ADD COLUMN pending_slot TINYINT UNSIGNED NULL/);
+  assert.ok(executions.some((sql) => sql.includes("pending_slot = CASE WHEN status = 'pending' THEN 1 ELSE NULL END")));
+  assert.match(statements[2], /MODIFY pending_slot TINYINT UNSIGNED NULL DEFAULT 1/);
+  assert.match(statements[3], /group_invitations_pending_unique \(group_id, invitee_id, pending_slot\)/);
+  await groupInvitationKeyMigration.down(connection);
+  assert.match(statements[4], /DROP INDEX group_invitations_pending_unique/);
+  assert.match(statements[6], /group_invitations_state/);
+});
+
+test("scheduled meetings migration creates meetings, participants, and reminder state", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await scheduledMeetingsMigration.up(connection);
+  assert.equal(statements.length, 2);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS scheduled_meetings/);
+  assert.match(statements[0], /reminder_sent_at DATETIME NULL/);
+  assert.match(statements[1], /CREATE TABLE IF NOT EXISTS meeting_participants/);
+  await scheduledMeetingsMigration.down(connection);
+  assert.match(statements[2], /DROP TABLE IF EXISTS meeting_participants/);
+});
+
+test("call room invitations are host-only and capped at four participants", () => {
+  const room = { hostId: "10", participants: new Set(["10", "11", "12"]) };
+  assert.deepEqual(canInviteToCallRoom(room, "10", "13"), { allowed: true, reason: null });
+  assert.deepEqual(canInviteToCallRoom(room, "11", "13"), { allowed: false, reason: "not-host" });
+  room.participants.add("13");
+  assert.equal(room.participants.size, MAX_CALL_PARTICIPANTS);
+  assert.deepEqual(canInviteToCallRoom(room, "10", "14"), { allowed: false, reason: "full" });
+});
+
+test("meeting reminders notify the organizer and accepted attendees only once", async () => {
+  let claimed = false;
+  const connection = {
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release: () => {},
+    execute: async (sql) => {
+      if (sql.includes("UPDATE scheduled_meetings")) {
+        if (claimed) return [{ affectedRows: 0 }, []];
+        claimed = true;
+        return [{ affectedRows: 1 }, []];
+      }
+      if (sql.includes("FROM meeting_participants")) return [[{ userId: 12 }], []];
+      if (sql.includes("INSERT INTO notifications")) return [{ affectedRows: 2 }, []];
+      if (sql.includes("FROM notifications WHERE batch_id")) {
+        return [[
+          { _id: 44, userId: 10, title: "Meeting reminder", body: "Planning begins soon." },
+          { _id: 45, userId: 12, title: "Meeting reminder", body: "Planning begins soon." },
+        ], []];
+      }
+      return [{ affectedRows: 1 }, []];
+    },
+  };
+  mock.method(pool, "execute", async (sql) => {
+    if (sql.includes("FROM scheduled_meetings")) {
+      return [[{ id: 33, organizerId: 10, title: "Planning", scheduledAt: new Date("2026-11-02T13:00:00Z") }], []];
+    }
+    return [[], []];
+  });
+  mock.method(pool, "getConnection", async () => connection);
+  const events = [];
+  const io = { in: (room) => ({ emit: (event, payload) => events.push({ room, event, payload }) }) };
+  const sent = await sendMeetingReminders(io, new Date("2026-11-02T12:50:00Z"));
+  assert.equal(sent, 2);
+  assert.deepEqual(events.map((event) => event.room), ["user:10", "user:12"]);
 });
 
 test("direct-message notifications persist and emit a conversation target to the recipient room", async () => {

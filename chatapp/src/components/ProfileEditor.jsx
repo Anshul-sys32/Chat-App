@@ -80,7 +80,7 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" className="glass-panel w-full max-w-md rounded-2xl p-5 shadow-2xl sm:p-6">
+      <section role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" className="glass-panel min-w-0 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl p-5 shadow-2xl sm:p-6">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 id="profile-editor-title" className="text-xl font-semibold text-white">

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { FaBell, FaCheckDouble, FaCog, FaVolumeUp } from "react-icons/fa";
+import { FaBell, FaCheck, FaCheckDouble, FaCog, FaTimes, FaVolumeUp } from "react-icons/fa";
 import Socket from "../Socket";
+import FloatingPanel from "./FloatingPanel";
+import useFloatingPanel from "../useFloatingPanel";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const authConfig = () => ({
@@ -23,13 +25,14 @@ export default function NotificationCenter({ onNavigate }) {
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
   const [preferencesLoading, setPreferencesLoading] = useState(true);
   const [error, setError] = useState("");
-  const containerRef = useRef(null);
-  const triggerRef = useRef(null);
+  const { triggerRef, panelRef, style: panelStyle } = useFloatingPanel(isOpen, () => setIsOpen(false));
   const preferencesRef = useRef(preferences);
+  const notificationsRef = useRef(notifications);
   const receivedNotificationIdsRef = useRef(new Set());
   const audioContextRef = useRef(null);
   const onNavigateRef = useRef(onNavigate);
   preferencesRef.current = preferences;
+  notificationsRef.current = notifications;
   onNavigateRef.current = onNavigate;
 
   const loadNotifications = useCallback(async () => {
@@ -117,13 +120,13 @@ export default function NotificationCenter({ onNavigate }) {
       .finally(() => setPreferencesLoading(false));
     const receiveNotification = (notification) => {
       const notificationId = String(notification?._id || "");
-      if (notificationId && receivedNotificationIdsRef.current.has(notificationId)) return;
+      const isInvitationUpdate = notification?.category === "group_invite" && notification?.invitationStatus !== "pending";
+      if (notificationId && receivedNotificationIdsRef.current.has(notificationId) && !isInvitationUpdate) return;
       if (notificationId) receivedNotificationIdsRef.current.add(notificationId);
-      setNotifications((current) => [
-        notification,
-        ...current.filter((item) => String(item._id) !== String(notification._id)),
-      ].slice(0, 50));
-      if (!notification.isRead) setUnreadCount((count) => count + 1);
+      const existing = notificationsRef.current.find((item) => String(item._id) === String(notification._id));
+      if (!notification.isRead && !existing?.isRead) setUnreadCount((count) => count + 1);
+      if (notification.isRead && existing && !existing.isRead) setUnreadCount((count) => Math.max(0, count - 1));
+      setNotifications((current) => [notification, ...current.filter((item) => String(item._id) !== String(notification._id))].slice(0, 50));
       if (document.visibilityState === "hidden"
         && preferencesRef.current.browserNotifications
         && "Notification" in window && Notification.permission === "granted") {
@@ -154,23 +157,6 @@ export default function NotificationCenter({ onNavigate }) {
     Socket.on("notification", receiveNotification);
     return () => Socket.off("notification", receiveNotification);
   }, [loadNotifications]);
-
-  useEffect(() => {
-    if (!isOpen) return undefined;
-    const closeOnOutsidePointer = (event) => {
-      if (containerRef.current?.contains(event.target) || triggerRef.current?.contains(event.target)) return;
-      setIsOpen(false);
-    };
-    const closeOnEscape = (event) => {
-      if (event.key === "Escape") setIsOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer, true);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [isOpen]);
 
   const markRead = async (notificationId) => {
     try {
@@ -219,8 +205,52 @@ export default function NotificationCenter({ onNavigate }) {
     setIsOpen(false);
   };
 
+  const respondToGroupInvite = async (notification, action) => {
+    try {
+      await axios.patch(
+        `${API_URL}/api/notifications/${notification._id}/group-invite`,
+        { action },
+        authConfig()
+      );
+      setNotifications((current) => current.map((item) => String(item._id) === String(notification._id)
+        ? {
+          ...item,
+          isRead: 1,
+          title: action === "accept" ? `You are now a member of ${item.targetName}` : `You rejected the invitation to ${item.targetName}`,
+          body: action === "accept" ? "The group is now available in your sidebar." : "The invitation has been rejected.",
+          invitationStatus: action === "accept" ? "accepted" : "rejected",
+        }
+        : item
+      ));
+      if (!notification.isRead) setUnreadCount((count) => Math.max(0, count - 1));
+      if (action === "accept") {
+        onNavigate?.({ targetType: "group", targetId: notification.targetId, targetName: notification.targetName });
+      }
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not respond to this invitation.");
+    }
+  };
+
+  const respondToMeetingInvite = async (notification, action) => {
+    try {
+      const { data } = await axios.patch(
+        `${API_URL}/api/notifications/${notification._id}/meeting-invite`,
+        { action },
+        authConfig()
+      );
+      const status = data.status;
+      setNotifications((current) => current.map((item) => String(item._id) === String(notification._id)
+        ? { ...item, isRead: 1, invitationStatus: status, title: status === "accepted" ? `You accepted ${item.targetName}` : `You declined ${item.targetName}` }
+        : item
+      ));
+      if (!notification.isRead) setUnreadCount((count) => Math.max(0, count - 1));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Could not respond to this meeting invitation.");
+    }
+  };
+
   return (
-    <div ref={containerRef} className={`relative ${isOpen ? "z-[60]" : ""}`}>
+    <div className={`relative ${isOpen ? "z-[60]" : ""}`}>
       <button
       ref={triggerRef}
         type="button"
@@ -237,15 +267,15 @@ export default function NotificationCenter({ onNavigate }) {
           </span>
         )}
       </button>
-      {isOpen && (
+      <FloatingPanel
+        open={isOpen}
+        triggerRef={triggerRef}
+        panelRef={panelRef}
+        style={panelStyle}
+        className="notification-panel-enter theme-popover w-[min(22rem,calc(100vw-1rem))] rounded-xl border p-3 shadow-2xl"
+      >
         <section
           aria-label="Notifications"
-          style={{
-            top: "calc(env(safe-area-inset-top) + 4.25rem)",
-            right: "max(0.75rem, env(safe-area-inset-right))",
-            maxHeight: "min(32rem, calc(var(--app-height, 100dvh) - 5.5rem - env(safe-area-inset-bottom)))",
-          }}
-          className="notification-panel-enter theme-sidebar fixed z-[70] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border p-3 shadow-2xl"
         >
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-semibold">Notifications</h2>
@@ -333,31 +363,56 @@ export default function NotificationCenter({ onNavigate }) {
             <p className="theme-muted py-8 text-center text-sm">You’re all caught up.</p>
           ) : (
             <ul className="mt-2 space-y-2">
-              {notifications.map((notification, index) => (
-                <li key={notification._id} style={{ "--notification-index": Math.min(index, 8) }} className="notification-item-enter">
-                  <button
-                    type="button"
-                    onClick={() => openNotification(notification)}
-                    className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${
-                      notification.isRead ? "border-white/5 opacity-75" : "border-teal-400/30 bg-teal-400/5"
-                    }`}
-                  >
-                    <span className="flex items-start justify-between gap-2">
-                      <span className="font-medium">{notification.title}</span>
-                      {!notification.isRead && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-teal-400" />}
-                    </span>
-                    <span className="mt-1 block whitespace-pre-wrap break-words text-sm">{notification.body}</span>
-                    <span className="theme-muted mt-2 block text-xs">
-                      {notification.senderName || "Administrator"} ·{" "}
-                      {new Date(notification.timestamp).toLocaleString()}
-                    </span>
-                  </button>
-                </li>
-              ))}
+                {notifications.map((notification, index) => (
+                  <NotificationItem
+                    key={notification._id}
+                    notification={notification}
+                    index={index}
+                    onOpen={openNotification}
+                    onRespond={respondToGroupInvite}
+                    onMeetingRespond={respondToMeetingInvite}
+                  />
+                ))}
             </ul>
           )}
         </section>
-      )}
+      </FloatingPanel>
     </div>
+  );
+}
+
+function NotificationItem({ notification, index, onOpen, onRespond, onMeetingRespond }) {
+  const isInvite = notification.category === "group_invite";
+  const isPendingInvite = isInvite && notification.invitationStatus === "pending";
+  const isPendingMeetingInvite = notification.category === "meeting_invite" && notification.invitationStatus === "invited";
+  const content = (
+    <>
+      <span className="flex items-start justify-between gap-2">
+        <span className="font-medium">{notification.title}</span>
+        {!notification.isRead && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-teal-400" />}
+      </span>
+      <span className="mt-1 block whitespace-pre-wrap break-words text-sm">{notification.body}</span>
+      <span className="theme-muted mt-2 block text-xs">
+        {notification.senderName || "Administrator"} · {notification.timestamp ? new Date(notification.timestamp).toLocaleString() : ""}
+      </span>
+    </>
+  );
+
+  return (
+    <li style={{ "--notification-index": Math.min(index, 8) }} className="notification-item-enter">
+      {isPendingInvite || isPendingMeetingInvite ? (
+        <div className="w-full rounded-lg border border-teal-400/30 bg-teal-400/5 p-3">
+          {content}
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => isPendingInvite ? onRespond(notification, "accept") : onMeetingRespond(notification, "accept")} className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"><FaCheck /> Accept</button>
+            <button type="button" onClick={() => isPendingInvite ? onRespond(notification, "reject") : onMeetingRespond(notification, "decline")} className="inline-flex items-center gap-1 rounded-md border border-rose-300/30 px-2.5 py-1.5 text-xs text-rose-200 hover:bg-rose-500/10"><FaTimes /> {isPendingInvite ? "Reject" : "Decline"}</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => onOpen(notification)} className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${notification.isRead ? "border-white/5 opacity-75" : "border-teal-400/30 bg-teal-400/5"}`}>
+          {content}
+        </button>
+      )}
+    </li>
   );
 }

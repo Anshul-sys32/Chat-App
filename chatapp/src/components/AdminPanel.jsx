@@ -509,7 +509,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
         )}
         <section className="glass-panel mt-10 rounded-xl p-4">
           <h2 className="mb-4 text-lg font-semibold">Group management</h2>
-          <GroupList />
+          <GroupList isAdmin />
         </section>
       </div>
       {editingUser && (

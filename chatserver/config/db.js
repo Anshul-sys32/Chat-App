@@ -251,6 +251,13 @@ const connectDB = async () => {
     if (!groupAvatarColumn[0].count) {
       await connection.query("ALTER TABLE chat_groups ADD COLUMN avatar_url VARCHAR(255) NULL");
     }
+    const [groupActiveColumn] = await connection.execute(
+      `SELECT COUNT(*) AS count FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'chat_groups' AND column_name = 'is_active'`
+    );
+    if (!groupActiveColumn[0].count) {
+      await connection.query("ALTER TABLE chat_groups ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE");
+    }
     await connection.query(`
       CREATE TABLE IF NOT EXISTS group_members (
         group_id INT UNSIGNED NOT NULL,

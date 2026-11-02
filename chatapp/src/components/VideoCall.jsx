@@ -1,22 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { FaExpand, FaPhone, FaPhoneSlash, FaVolumeUp, FaWindowMinimize } from "react-icons/fa";
+import { FaExpand, FaPhone, FaPhoneSlash, FaUserPlus, FaVolumeUp, FaWindowMinimize } from "react-icons/fa";
 import Socket from "../Socket";
 import { listAudioRoutes, selectAudioRoute } from "../audioRouting";
 import { readMediaDevicePreferences, saveMediaDevicePreferences } from "../mediaDevicePreferences";
 import axios from "axios";
+import FloatingPanel from "./FloatingPanel";
+import useFloatingPanel from "../useFloatingPanel";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
 export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const localVideo = useRef();
-  const remoteVideo = useRef();
-  const remoteAudio = useRef();
-  const pc = useRef(null);
+  const peerConnections = useRef(new Map());
+  const remoteMediaElements = useRef(new Map());
   const localStream = useRef(null);
-  const remoteStream = useRef(null);
-  const pendingCandidates = useRef([]);
-  const remoteUserId = useRef(null);
-  const currentTo = useRef(to);
+  const pendingCandidates = useRef(new Map());
   const currentPeerName = useRef(peerName);
   const onCloseRef = useRef(onClose);
   const [error, setError] = useState("");
@@ -28,36 +26,35 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const [visible, setVisible] = useState(isOpen);
   const [minimized, setMinimized] = useState(false);
   const [hasLocalMedia, setHasLocalMedia] = useState(false);
-  const [hasRemoteMedia, setHasRemoteMedia] = useState(false);
   const [selfViewPosition, setSelfViewPosition] = useState(null);
   const [audioRoutes, setAudioRoutes] = useState([]);
   const [selectedAudioRoute, setSelectedAudioRoute] = useState("");
   const [audioRouteError, setAudioRouteError] = useState("");
   const [showAudioRoutes, setShowAudioRoutes] = useState(false);
+  const [remotePeers, setRemotePeers] = useState([]);
+  const [isCallHost, setIsCallHost] = useState(false);
+  const [showInviteParticipant, setShowInviteParticipant] = useState(false);
+  const [inviteIdentifier, setInviteIdentifier] = useState("");
+  const [invitingParticipant, setInvitingParticipant] = useState(false);
+  const audioRoutesPanel = useFloatingPanel(showAudioRoutes, () => setShowAudioRoutes(false));
   const callHistoryId = useRef(null);
+  const callRoomId = useRef(null);
   const [minimizedPosition, setMinimizedPosition] = useState(null);
 
-  currentTo.current = to;
   currentPeerName.current = peerName;
   onCloseRef.current = onClose;
   const displayPeerName = callPeerName || peerName || "Private call";
   useEffect(() => setVisible(isOpen), [isOpen]);
   useEffect(() => {
-    if (!pc.current && !incomingOffer) setActiveCallType(callType);
+    if (!peerConnections.current.size && !incomingOffer) setActiveCallType(callType);
   }, [callType, incomingOffer]);
   useEffect(() => {
-    if (activeCallType === "video" && localVideo.current && localStream.current) {
-      localVideo.current.srcObject = localStream.current;
+    if (activeCallType === "video" && localVideo.current && localStream.current) localVideo.current.srcObject = localStream.current;
+    for (const remotePeer of remotePeers) {
+      const element = remoteMediaElements.current.get(remotePeer.userId);
+      if (element && element.srcObject !== remotePeer.stream) element.srcObject = remotePeer.stream;
     }
-  }, [activeCallType, hasLocalMedia, visible]);
-  useEffect(() => {
-    if (remoteVideo.current && remoteStream.current) {
-      remoteVideo.current.srcObject = remoteStream.current;
-    }
-    if (activeCallType === "audio" && remoteAudio.current && remoteStream.current) {
-      remoteAudio.current.srcObject = remoteStream.current;
-    }
-  }, [activeCallType, hasRemoteMedia, incomingOffer, visible]);
+  }, [activeCallType, hasLocalMedia, remotePeers, visible]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -73,7 +70,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
           setAudioRoutes(routes);
           if (routeToUse && selectedAudioRoute !== routeToUse.id) setSelectedAudioRoute(routeToUse.id);
         }
-        const mediaElements = [remoteAudio.current, remoteVideo.current].filter(Boolean);
+        const mediaElements = [...remoteMediaElements.current.values()];
         if (active && preferredRoute && mediaElements.length) {
           await selectAudioRoute(preferredRoute.id, mediaElements);
         }
@@ -94,7 +91,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     const routeId = event.target.value;
     setAudioRouteError("");
     try {
-      await selectAudioRoute(routeId, [remoteAudio.current, remoteVideo.current]);
+      await selectAudioRoute(routeId, [...remoteMediaElements.current.values()]);
       setSelectedAudioRoute(routeId);
       const currentPreferences = readMediaDevicePreferences();
       saveMediaDevicePreferences(undefined, { ...currentPreferences, audioOutputId: routeId });
@@ -204,13 +201,12 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   };
 
   useEffect(() => {
-    const handleOffer = ({ offer, from, callType: incomingCallType }) => {
-      if (currentTo.current && String(currentTo.current) !== String(from)) return;
-      if (pc.current) return;
+    const handleOffer = ({ offer, from, fromName, roomId, callType: incomingCallType }) => {
+      if (peerConnections.current.has(String(from)) || peerConnections.current.size > 0) return;
       const requestedType = incomingCallType === "audio" ? "audio" : "video";
-      remoteUserId.current = from;
-      setCallPeerName(currentPeerName.current);
-      setIncomingOffer({ offer, from, callType: requestedType });
+      setCallPeerName(fromName || currentPeerName.current || "Caller");
+      setIsCallHost(false);
+      setIncomingOffer({ offer, from, fromName, roomId, callType: requestedType });
       setActiveCallType(requestedType);
       setMinimized(false);
       setVisible(true);
@@ -218,13 +214,15 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     };
 
     const handleAnswer = async ({ answer, from }) => {
-      if (String(from) !== String(remoteUserId.current)) return;
+      const peer = peerConnections.current.get(String(from));
+      if (!peer || peer.remoteDescription) return;
       try {
-        await pc.current?.setRemoteDescription(new RTCSessionDescription(answer));
+        await peer.setRemoteDescription(new RTCSessionDescription(answer));
         setCallStatus("Connecting");
-        for (const candidate of pendingCandidates.current.splice(0)) {
-          await pc.current?.addIceCandidate(new RTCIceCandidate(candidate));
+        for (const candidate of pendingCandidates.current.get(String(from)) || []) {
+          await peer.addIceCandidate(new RTCIceCandidate(candidate));
         }
+        pendingCandidates.current.delete(String(from));
         setCalling(false);
       } catch (callError) {
         setError(callError.message || "Could not complete this call.");
@@ -232,72 +230,87 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     };
 
     const handleCandidate = async ({ candidate, from }) => {
-      if (String(from) !== String(remoteUserId.current)) return;
-      if (!pc.current?.remoteDescription) {
-        pendingCandidates.current.push(candidate);
+      const peer = peerConnections.current.get(String(from));
+      if (!peer?.remoteDescription) {
+        const queue = pendingCandidates.current.get(String(from)) || [];
+        queue.push(candidate);
+        pendingCandidates.current.set(String(from), queue);
         return;
       }
       try {
-        await pc.current.addIceCandidate(new RTCIceCandidate(candidate));
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (callError) {
         setError(callError.message || "Could not connect the call network.");
       }
     };
     const handleHangup = ({ from }) => {
-      if (String(from) !== String(remoteUserId.current)) return;
-      cleanupCall();
-      setIncomingOffer(null);
-      setCalling(false);
-      setCallStatus("Call ended");
-      setMinimized(false);
-      setVisible(false);
-      onCloseRef.current?.();
+      const peerId = String(from);
+      peerConnections.current.get(peerId)?.close();
+      peerConnections.current.delete(peerId);
+      pendingCandidates.current.delete(peerId);
+      const remoteElement = remoteMediaElements.current.get(peerId);
+      if (remoteElement) remoteElement.srcObject = null;
+      remoteMediaElements.current.delete(peerId);
+      setRemotePeers((current) => current.filter((peer) => peer.userId !== peerId));
+      if (!peerConnections.current.size) {
+        cleanupCall();
+        setIncomingOffer(null);
+        setCalling(false);
+        setCallStatus("Call ended");
+        setMinimized(false);
+        setVisible(false);
+        onCloseRef.current?.();
+      }
     };
+    const handleCallRoomError = ({ message }) => setError(message || "Could not add that participant to the call.");
 
     Socket.on("offer", handleOffer);
     Socket.on("answer", handleAnswer);
     Socket.on("ice-candidate", handleCandidate);
     Socket.on("hangup", handleHangup);
+    Socket.on("call-room-error", handleCallRoomError);
 
     return () => {
       Socket.off("offer", handleOffer);
       Socket.off("answer", handleAnswer);
       Socket.off("ice-candidate", handleCandidate);
       Socket.off("hangup", handleHangup);
+      Socket.off("call-room-error", handleCallRoomError);
       cleanupCall();
     };
   }, []);
 
   const cleanupCall = () => {
-    pc.current?.close();
-    pc.current = null;
+    peerConnections.current.forEach((peer) => peer.close());
+    peerConnections.current.clear();
     localStream.current?.getTracks().forEach((track) => track.stop());
     localStream.current = null;
-    remoteStream.current = null;
+    remoteMediaElements.current.forEach((element) => { element.srcObject = null; });
+    remoteMediaElements.current.clear();
+    setRemotePeers([]);
     setHasLocalMedia(false);
-    setHasRemoteMedia(false);
-    pendingCandidates.current = [];
+    setIsCallHost(false);
+    pendingCandidates.current.clear();
     if (localVideo.current) localVideo.current.srcObject = null;
-    if (remoteVideo.current) remoteVideo.current.srcObject = null;
-    if (remoteAudio.current) remoteAudio.current.srcObject = null;
   };
 
-  const createPeerConnection = (targetId, mediaType) => {
+  const createPeerConnection = (targetId) => {
     const peer = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     peer.onicecandidate = (event) => {
       if (event.candidate) {
-        Socket.emit("ice-candidate", { candidate: event.candidate, to: targetId });
+        Socket.emit("ice-candidate", { candidate: event.candidate, to: targetId, roomId: callRoomId.current });
       }
     };
 
     peer.ontrack = (e) => {
-      remoteStream.current = e.streams[0];
-      setHasRemoteMedia(true);
-      if (mediaType === "video" && remoteVideo.current) remoteVideo.current.srcObject = remoteStream.current;
-      if (mediaType === "audio" && remoteAudio.current) remoteAudio.current.srcObject = remoteStream.current;
+      const stream = e.streams[0];
+      setRemotePeers((current) => {
+        const next = current.filter((item) => item.userId !== String(targetId));
+        return [...next, { userId: String(targetId), name: peerNames.current.get(String(targetId)) || "Participant", stream }];
+      });
     };
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === "connected") setCalling(false);
@@ -311,6 +324,20 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     return peer;
   };
 
+  const peerNames = useRef(new Map());
+
+  const createOutgoingPeer = async (targetId, targetName, stream, mediaType) => {
+    const id = String(targetId);
+    if (peerConnections.current.has(id)) return;
+    peerNames.current.set(id, targetName || "Participant");
+    const peer = createPeerConnection(id);
+    peerConnections.current.set(id, peer);
+    stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    Socket.emit("offer", { offer, to: id, callType: mediaType, roomId: callRoomId.current });
+  };
+
   const callUser = async () => {
     if (!to || calling || !Socket.connected) {
       setError("Connect to the chat server before starting a call.");
@@ -320,9 +347,10 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     setError("");
     setActiveCallType(callType);
     setCallPeerName(peerName);
+    setIsCallHost(true);
     setMinimized(false);
     setCallStatus("Calling");
-    remoteUserId.current = to;
+    callRoomId.current = crypto.randomUUID();
     try {
       const stream = await ensureLocalMedia(callType);
       try {
@@ -337,11 +365,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       } catch (historyError) {
         console.error("Could not save call history:", historyError);
       }
-      pc.current = createPeerConnection(to, callType);
-      stream.getTracks().forEach((track) => pc.current.addTrack(track, stream));
-      const offer = await pc.current.createOffer();
-      await pc.current.setLocalDescription(offer);
-      Socket.emit("offer", { offer, to, callType });
+      await createOutgoingPeer(to, peerName || "Participant", stream, callType);
     } catch (callError) {
       setError(callError.message || "Could not start this call.");
       setCalling(false);
@@ -351,18 +375,27 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   const acceptCall = async () => {
     if (!incomingOffer) return;
+    const incomingId = String(incomingOffer.from);
+    const existingPeer = peerConnections.current.get(incomingId);
+    if (existingPeer && existingPeer.remoteDescription) return;
     try {
       const { offer, from, callType: incomingCallType } = incomingOffer;
+      callRoomId.current = incomingOffer.roomId;
       const stream = await ensureLocalMedia(incomingCallType);
-      pc.current = createPeerConnection(from, incomingCallType);
-      stream.getTracks().forEach((track) => pc.current.addTrack(track, stream));
-      await pc.current.setRemoteDescription(new RTCSessionDescription(offer));
-      for (const candidate of pendingCandidates.current.splice(0)) {
-        await pc.current.addIceCandidate(new RTCIceCandidate(candidate));
+      const peer = existingPeer || createPeerConnection(from);
+      if (!existingPeer) {
+        peerConnections.current.set(incomingId, peer);
       }
-      const answer = await pc.current.createAnswer();
-      await pc.current.setLocalDescription(answer);
-      Socket.emit("answer", { answer, to: from });
+      peerNames.current.set(incomingId, incomingOffer.fromName || callPeerName);
+      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      await peer.setRemoteDescription(new RTCSessionDescription(offer));
+      for (const candidate of pendingCandidates.current.get(incomingId) || []) {
+        await peer.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+      pendingCandidates.current.delete(incomingId);
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      Socket.emit("answer", { answer, to: from, roomId: callRoomId.current });
       setIncomingOffer(null);
       setMinimized(false);
       setCalling(true);
@@ -373,9 +406,40 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     }
   };
 
+  const inviteParticipant = async (event) => {
+    event.preventDefault();
+    const identifier = inviteIdentifier.trim();
+    if (!identifier || !Socket.connected || !peerConnections.current.size) return;
+    if (peerConnections.current.size >= 3) {
+      setError("Small calls support up to four people, including you.");
+      return;
+    }
+    setInvitingParticipant(true);
+    setError("");
+    try {
+      const { data: participant } = await axios.post(`${API_URL}/api/call-invitees`, { identifier }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
+        withCredentials: true,
+      });
+      if (peerConnections.current.has(String(participant._id))) {
+        setError("That person is already in this call.");
+        return;
+      }
+      const stream = await ensureLocalMedia(activeCallType);
+      await createOutgoingPeer(participant._id, participant.username, stream, activeCallType);
+      setInviteIdentifier("");
+      setCallPeerName((current) => current || participant.username);
+      setCallStatus(`Calling ${participant.username}`);
+    } catch (callError) {
+      setError(callError.response?.data?.message || callError.message || "Could not invite that participant.");
+    } finally {
+      setInvitingParticipant(false);
+    }
+  };
+
   const closeCall = () => {
-    if (remoteUserId.current && Socket.connected) {
-      Socket.emit("hangup", { to: remoteUserId.current });
+    if (Socket.connected) {
+      peerConnections.current.forEach((_, participantId) => Socket.emit("hangup", { to: participantId, roomId: callRoomId.current }));
     }
     cleanupCall();
     if (callHistoryId.current) {
@@ -390,6 +454,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     setCallStatus("Call ended");
     setMinimized(false);
     setVisible(false);
+    callRoomId.current = null;
     onCloseRef.current?.();
   };
 
@@ -408,13 +473,22 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       <section className="relative h-full w-full overflow-hidden" role="dialog" aria-modal={!minimized} aria-label={`${activeCallType} call`}>
         {activeCallType === "video" ? (
           <>
-            <video
-              ref={remoteVideo}
-              autoPlay
-              playsInline
-              className="absolute inset-0 h-full w-full bg-[#071315] object-cover"
-            />
-            {!hasRemoteMedia && !incomingOffer && (
+            {remotePeers.length > 0 ? remotePeers.map((remotePeer, index) => (
+              <div key={remotePeer.userId} style={index > 0 ? { top: `${80 + (index - 1) * 148}px` } : undefined} className={index === 0 ? "absolute inset-0" : "absolute right-4 z-20 aspect-video w-[min(28vw,240px)] overflow-hidden rounded-xl border border-white/30 shadow-xl"}>
+                <video
+                  ref={(element) => {
+                    if (element) {
+                      element.srcObject = remotePeer.stream;
+                      remoteMediaElements.current.set(remotePeer.userId, element);
+                    } else remoteMediaElements.current.delete(remotePeer.userId);
+                  }}
+                  autoPlay
+                  playsInline
+                  className="h-full w-full bg-[#071315] object-cover"
+                />
+                <span className="absolute bottom-2 left-2 rounded bg-black/55 px-2 py-1 text-xs text-white">{remotePeer.name}</span>
+              </div>
+            )) : !incomingOffer && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
                 <div className="grid h-28 w-28 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl ring-8 ring-white/5 sm:h-40 sm:w-40 sm:text-5xl">
                   {displayPeerName.slice(0, 1).toUpperCase()}
@@ -462,8 +536,15 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
           <div className="relative flex items-center gap-2">
             {!incomingOffer && (
               <div className="relative">
+                <button type="button" onClick={() => setShowInviteParticipant((open) => !open)} disabled={!isCallHost || !peerConnections.current.size || peerConnections.current.size >= 3} aria-label="Invite participant" aria-expanded={showInviteParticipant} title={peerConnections.current.size >= 3 ? "Small calls are limited to four people" : "Invite participant"} className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15 disabled:opacity-40"><FaUserPlus /></button>
+                {showInviteParticipant && <form onSubmit={inviteParticipant} className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-[#071315]/95 p-3 shadow-2xl backdrop-blur"><p className="mb-2 text-xs text-white/70">Invite up to three guests to this call.</p><div className="flex gap-2"><input value={inviteIdentifier} onChange={(event) => setInviteIdentifier(event.target.value)} placeholder="Username or email" aria-label="Participant username or email" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white" /><button type="submit" disabled={invitingParticipant || !inviteIdentifier.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">{invitingParticipant ? "Inviting…" : "Invite"}</button></div>{remotePeers.length > 0 && <ul className="mt-2 space-y-1">{remotePeers.map((peer) => <li key={peer.userId} className="text-xs text-white/60">{peer.name} connected</li>)}</ul>}</form>}
+              </div>
+            )}
+            {!incomingOffer && (
+              <div className="relative">
                 <button
                   type="button"
+                  ref={audioRoutesPanel.triggerRef}
                   onClick={() => setShowAudioRoutes((visibleRoutes) => !visibleRoutes)}
                   aria-label="Choose audio output"
                   aria-expanded={showAudioRoutes}
@@ -472,8 +553,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
                 >
                   <FaVolumeUp />
                 </button>
-                {showAudioRoutes && (
-                  <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-xl border border-white/20 bg-[#071315]/95 p-2 shadow-2xl backdrop-blur">
+                <FloatingPanel open={showAudioRoutes} panelRef={audioRoutesPanel.panelRef} style={audioRoutesPanel.style} className="w-56 rounded-xl border border-white/20 bg-[#071315]/95 p-2 shadow-2xl backdrop-blur">
                     {audioRoutes.length > 0 ? (
                       <>
                         <p className="px-2 py-1 text-xs text-white/60">Audio output</p>
@@ -490,8 +570,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
                       <p className="px-2 py-1 text-xs text-white/60">No selectable outputs detected.</p>
                     )}
                     {audioRouteError && <p className="px-2 py-1 text-xs text-rose-200">{audioRouteError}</p>}
-                  </div>
-                )}
+                </FloatingPanel>
               </div>
             )}
             <button
@@ -516,10 +595,8 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
         {!minimized && activeCallType === "audio" && !incomingOffer && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
-            <div className="grid h-36 w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-5xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5 sm:h-48 sm:w-48 sm:text-6xl">
-              {displayPeerName.slice(0, 1).toUpperCase()}
-            </div>
-            <p className="text-sm text-white/70">Audio call</p>
+            <div className="flex flex-wrap justify-center gap-5">{remotePeers.map((remotePeer) => <div key={remotePeer.userId} className="flex flex-col items-center gap-2"><div className="grid h-28 w-28 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5 sm:h-36 sm:w-36">{remotePeer.name.slice(0, 1).toUpperCase()}</div><span className="max-w-36 truncate text-sm text-white/80">{remotePeer.name}</span></div>)}</div>
+            <p className="text-sm text-white/70">Audio call · {remotePeers.length + 1} participants</p>
           </div>
         )}
         {!minimized && activeCallType === "video" && hasLocalMedia && !incomingOffer && (
@@ -612,7 +689,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
           </div>
         )}
 
-        {activeCallType === "audio" && <audio ref={remoteAudio} autoPlay playsInline className="hidden" />}
+        {activeCallType === "audio" && remotePeers.map((remotePeer) => <audio key={remotePeer.userId} ref={(element) => { if (element) { element.srcObject = remotePeer.stream; remoteMediaElements.current.set(remotePeer.userId, element); } else remoteMediaElements.current.delete(remotePeer.userId); }} autoPlay playsInline className="hidden" />)}
       </section>
     </div>
   );

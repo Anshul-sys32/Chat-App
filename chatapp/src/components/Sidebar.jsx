@@ -9,6 +9,7 @@ import {
   FaMoon,
   FaSun,
   FaPhone,
+  FaCalendarAlt,
   FaCog,
 } from 'react-icons/fa';
 import UserList from './UserList';
@@ -17,11 +18,12 @@ import Socket from '../Socket';
 import ProfileEditor from './ProfileEditor';
 import Avatar from './Avatar';
 import CallHistory from './CallHistory';
+import Meetings from './Meetings';
 import SettingsPanel from './SettingsPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
-const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, selectedChat }) => {
+const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) => {
   const [activeTab, setActiveTab] = useState('localUsers');
   const [search, setSearch] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -38,11 +40,13 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       case 'globalUsers':
         return <UserList currentUser={user} activeChatId={selectedChat?._id} scope="global" search={search} onStartChat={handleSelectChat} />;
       case 'groups':
-        return <GroupList search={search} onSelectGroup={handleSelectChat} />;
+        return <GroupList search={search} onSelectGroup={handleSelectChat} isAdmin={user?.role === 'admin'} />;
       case 'calls':
         return <CallHistory onStartChat={handleSelectChat} />;
+      case 'meetings':
+        return <Meetings />;
       case 'settings':
-        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} onOpenProfile={() => setIsProfileOpen(true)} />;
+        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
       default:
         return null;
     }
@@ -122,6 +126,12 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
               label="Call History"
               onClick={() => setActiveTab('calls')}
               active={activeTab === 'calls'}
+            />
+            <IconButton
+              icon={<FaCalendarAlt />}
+              label="Meetings"
+              onClick={() => setActiveTab('meetings')}
+              active={activeTab === 'meetings'}
             />
             <IconButton
               icon={<FaCog />}

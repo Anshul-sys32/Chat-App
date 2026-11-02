@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { createPortal } from 'react-dom';
 import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaHashtag, FaPlus, FaTimes, FaUserMinus, FaUserPlus, FaUsers } from 'react-icons/fa';
 import Socket from '../Socket';
 import Avatar from './Avatar';
@@ -9,21 +10,21 @@ const authConfig = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
 });
 
-export default function GroupList({ search = '', onSelectGroup }) {
+export default function GroupList({ search = '', onSelectGroup, isAdmin = false }) {
   const [groups, setGroups] = useState([]);
   const [activeGroup, setActiveGroup] = useState(null);
   const [members, setMembers] = useState([]);
-  const [users, setUsers] = useState([]);
   const [name, setName] = useState('');
   const [groupType, setGroupType] = useState('standard');
   const [channels, setChannels] = useState([]);
   const [newChannelName, setNewChannelName] = useState('');
   const [channelPostingMode, setChannelPostingMode] = useState('members');
-  const [newMemberId, setNewMemberId] = useState('');
+  const [memberIdentifier, setMemberIdentifier] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isManagementOpen, setIsManagementOpen] = useState(false);
+  const [chatAreaOverlay, setChatAreaOverlay] = useState(null);
   let currentUser = null;
   try {
     currentUser = JSON.parse(localStorage.getItem('user') || 'null');
@@ -32,8 +33,12 @@ export default function GroupList({ search = '', onSelectGroup }) {
   }
 
   useEffect(() => {
+    setChatAreaOverlay(document.getElementById('chat-area-overlay'));
+  }, []);
+
+  useEffect(() => {
     let active = true;
-    axios.get(`${apiUrl}/api/groups`, authConfig()).then(({ data }) => {
+    axios.get(`${apiUrl}${isAdmin ? '/api/admin/groups' : '/api/groups'}`, authConfig()).then(({ data }) => {
       if (active) setGroups(data);
     }).catch((requestError) => {
       if (active) setError(requestError.response?.data?.message || 'Could not load groups.');
@@ -41,12 +46,34 @@ export default function GroupList({ search = '', onSelectGroup }) {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const handleRemoved = ({ groupId }) => {
       setGroups((previous) => previous.filter((group) => String(group._id) !== String(groupId)));
       setActiveGroup((previous) => previous && String(previous._id) === String(groupId) ? null : previous);
+    };
+    const handleDeactivated = ({ groupId }) => {
+      if (isAdmin) {
+        setGroups((previous) => previous.map((group) => String(group._id) === String(groupId) ? { ...group, isActive: 0 } : group));
+      } else {
+        setGroups((previous) => previous.filter((group) => String(group._id) !== String(groupId)));
+      }
+      setActiveGroup((previous) => previous && String(previous._id) === String(groupId) ? null : previous);
+      setIsManagementOpen(false);
+    };
+    const handleReactivated = (group) => {
+      if (!isAdmin) {
+        setGroups((previous) => previous.some((item) => String(item._id) === String(group._id))
+          ? previous.map((item) => String(item._id) === String(group._id) ? { ...item, ...group } : item)
+          : [...previous, group]);
+      } else {
+        setGroups((previous) => previous.map((item) => String(item._id) === String(group._id) ? { ...item, ...group } : item));
+      }
+    };
+    const handleGroupUpdated = (group) => {
+      setGroups((previous) => previous.map((item) => String(item._id) === String(group._id) ? { ...item, ...group } : item));
+      setActiveGroup((previous) => previous && String(previous._id) === String(group._id) ? { ...previous, ...group } : previous);
     };
     const handleRoleChange = ({ groupId, userId, role }) => {
       if (String(userId) === String(currentUser?._id)) {
@@ -55,7 +82,8 @@ export default function GroupList({ search = '', onSelectGroup }) {
       }
       setMembers((previous) => previous.map((member) => String(member._id) === String(userId) ? { ...member, role } : member));
     };
-    const handleMemberAdded = ({ groupId, member, groupName, members: memberCount }) => {
+    const handleMemberAdded = (event) => {
+      const { groupId, member, groupName, members: memberCount } = event;
       setGroups((previous) => previous.map((group) => String(group._id) === String(groupId)
         ? { ...group, members: memberCount }
         : group));
@@ -63,10 +91,17 @@ export default function GroupList({ search = '', onSelectGroup }) {
         setMembers((previous) => previous.some((current) => String(current._id) === String(member._id))
           ? previous
           : [...previous, member]);
-        setUsers((previous) => previous.filter((candidate) => String(candidate._id) !== String(member._id)));
       } else if (!groups.some((group) => String(group._id) === String(groupId))
         && String(member._id) === String(currentUser?._id)) {
-        setGroups((previous) => [...previous, { _id: groupId, name: groupName, members: memberCount, role: 'member' }]);
+        setGroups((previous) => [...previous, {
+          _id: groupId,
+          name: groupName,
+          avatarUrl: event.avatarUrl,
+          groupType: event.groupType || 'standard',
+          isActive: 1,
+          members: memberCount,
+          role: 'member',
+        }]);
       }
     };
     const handleMemberChanged = ({ groupId, userId }) => {
@@ -103,6 +138,9 @@ export default function GroupList({ search = '', onSelectGroup }) {
       setChannels((previous) => previous.filter((item) => String(item._id) !== String(channelId)));
     };
     Socket.on('group-member-removed', handleRemoved);
+    Socket.on('group-deactivated', handleDeactivated);
+    Socket.on('group-reactivated', handleReactivated);
+    Socket.on('group-updated', handleGroupUpdated);
     Socket.on('group-role-updated', handleRoleChange);
     Socket.on('group-member-added', handleMemberAdded);
     Socket.on('group-member-changed', handleMemberChanged);
@@ -113,6 +151,9 @@ export default function GroupList({ search = '', onSelectGroup }) {
     Socket.on('group-channel-archived', handleChannelArchived);
     return () => {
       Socket.off('group-member-removed', handleRemoved);
+      Socket.off('group-deactivated', handleDeactivated);
+      Socket.off('group-reactivated', handleReactivated);
+      Socket.off('group-updated', handleGroupUpdated);
       Socket.off('group-role-updated', handleRoleChange);
       Socket.off('group-member-added', handleMemberAdded);
       Socket.off('group-member-changed', handleMemberChanged);
@@ -122,24 +163,19 @@ export default function GroupList({ search = '', onSelectGroup }) {
       Socket.off('group-channel-updated', handleChannelUpdated);
       Socket.off('group-channel-archived', handleChannelArchived);
     };
-  }, [currentUser?._id, activeGroup?._id, groups]);
+  }, [currentUser?._id, activeGroup?._id, groups, isAdmin]);
 
   const refreshMembers = async (group) => {
     setError('');
     try {
-      const [memberResponse, userResponse, channelResponse] = await Promise.all([
+      const [memberResponse, channelResponse] = await Promise.all([
         axios.get(`${apiUrl}/api/groups/${group._id}/members`, authConfig()),
-        axios.get(`${apiUrl}/api/users`, authConfig()),
-        group.groupType === 'community'
+        group.groupType === 'community' && group.isActive !== 0
           ? axios.get(`${apiUrl}/api/groups/${group._id}/channels`, authConfig())
           : Promise.resolve({ data: { channels: [] } }),
       ]);
       setMembers(memberResponse.data);
       setChannels(channelResponse.data.channels || []);
-      const availableUsers = userResponse.data.users || userResponse.data;
-      setUsers(availableUsers.filter((candidate) =>
-        !memberResponse.data.some((member) => String(member._id) === String(candidate._id))
-      ));
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not load group members.');
     }
@@ -149,6 +185,42 @@ export default function GroupList({ search = '', onSelectGroup }) {
     setActiveGroup(group);
     setIsManagementOpen(true);
     await refreshMembers(group);
+  };
+
+  const deactivateGroup = async () => {
+    if (!activeGroup || !window.confirm(`Deactivate ${activeGroup.name}? It will disappear from every member's sidebar until an administrator restores it.`)) return;
+    try {
+      await axios.delete(`${apiUrl}/api/groups/${activeGroup._id}`, authConfig());
+      setIsManagementOpen(false);
+      if (!isAdmin) setGroups((previous) => previous.filter((group) => String(group._id) !== String(activeGroup._id)));
+      else setGroups((previous) => previous.map((group) => String(group._id) === String(activeGroup._id) ? { ...group, isActive: 0 } : group));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not deactivate the group.');
+    }
+  };
+
+  const updateGroupName = async (event) => {
+    event.preventDefault();
+    if (!activeGroup || !activeGroup.name.trim()) return;
+    try {
+      const { data } = await axios.patch(`${apiUrl}/api/groups/${activeGroup._id}`, { name: activeGroup.name }, authConfig());
+      setGroups((previous) => previous.map((group) => String(group._id) === String(data._id) ? { ...group, ...data } : group));
+      setActiveGroup((previous) => ({ ...previous, ...data }));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not rename the group.');
+    }
+  };
+
+  const reactivateGroup = async () => {
+    if (!activeGroup || !isAdmin) return;
+    try {
+      const { data } = await axios.patch(`${apiUrl}/api/groups/${activeGroup._id}`, { isActive: true }, authConfig());
+      setGroups((previous) => previous.map((group) => String(group._id) === String(data._id) ? { ...group, ...data } : group));
+      setActiveGroup((previous) => ({ ...previous, ...data }));
+      await refreshMembers(data);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not reactivate the group.');
+    }
   };
 
   const toggleChannels = async (group) => {
@@ -221,13 +293,12 @@ export default function GroupList({ search = '', onSelectGroup }) {
 
   const addMember = async (event) => {
     event.preventDefault();
-    if (!activeGroup || !newMemberId) return;
+    if (!activeGroup || !memberIdentifier.trim()) return;
     try {
-      await axios.post(`${apiUrl}/api/groups/${activeGroup._id}/members`, { userId: newMemberId }, authConfig());
-      setNewMemberId('');
-      await refreshMembers(activeGroup);
+      await axios.post(`${apiUrl}/api/groups/${activeGroup._id}/invitations`, { identifier: memberIdentifier.trim() }, authConfig());
+      setMemberIdentifier('');
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Could not add member.');
+      setError(requestError.response?.data?.message || 'Could not send the invitation.');
     }
   };
 
@@ -315,12 +386,12 @@ export default function GroupList({ search = '', onSelectGroup }) {
               >
                 <span className="block truncate text-sm font-semibold">{group.name}</span>
                 <span className="mt-0.5 flex items-center gap-1 text-[11px] text-white/55">
-                  <FaUsers size={10} /> {group.members} · {group.role}
+                  <FaUsers size={10} /> {group.members} · {group.role} {group.isActive === 0 && <span className="text-rose-300">· inactive</span>}
                 </span>
               </button>
               <button type="button" onClick={() => toggleChannels(group)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-300 transition hover:bg-white/10 hover:text-white" aria-label={`Show channels of ${group.name}`} title="Show group channels">{activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}</button>
             </div>
-            {activeGroup?._id === group._id && (
+            {activeGroup?._id === group._id && !isManagementOpen && (
               <div className="border-t border-white/10 px-2.5 py-2.5">
                 <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{group.groupType === 'community' ? channels.length : 'None'}</span></div>
                 {group.groupType === 'community' ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-teal-300/10 hover:text-teal-200"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span></button></li>)}</ul> : <p className="text-xs text-white/45">This standard group has no channels.</p>}
@@ -427,16 +498,8 @@ export default function GroupList({ search = '', onSelectGroup }) {
                 )}
                 {group.role === 'admin' && (
                   <form onSubmit={addMember} className="mb-2 flex gap-1">
-                    <select
-                      value={newMemberId}
-                      onChange={(event) => setNewMemberId(event.target.value)}
-                      className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-900 px-1.5 py-1.5 text-xs text-white"
-                      aria-label="Choose a user to add"
-                    >
-                      <option value="">Add someone...</option>
-                      {users.map((candidate) => <option key={candidate._id} value={candidate._id}>{candidate.username}</option>)}
-                    </select>
-                    <button type="submit" disabled={!newMemberId} className="grid w-7 place-items-center rounded bg-cyan-600 text-white disabled:opacity-40" title="Add member" aria-label="Add member">
+                    <input value={memberIdentifier} onChange={(event) => setMemberIdentifier(event.target.value)} placeholder="Username or email" className="min-w-0 flex-1 rounded border border-gray-600 bg-gray-900 px-1.5 py-1.5 text-xs text-white" aria-label="Username or email to invite" />
+                    <button type="submit" disabled={!memberIdentifier.trim()} className="grid w-7 place-items-center rounded bg-cyan-600 text-white disabled:opacity-40" title="Send invitation" aria-label="Send invitation">
                       <FaPlus size={10} />
                     </button>
                   </form>
@@ -472,8 +535,8 @@ export default function GroupList({ search = '', onSelectGroup }) {
           </li>
         ))}
       </ul>
-      {isCreateOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsCreateOpen(false)}>
+      {isCreateOpen && createPortal(
+        <div className="pointer-events-auto absolute inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsCreateOpen(false)}>
           <form onSubmit={createGroup} className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div><h2 className="text-lg font-semibold">Create a group</h2><p className="mt-1 text-xs text-white/55">Start a private group or a channel-based community.</p></div>
@@ -484,19 +547,23 @@ export default function GroupList({ search = '', onSelectGroup }) {
             {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
             <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setIsCreateOpen(false)} className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white/75 hover:bg-white/10">Cancel</button><button type="submit" disabled={!name.trim()} className="rounded-lg bg-teal-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Create group</button></div>
           </form>
-        </div>
+        </div>,
+        chatAreaOverlay || document.body,
       )}
-      {isManagementOpen && activeGroup && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsManagementOpen(false)}>
+      {isManagementOpen && activeGroup && createPortal(
+        <div className="pointer-events-auto absolute inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsManagementOpen(false)}>
           <section className="max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl">
-            <div className="mb-5 flex items-start gap-3"><Avatar src={activeGroup.avatarUrl} name={activeGroup.name} group className="h-12 w-12 text-base" /><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-semibold">{activeGroup.name}</h2><p className="text-xs text-white/55">Group management · {activeGroup.members} members</p></div><button type="button" onClick={() => setIsManagementOpen(false)} className="rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close group management"><FaTimes /></button></div>
+            <div className="mb-5 flex items-start gap-3"><Avatar src={activeGroup.avatarUrl} name={activeGroup.name} group className="h-12 w-12 text-base" /><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-semibold">{activeGroup.name}</h2><p className="text-xs text-white/55">Group management · {activeGroup.members} members {activeGroup.isActive === 0 && <span className="text-rose-300">· inactive</span>}</p></div><button type="button" onClick={() => setIsManagementOpen(false)} className="rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close group management"><FaTimes /></button></div>
+            {activeGroup.role === 'admin' && <form onSubmit={updateGroupName} className="mb-4 flex gap-2"><input value={activeGroup.name} onChange={(event) => setActiveGroup((current) => ({ ...current, name: event.target.value }))} maxLength={100} aria-label="Group name" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm" /><button type="submit" className="rounded-lg border border-white/15 px-3 py-2 text-xs hover:bg-white/10">Save name</button></form>}
             {activeGroup.role === 'admin' && <div className="grid gap-2 sm:grid-cols-2"><label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 p-3 text-sm hover:bg-white/10"><FaCamera className="text-teal-300" /> Change group photo<input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" className="sr-only" onChange={(event) => { uploadGroupAvatar(activeGroup, event.target.files?.[0]); event.target.value = ''; }} /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 p-3 text-sm"><FaExchangeAlt className="text-teal-300" /> Type<select value={activeGroup.groupType} onChange={(event) => updateGroupType(event.target.value)} className="ml-auto max-w-[130px] rounded bg-slate-900 px-2 py-1 text-xs"><option value="standard">Standard</option><option value="community">Community</option></select></label></div>}
-            {activeGroup.role === 'admin' && <form onSubmit={addMember} className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-2 flex items-center gap-2 text-sm font-semibold"><FaUserPlus className="text-teal-300" /> Add a member</div><div className="flex gap-2"><select value={newMemberId} onChange={(event) => setNewMemberId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-sm"><option value="">Choose someone...</option>{users.map((candidate) => <option key={candidate._id} value={candidate._id}>{candidate.username}</option>)}</select><button type="submit" disabled={!newMemberId} className="rounded-lg bg-teal-400 px-3 text-slate-950 disabled:opacity-40" aria-label="Add member"><FaPlus /></button></div></form>}
+            {activeGroup.role === 'admin' && <form onSubmit={addMember} className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-2 flex items-center gap-2 text-sm font-semibold"><FaUserPlus className="text-teal-300" /> Invite a member</div><div className="flex gap-2"><input value={memberIdentifier} onChange={(event) => setMemberIdentifier(event.target.value)} placeholder="Username or email" aria-label="Username or email to invite" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-sm" /><button type="submit" disabled={!memberIdentifier.trim()} className="rounded-lg bg-teal-400 px-3 text-slate-950 disabled:opacity-40" aria-label="Send invitation"><FaPlus /></button></div><p className="mt-2 text-[11px] text-white/45">They must accept the invitation from Alerts.</p></form>}
             {activeGroup.groupType === 'community' && <section className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><FaHashtag className="text-teal-300" /> Channels</div><span className="text-xs text-white/45">{channels.length}</span></div>{activeGroup.role === 'admin' && <form onSubmit={createChannel} className="mb-3 flex gap-2"><input value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} maxLength={60} placeholder="New channel" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-sm" /><select value={channelPostingMode} onChange={(event) => setChannelPostingMode(event.target.value)} className="max-w-[120px] rounded-lg border border-white/10 bg-slate-900 px-1 text-xs"><option value="members">Members post</option><option value="admins">Leaders only</option></select><button type="submit" disabled={!newChannelName.trim()} className="rounded-lg bg-teal-400 px-3 text-slate-950 disabled:opacity-40" aria-label="Create channel"><FaPlus /></button></form>}<ul className="space-y-1">{channels.map((channel) => <li key={channel._id} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-2"><button type="button" onClick={() => { setIsManagementOpen(false); onSelectGroup?.({ ...activeGroup, type: 'group', channelId: channel._id, channelName: channel.name }); }} className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm hover:text-teal-200"><FaHashtag className="text-xs text-white/40" /><span className="truncate">{channel.name}</span></button>{activeGroup.role === 'admin' && <><select value={channel.postingMode} onChange={(event) => updateChannelPostingMode(channel, event.target.value)} className="max-w-[100px] rounded bg-slate-900 px-1 py-1 text-[10px]" aria-label={`${channel.name} posting permissions`}><option value="members">Members</option><option value="admins">Leaders</option></select><button type="button" onClick={() => archiveChannel(channel)} disabled={channel.slug === 'general' || channels.length < 2} className="text-white/45 hover:text-rose-300 disabled:opacity-25" title="Archive channel" aria-label={`Archive ${channel.name}`}><FaArchive size={11} /></button></>}</li>)}</ul></section>}
             <section className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-3 flex items-center justify-between"><span className="text-sm font-semibold">Members</span><span className="text-xs text-white/45">{members.length}</span></div><ul className="space-y-1">{members.map((member) => <li key={member._id} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-2"><Avatar src={member.profilePicture || member.googlePicture} name={member.username} className="h-7 w-7 text-[10px]" /><span className="min-w-0 flex-1 truncate text-sm">{member.username}</span>{member.role === 'admin' && <FaCrown className="text-amber-300" size={11} />}{activeGroup.role === 'admin' ? <><select value={member.role} onChange={(event) => updateRole(member, event.target.value)} className="rounded bg-slate-900 px-1 py-1 text-[10px]" aria-label={`Role for ${member.username}`}><option value="admin">Admin</option><option value="member">Member</option></select><button type="button" onClick={() => removeMember(member)} className="text-white/45 hover:text-rose-300" title={`Remove ${member.username}`} aria-label={`Remove ${member.username}`}><FaUserMinus size={11} /></button></> : <span className="text-[10px] text-white/45">{member.role}</span>}</li>)}</ul></section>
             {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2">{isAdmin && activeGroup.isActive === 0 ? <button type="button" onClick={reactivateGroup} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950">Reactivate group</button> : <button type="button" onClick={deactivateGroup} className="rounded-lg border border-rose-300/20 px-3 py-2 text-xs text-rose-200 hover:bg-rose-500/10">Deactivate group</button>}</div>
           </section>
-        </div>
+        </div>,
+        chatAreaOverlay || document.body,
       )}
     </div>
   );

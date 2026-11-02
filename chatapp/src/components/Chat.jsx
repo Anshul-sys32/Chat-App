@@ -4,7 +4,7 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaBell, FaBellSlash, FaCopy, FaEllipsisV, FaMicrophone, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCopy, FaEllipsisV, FaMicrophone, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -12,6 +12,8 @@ import VoiceRecorder from './VoiceRecorder';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
 import Avatar from './Avatar';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
+import FloatingPanel from './FloatingPanel';
+import useFloatingPanel from '../useFloatingPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const MAX_FILES_PER_MESSAGE = 5;
@@ -102,6 +104,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const replyDrag = React.useRef(null);
   const suppressMessageClick = React.useRef(false);
   const [replySwipe, setReplySwipe] = useState({ messageId: null, offset: 0, dragging: false });
+  const bulkPanel = useFloatingPanel(openBulkMenu, () => setOpenBulkMenu(false));
+  const stickerPanel = useFloatingPanel(showStickers, () => setShowStickers(false));
 
   useEffect(() => {
     if (!voiceFile) {
@@ -395,6 +399,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('group-message-updated', handleMessageUpdated);
     Socket.on('message-hidden-for-user', handleMessageHiddenForUser);
     Socket.on('group-member-removed', handleRemovedFromGroup);
+    Socket.on('group-deactivated', handleRemovedFromGroup);
     Socket.on('group-channel-archived', handleChannelArchived);
     Socket.on('profile-picture-updated', handleProfilePicture);
     Socket.on('group-picture-updated', handleGroupPicture);
@@ -408,6 +413,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('group-message-updated', handleMessageUpdated);
       Socket.off('message-hidden-for-user', handleMessageHiddenForUser);
       Socket.off('group-member-removed', handleRemovedFromGroup);
+      Socket.off('group-deactivated', handleRemovedFromGroup);
       Socket.off('group-channel-archived', handleChannelArchived);
       Socket.off('profile-picture-updated', handleProfilePicture);
       Socket.off('group-picture-updated', handleGroupPicture);
@@ -935,11 +941,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         theme={theme}
         onToggleTheme={onToggleTheme}
         selectedChat={selectedChat}
+        conversationMuted={conversationMuted}
+        conversationMuteLoading={conversationMuteLoading}
+        conversationMuteSaving={conversationMuteSaving}
+        conversationMuteError={conversationMuteError}
+        onToggleConversationMute={toggleConversationMute}
       />
 
 
       <div
-        className={`ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
+        className={`relative ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
       >
         {/* Header */}
         <header className="theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 rounded-b-2xl border py-3 pl-[max(4rem,calc(3rem+env(safe-area-inset-left)))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:py-4 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))]">
@@ -978,6 +989,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <>
                 <button
                   type="button"
+                  ref={bulkPanel.triggerRef}
                   onClick={() => setOpenBulkMenu((current) => !current)}
                   className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border"
                   title="Selected message actions"
@@ -985,8 +997,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 >
                   <FaEllipsisV />
                 </button>
-                {openBulkMenu && (
-                  <div className="absolute right-0 top-12 z-40 min-w-40 rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl">
+                <FloatingPanel open={openBulkMenu} panelRef={bulkPanel.panelRef} style={bulkPanel.style} className="min-w-40 rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl">
                     <button type="button" onClick={deleteSelectedMessages} className="block w-full rounded px-2 py-2 text-left text-rose-300 hover:bg-white/10">
                       Delete selected
                     </button>
@@ -996,23 +1007,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     <button type="button" onClick={copySelectedMessages} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left hover:bg-white/10">
                       <FaCopy /> Copy selected
                     </button>
-                  </div>
-                )}
+                </FloatingPanel>
               </>
             ) : (
               <>
             <NotificationCenter onNavigate={navigateToNotificationTarget} />
-            <button
-              type="button"
-              onClick={toggleConversationMute}
-              disabled={!selectedChat || conversationMuteLoading || conversationMuteSaving}
-              title={conversationMuted ? 'Unmute conversation notifications' : 'Mute conversation notifications'}
-              aria-label={conversationMuted ? 'Unmute conversation notifications' : 'Mute conversation notifications'}
-              aria-pressed={conversationMuted}
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-30"
-            >
-              {conversationMuted ? <FaBellSlash /> : <FaBell />}
-            </button>
             <button
               onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
               title="Start Audio Call"
@@ -1036,7 +1035,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           </div>
         </header>
 
-        {conversationMuteError && <p role="alert" className="theme-muted px-4 py-1 text-xs text-rose-400">{conversationMuteError}</p>}
+        <div id="chat-area-overlay" className="pointer-events-none absolute inset-0 z-[65]" />
+        <div id="chat-area-settings" className="pointer-events-none absolute inset-x-0 bottom-0 top-16 z-[25] overflow-y-auto" />
 
         {/* Main chat area */}
         <main
@@ -1329,6 +1329,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <div className="relative shrink-0">
               <button
                 type="button"
+                ref={stickerPanel.triggerRef}
                 onClick={() => setShowStickers((current) => !current)}
                 disabled={!selectedChat || isSending}
                 className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-50"
@@ -1337,8 +1338,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               >
                 <FaSmile />
               </button>
-              {showStickers && (
-                <div className="absolute bottom-12 left-0 z-40 w-64 rounded-xl border border-white/15 bg-slate-950 p-3 shadow-xl">
+              <FloatingPanel open={showStickers} panelRef={stickerPanel.panelRef} style={stickerPanel.style} className="w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-white/15 bg-slate-950 p-3 shadow-xl">
                   <div className="mb-2 flex flex-wrap gap-1 border-b border-white/10 pb-2">
                     {['all', 'favorites', 'recent', ...stickerCategories].map((category) => (
                       <button type="button" key={category} onClick={() => setStickerCategory(category)} className={`rounded px-2 py-1 text-[11px] capitalize ${stickerCategory === category ? 'bg-teal-500 text-slate-950' : 'text-white/70 hover:bg-white/10'}`}>
@@ -1390,8 +1390,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       <p>{stickers.length ? `No ${stickerCategory} stickers yet.` : 'No stickers available yet.'}</p>
                     </div>
                   )}
-                </div>
-              )}
+              </FloatingPanel>
             </div>
             <button
               type="button"

@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
 const { createMessageNotifications } = require("../services/messageNotifications");
+const { canInviteToCallRoom } = require("../services/callRoomPolicy");
 const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
@@ -18,6 +19,7 @@ const {
 } = require("../utils/uploads");
 
 const connectedUsers = new Map();
+const activeCallRooms = new Map();
 
 const validateAttachments = (attachments, userId) => {
   if (attachments === undefined) return [];
@@ -75,11 +77,12 @@ const initSocket = (httpServer) => {
       const user = jwt.verify(token, process.env.JWT_SECRET);
       socket.data.authExpiresAt = user.exp * 1000;
       pool.execute(
-        "SELECT id, role, status FROM users WHERE id = ? AND status = 'active' LIMIT 1",
+        "SELECT id, username, role, status FROM users WHERE id = ? AND status = 'active' LIMIT 1",
         [user.id]
       ).then(([users]) => {
         if (!users[0]) return next(new Error("Unauthorized"));
         socket.userId = String(users[0].id);
+        socket.userName = users[0].username;
         socket.userRole = users[0].role;
         return next();
       }).catch((error) => {
@@ -293,9 +296,41 @@ const initSocket = (httpServer) => {
       socket.on(eventName, (payload = {}) => {
         const recipientId = String(payload.to || "");
         if (!connectedUsers.has(recipientId)) return;
+        const roomId = typeof payload.roomId === "string" ? payload.roomId : null;
+        if (eventName === "offer" && roomId) {
+          let room = activeCallRooms.get(roomId);
+          if (!room) {
+            room = { hostId: socket.userId, participants: new Set([socket.userId]) };
+            activeCallRooms.set(roomId, room);
+          }
+          const invitePermission = canInviteToCallRoom(room, socket.userId, recipientId);
+          if (!invitePermission.allowed && invitePermission.reason === "not-host") {
+            return socket.emit("call-room-error", { message: "Only the call organizer can invite participants." });
+          }
+          if (!invitePermission.allowed && invitePermission.reason === "full") {
+            return socket.emit("call-room-error", { message: "Small calls are limited to four people." });
+          }
+          room.participants.add(recipientId);
+        } else if (roomId) {
+          const room = activeCallRooms.get(roomId);
+          if (!room || !room.participants.has(socket.userId) || !room.participants.has(recipientId)) return;
+          if (eventName === "hangup") {
+            if (socket.userId === room.hostId) {
+              for (const participantId of room.participants) {
+                if (participantId === socket.userId) continue;
+                for (const targetSocket of connectedUsers.get(participantId) || []) {
+                  io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+                }
+              }
+              activeCallRooms.delete(roomId);
+              return;
+            }
+            room.participants.delete(socket.userId);
+          }
+        }
         const { to, ...signalData } = payload;
         for (const targetSocket of connectedUsers.get(recipientId)) {
-          io.to(targetSocket).emit(eventName, { ...signalData, from: socket.userId });
+          io.to(targetSocket).emit(eventName, { ...signalData, from: socket.userId, fromName: socket.userName });
         }
       });
     }
@@ -306,6 +341,23 @@ const initSocket = (httpServer) => {
       clearTimeout(socket.authExpirationTimer);
 
       if (socket.userId) {
+        for (const [roomId, room] of activeCallRooms) {
+          if (!room.participants.has(socket.userId)) continue;
+          if (room.hostId === socket.userId) {
+            for (const participantId of room.participants) {
+              if (participantId === socket.userId) continue;
+              for (const targetSocket of connectedUsers.get(participantId) || []) {
+                io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+              }
+            }
+            activeCallRooms.delete(roomId);
+          } else {
+            room.participants.delete(socket.userId);
+            for (const targetSocket of connectedUsers.get(room.hostId) || []) {
+              io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+            }
+          }
+        }
         const userSockets = connectedUsers.get(socket.userId);
         userSockets?.delete(socket.id);
         if (!userSockets?.size) connectedUsers.delete(socket.userId);

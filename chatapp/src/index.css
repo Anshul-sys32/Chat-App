@@ -13,7 +13,8 @@ body,
 html,
 body {
   margin: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 @media (min-width: 768px) {
@@ -52,6 +53,9 @@ body {
   --theme-page: #000;
   --theme-page-gradient: #080a0b;
   --theme-surface: rgb(10 12 13 / 94%);
+  --theme-popover: #42474f;
+  --theme-popover-text: #ffffff;
+  --theme-popover-muted: #e0e4e8;
   --theme-surface-raised: rgb(255 255 255 / 6%);
   --theme-border: rgb(255 255 255 / 11%);
   --theme-control: #171a1b;
@@ -83,6 +87,9 @@ body {
   --theme-page: #edf4f2;
   --theme-page-gradient: linear-gradient(135deg, #eef5f4 0%, #e7f0ee 52%, #dcebe6 100%);
   --theme-surface: rgb(248 252 251 / 92%);
+  --theme-popover: #f5f7f8;
+  --theme-popover-text: #17313a;
+  --theme-popover-muted: #52666d;
   --theme-surface-raised: rgb(255 255 255 / 68%);
   --theme-border: rgb(38 80 81 / 14%);
   --theme-control: #f7fbfa;
@@ -124,6 +131,17 @@ body {
 .theme-sidebar {
   color: var(--theme-text);
   background: var(--theme-surface);
+}
+
+.theme-popover {
+  color: var(--theme-popover-text);
+  background-color: var(--theme-popover);
+  border-color: var(--theme-border);
+  opacity: 1;
+}
+
+.theme-popover .theme-muted {
+  color: var(--theme-popover-muted);
 }
 
 .theme-sidebar-panel {

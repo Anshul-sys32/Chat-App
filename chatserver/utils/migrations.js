@@ -32,7 +32,11 @@ const runMigrations = async () => {
       if (typeof migration.up !== "function") {
         throw new Error(`Migration ${version} does not export an up function.`);
       }
-      await migration.up(connection);
+      try {
+        await migration.up(connection);
+      } catch (error) {
+        throw new Error(`Migration ${version} failed: ${error.message}`, { cause: error });
+      }
       await connection.execute("INSERT INTO schema_migrations (version) VALUES (?)", [version]);
       console.log(`Applied database migration ${version}`);
     }
