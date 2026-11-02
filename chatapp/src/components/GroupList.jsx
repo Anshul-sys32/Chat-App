@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaHashtag, FaPlus, FaUserMinus, FaUsers } from 'react-icons/fa';
+import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaHashtag, FaPlus, FaTimes, FaUserMinus, FaUserPlus, FaUsers } from 'react-icons/fa';
 import Socket from '../Socket';
 import Avatar from './Avatar';
 
@@ -22,6 +22,8 @@ export default function GroupList({ search = '', onSelectGroup }) {
   const [newMemberId, setNewMemberId] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isManagementOpen, setIsManagementOpen] = useState(false);
   let currentUser = null;
   try {
     currentUser = JSON.parse(localStorage.getItem('user') || 'null');
@@ -134,7 +136,8 @@ export default function GroupList({ search = '', onSelectGroup }) {
       ]);
       setMembers(memberResponse.data);
       setChannels(channelResponse.data.channels || []);
-      setUsers(userResponse.data.filter((candidate) =>
+      const availableUsers = userResponse.data.users || userResponse.data;
+      setUsers(availableUsers.filter((candidate) =>
         !memberResponse.data.some((member) => String(member._id) === String(candidate._id))
       ));
     } catch (requestError) {
@@ -143,10 +146,20 @@ export default function GroupList({ search = '', onSelectGroup }) {
   };
 
   const showManagement = async (group) => {
-    const next = activeGroup?._id === group._id ? null : group;
-    setActiveGroup(next);
-    if (next) await refreshMembers(next);
-    else setChannels([]);
+    setActiveGroup(group);
+    setIsManagementOpen(true);
+    await refreshMembers(group);
+  };
+
+  const toggleChannels = async (group) => {
+    if (String(activeGroup?._id) === String(group._id)) {
+      setActiveGroup(null);
+      setChannels([]);
+      return;
+    }
+    setActiveGroup(group);
+    setIsManagementOpen(false);
+    await refreshMembers(group);
   };
 
   const createGroup = async (event) => {
@@ -158,6 +171,7 @@ export default function GroupList({ search = '', onSelectGroup }) {
       setGroups((previous) => [...previous, data]);
       setName('');
       setGroupType('standard');
+      setIsCreateOpen(false);
       await showManagement(data);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not create group.');
@@ -261,66 +275,59 @@ export default function GroupList({ search = '', onSelectGroup }) {
     }
   };
 
+  const updateGroupType = async (nextType) => {
+    if (!activeGroup || nextType === activeGroup.groupType) return;
+    setError('');
+    try {
+      const { data } = await axios.patch(`${apiUrl}/api/groups/${activeGroup._id}`, { groupType: nextType }, authConfig());
+      setGroups((previous) => previous.map((group) => String(group._id) === String(data._id) ? { ...group, ...data } : group));
+      setActiveGroup((previous) => ({ ...previous, ...data }));
+      setChannels([]);
+      if (nextType === 'community') await refreshMembers({ ...activeGroup, ...data });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not change the group type.');
+    }
+  };
+
   const visibleGroups = groups.filter((group) => group.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="text-white">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-300">Your groups</h3>
-        <span className="text-xs text-gray-400">{groups.length}</span>
-      </div>
-      <form onSubmit={createGroup} className="mb-4 flex gap-1.5">
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          maxLength={100}
-          placeholder="New group"
-          className="min-w-0 flex-1 rounded-md border border-gray-600 bg-gray-900/70 px-2.5 py-2 text-sm text-white outline-none transition focus:border-cyan-400"
-          aria-label="New group name"
-        />
-        <select
-          value={groupType}
-          onChange={(event) => setGroupType(event.target.value)}
-          aria-label="Group type"
-          className="max-w-[108px] rounded-md border border-gray-600 bg-gray-900 px-1.5 text-xs text-white"
-        >
-          <option value="standard">Standard</option>
-          <option value="community">Community</option>
-        </select>
-        <button type="submit" disabled={!name.trim()} className="grid aspect-square place-items-center rounded-md bg-cyan-600 text-white transition hover:bg-cyan-500 disabled:opacity-40" title="Create group" aria-label="Create group">
+        <button type="button" onClick={() => setIsCreateOpen(true)} className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 text-gray-300 transition hover:border-teal-300/50 hover:bg-white/10 hover:text-teal-200" title="Create a new group" aria-label="Create a new group">
           <FaPlus size={11} />
         </button>
-      </form>
+      </div>
       <ul className="space-y-1.5">
         {!loading && visibleGroups.length === 0 && <li className="rounded-md border border-dashed border-gray-700 px-3 py-4 text-center text-xs text-gray-400">No groups found</li>}
         {visibleGroups.map((group) => (
-          <li key={group._id} className={`rounded-xl border transition ${activeGroup?._id === group._id ? 'border-teal-200/30 bg-teal-300/[0.1]' : 'border-white/[0.07] bg-white/[0.045] hover:bg-white/[0.08]'}`}>
+          <li key={group._id} className={`relative rounded-xl border transition ${activeGroup?._id === group._id ? 'border-teal-200/30 bg-teal-300/[0.1]' : 'border-white/[0.07] bg-white/[0.045] hover:bg-white/[0.08]'}`}>
             <div className="flex items-center gap-2 px-2.5 py-2">
-              <Avatar src={group.avatarUrl} name={group.name} group className="h-9 w-9 text-sm" />
+              <button type="button" onClick={() => showManagement(group)} className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-teal-300" title={`Manage ${group.name}`} aria-label={`Manage ${group.name}`}>
+                <Avatar src={group.avatarUrl} name={group.name} group className="h-9 w-9 text-sm" />
+              </button>
               <button
                 type="button"
-                onClick={() => group.groupType === 'community'
-                  ? showManagement(group)
-                  : onSelectGroup?.({ ...group, type: 'group' })}
+                onClick={() => onSelectGroup?.({ ...group, type: 'group' })}
                 className="min-w-0 flex-1 text-left"
-                title={group.groupType === 'community' ? `Open channels in ${group.name}` : `Open ${group.name}`}
+                title={`Open ${group.name}`}
               >
                 <span className="block truncate text-sm font-semibold">{group.name}</span>
                 <span className="mt-0.5 flex items-center gap-1 text-[11px] text-white/55">
                   <FaUsers size={10} /> {group.members} · {group.role}
                 </span>
               </button>
-              <button
-                type="button"
-                onClick={() => showManagement(group)}
-                className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-300 transition hover:bg-gray-600 hover:text-white"
-                aria-label={`Manage ${group.name}`}
-                title="Members and roles"
-              >
-                {activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}
-              </button>
+              <button type="button" onClick={() => toggleChannels(group)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-300 transition hover:bg-white/10 hover:text-white" aria-label={`Show channels of ${group.name}`} title="Show group channels">{activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}</button>
             </div>
             {activeGroup?._id === group._id && (
+              <div className="border-t border-white/10 px-2.5 py-2.5">
+                <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{group.groupType === 'community' ? channels.length : 'None'}</span></div>
+                {group.groupType === 'community' ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-teal-300/10 hover:text-teal-200"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span></button></li>)}</ul> : <p className="text-xs text-white/45">This standard group has no channels.</p>}
+              </div>
+            )}
+            {/* Group actions live in the avatar menu so the list stays scannable. */}
+            {activeGroup?._id === '__legacy_inline_controls_disabled__' && (
               <div className="border-t border-gray-600 px-2.5 py-2.5">
                 {group.groupType === 'community' && (
                   <section className="mb-3 border-b border-white/10 pb-3" aria-label={`${group.name} channels`}>
@@ -465,6 +472,32 @@ export default function GroupList({ search = '', onSelectGroup }) {
           </li>
         ))}
       </ul>
+      {isCreateOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsCreateOpen(false)}>
+          <form onSubmit={createGroup} className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div><h2 className="text-lg font-semibold">Create a group</h2><p className="mt-1 text-xs text-white/55">Start a private group or a channel-based community.</p></div>
+              <button type="button" onClick={() => setIsCreateOpen(false)} className="rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close create group dialog"><FaTimes /></button>
+            </div>
+            <label className="block text-sm text-white/75">Group name<input value={name} onChange={(event) => setName(event.target.value)} maxLength={100} autoFocus placeholder="e.g. Weekend plans" className="mt-1.5 w-full rounded-lg border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-teal-300" /></label>
+            <label className="mt-4 block text-sm text-white/75">Group type<select value={groupType} onChange={(event) => setGroupType(event.target.value)} className="mt-1.5 w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-2.5 text-sm text-white"><option value="standard">Standard group</option><option value="community">Community with channels</option></select></label>
+            {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setIsCreateOpen(false)} className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white/75 hover:bg-white/10">Cancel</button><button type="submit" disabled={!name.trim()} className="rounded-lg bg-teal-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Create group</button></div>
+          </form>
+        </div>
+      )}
+      {isManagementOpen && activeGroup && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsManagementOpen(false)}>
+          <section className="max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl">
+            <div className="mb-5 flex items-start gap-3"><Avatar src={activeGroup.avatarUrl} name={activeGroup.name} group className="h-12 w-12 text-base" /><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-semibold">{activeGroup.name}</h2><p className="text-xs text-white/55">Group management · {activeGroup.members} members</p></div><button type="button" onClick={() => setIsManagementOpen(false)} className="rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close group management"><FaTimes /></button></div>
+            {activeGroup.role === 'admin' && <div className="grid gap-2 sm:grid-cols-2"><label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 p-3 text-sm hover:bg-white/10"><FaCamera className="text-teal-300" /> Change group photo<input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" className="sr-only" onChange={(event) => { uploadGroupAvatar(activeGroup, event.target.files?.[0]); event.target.value = ''; }} /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 p-3 text-sm"><FaExchangeAlt className="text-teal-300" /> Type<select value={activeGroup.groupType} onChange={(event) => updateGroupType(event.target.value)} className="ml-auto max-w-[130px] rounded bg-slate-900 px-2 py-1 text-xs"><option value="standard">Standard</option><option value="community">Community</option></select></label></div>}
+            {activeGroup.role === 'admin' && <form onSubmit={addMember} className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-2 flex items-center gap-2 text-sm font-semibold"><FaUserPlus className="text-teal-300" /> Add a member</div><div className="flex gap-2"><select value={newMemberId} onChange={(event) => setNewMemberId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-sm"><option value="">Choose someone...</option>{users.map((candidate) => <option key={candidate._id} value={candidate._id}>{candidate.username}</option>)}</select><button type="submit" disabled={!newMemberId} className="rounded-lg bg-teal-400 px-3 text-slate-950 disabled:opacity-40" aria-label="Add member"><FaPlus /></button></div></form>}
+            {activeGroup.groupType === 'community' && <section className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold"><FaHashtag className="text-teal-300" /> Channels</div><span className="text-xs text-white/45">{channels.length}</span></div>{activeGroup.role === 'admin' && <form onSubmit={createChannel} className="mb-3 flex gap-2"><input value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} maxLength={60} placeholder="New channel" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-sm" /><select value={channelPostingMode} onChange={(event) => setChannelPostingMode(event.target.value)} className="max-w-[120px] rounded-lg border border-white/10 bg-slate-900 px-1 text-xs"><option value="members">Members post</option><option value="admins">Leaders only</option></select><button type="submit" disabled={!newChannelName.trim()} className="rounded-lg bg-teal-400 px-3 text-slate-950 disabled:opacity-40" aria-label="Create channel"><FaPlus /></button></form>}<ul className="space-y-1">{channels.map((channel) => <li key={channel._id} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-2"><button type="button" onClick={() => { setIsManagementOpen(false); onSelectGroup?.({ ...activeGroup, type: 'group', channelId: channel._id, channelName: channel.name }); }} className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm hover:text-teal-200"><FaHashtag className="text-xs text-white/40" /><span className="truncate">{channel.name}</span></button>{activeGroup.role === 'admin' && <><select value={channel.postingMode} onChange={(event) => updateChannelPostingMode(channel, event.target.value)} className="max-w-[100px] rounded bg-slate-900 px-1 py-1 text-[10px]" aria-label={`${channel.name} posting permissions`}><option value="members">Members</option><option value="admins">Leaders</option></select><button type="button" onClick={() => archiveChannel(channel)} disabled={channel.slug === 'general' || channels.length < 2} className="text-white/45 hover:text-rose-300 disabled:opacity-25" title="Archive channel" aria-label={`Archive ${channel.name}`}><FaArchive size={11} /></button></>}</li>)}</ul></section>}
+            <section className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-3 flex items-center justify-between"><span className="text-sm font-semibold">Members</span><span className="text-xs text-white/45">{members.length}</span></div><ul className="space-y-1">{members.map((member) => <li key={member._id} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-2"><Avatar src={member.profilePicture || member.googlePicture} name={member.username} className="h-7 w-7 text-[10px]" /><span className="min-w-0 flex-1 truncate text-sm">{member.username}</span>{member.role === 'admin' && <FaCrown className="text-amber-300" size={11} />}{activeGroup.role === 'admin' ? <><select value={member.role} onChange={(event) => updateRole(member, event.target.value)} className="rounded bg-slate-900 px-1 py-1 text-[10px]" aria-label={`Role for ${member.username}`}><option value="admin">Admin</option><option value="member">Member</option></select><button type="button" onClick={() => removeMember(member)} className="text-white/45 hover:text-rose-300" title={`Remove ${member.username}`} aria-label={`Remove ${member.username}`}><FaUserMinus size={11} /></button></> : <span className="text-[10px] text-white/45">{member.role}</span>}</li>)}</ul></section>
+            {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
+          </section>
+        </div>
+      )}
     </div>
   );
 }

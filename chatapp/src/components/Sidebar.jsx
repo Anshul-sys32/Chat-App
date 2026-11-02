@@ -17,7 +17,7 @@ import Socket from '../Socket';
 import ProfileEditor from './ProfileEditor';
 import Avatar from './Avatar';
 import CallHistory from './CallHistory';
-import MediaDeviceSettings from './MediaDeviceSettings';
+import SettingsPanel from './SettingsPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
@@ -42,7 +42,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       case 'calls':
         return <CallHistory onStartChat={handleSelectChat} />;
       case 'settings':
-        return <MediaDeviceSettings userId={user?._id} />;
+        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} onOpenProfile={() => setIsProfileOpen(true)} />;
       default:
         return null;
     }

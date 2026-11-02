@@ -336,7 +336,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     const handleMessageUpdated = (data) => {
       if (data.groupId) {
         if (selectedChatRef.current?.type !== 'group'
-          || String(data.groupId) !== String(selectedChatRef.current?._id)) return;
+          || String(data.groupId) !== String(selectedChatRef.current?._id)
+          || String(data.channelId || '') !== String(selectedChatRef.current?.channelId || '')) return;
       } else {
         const selectedId = String(selectedChatRef.current?._id);
         const currentUserId = String(user?._id);
@@ -368,6 +369,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         onSelectChat(null);
       }
     };
+    const handleChannelArchived = ({ groupId, channelId }) => {
+      if (selectedChatRef.current?.type !== 'group'
+        || String(selectedChatRef.current?._id) !== String(groupId)
+        || String(selectedChatRef.current?.channelId) !== String(channelId)) return;
+      setMessages([]);
+      onSelectChat(null);
+    };
     const handleProfilePicture = ({ userId, profilePicture }) => {
       if (selectedChatRef.current?.type === 'group'
         || String(selectedChatRef.current?._id) !== String(userId)) return;
@@ -387,6 +395,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('group-message-updated', handleMessageUpdated);
     Socket.on('message-hidden-for-user', handleMessageHiddenForUser);
     Socket.on('group-member-removed', handleRemovedFromGroup);
+    Socket.on('group-channel-archived', handleChannelArchived);
     Socket.on('profile-picture-updated', handleProfilePicture);
     Socket.on('group-picture-updated', handleGroupPicture);
 
@@ -399,6 +408,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('group-message-updated', handleMessageUpdated);
       Socket.off('message-hidden-for-user', handleMessageHiddenForUser);
       Socket.off('group-member-removed', handleRemovedFromGroup);
+      Socket.off('group-channel-archived', handleChannelArchived);
       Socket.off('profile-picture-updated', handleProfilePicture);
       Socket.off('group-picture-updated', handleGroupPicture);
       Socket.off('connect', handleSocketConnect);

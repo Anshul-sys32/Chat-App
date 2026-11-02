@@ -168,7 +168,11 @@ const archiveChannel = async (req, res) => {
       "UPDATE group_channels SET is_archived = TRUE WHERE id = ? AND group_id = ?",
       [channelId, groupId]
     );
-    req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-archived", { groupId, channelId });
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`group:${groupId}`).emit("group-channel-archived", { groupId, channelId });
+      io.in(`group:${groupId}:channel:${channelId}`).socketsLeave(`group:${groupId}:channel:${channelId}`);
+    }
     return res.status(204).end();
   } catch (error) {
     console.error("Archive community channel error:", error);

@@ -978,6 +978,39 @@ router.post("/groups", protect, async (req, res) => {
 	}
 });
 
+router.patch("/groups/:groupId", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const groupType = req.body.groupType;
+	if (!validId(groupId) || !isGroupType(groupType)) {
+		return res.status(400).json({ message: "Group type must be standard or community." });
+	}
+	try {
+		if (!await canManageGroup(groupId, req.user)) {
+			return res.status(403).json({ message: "Only group admins can change the group type." });
+		}
+		const [groups] = await pool.execute(
+			"SELECT id AS _id, name, avatar_url AS avatarUrl, group_type AS groupType FROM chat_groups WHERE id = ? LIMIT 1",
+			[groupId]
+		);
+		if (!groups.length) return res.status(404).json({ message: "Group not found." });
+		await pool.execute("UPDATE chat_groups SET group_type = ? WHERE id = ?", [groupType, groupId]);
+		if (groupType === "community") {
+			await pool.execute(
+				`INSERT IGNORE INTO group_channels
+				 (group_id, name, slug, description, posting_mode, sort_order, created_by)
+				 VALUES (?, 'general', 'general', 'General discussion', 'members', 0, ?)`,
+				[groupId, req.user.id]
+			);
+		}
+		const updated = { ...groups[0], groupType };
+		req.app.get("io")?.emit("group-updated", updated);
+		return res.json(updated);
+	} catch (error) {
+		console.error("Update group type error:", error);
+		return res.status(500).json({ message: "Could not change the group type." });
+	}
+});
+
 router.get("/groups/:groupId/channels", protect, listChannels);
 router.post("/groups/:groupId/channels", protect, createChannel);
 router.patch("/groups/:groupId/channels/:channelId", protect, updateChannel);
@@ -1249,13 +1282,17 @@ router.delete("/groups/:groupId/messages/:messageId", protect, async (req, res) 
 			[messageId]
 		);
 		const [rows] = await pool.execute(
-			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
+			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.channel_id AS channelId,
+			        gm.sender_id AS sender,
 			        u.username AS senderName, gm.content, NULL AS attachments, gm.is_deleted AS isDeleted,
 			        gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id WHERE gm.id = ?`,
 			[messageId]
 		);
-		req.app.get("io")?.to(`group:${groupId}`).emit("group-message-updated", rows[0]);
+		const messageRoom = rows[0].channelId
+			? `group:${groupId}:channel:${rows[0].channelId}`
+			: `group:${groupId}`;
+		req.app.get("io")?.to(messageRoom).emit("group-message-updated", rows[0]);
 		res.json(rows[0]);
 	} catch (err) {
 		console.error("Delete group message error:", err);
