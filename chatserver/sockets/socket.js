@@ -4,7 +4,8 @@ const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
 const { createMessageNotifications } = require("../services/messageNotifications");
-const { canInviteToCallRoom } = require("../services/callRoomPolicy");
+const { canNegotiateCallRoomOffer, canInviteToCallRoom, shouldUpgradeCallRoomToSfu } = require("../services/callRoomPolicy");
+const { activeCallRooms } = require("../services/callRoomRegistry");
 const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
@@ -19,7 +20,6 @@ const {
 } = require("../utils/uploads");
 
 const connectedUsers = new Map();
-const activeCallRooms = new Map();
 
 const validateAttachments = (attachments, userId) => {
   if (attachments === undefined) return [];
@@ -69,6 +69,15 @@ const initSocket = (httpServer) => {
       credentials: true,
     },
   });
+  const commitSfuUpgrade = (roomId, room) => {
+    if (!room || room.sfuCommitted || room.sfuReadyParticipants.size < room.acceptedParticipants.size) return;
+    room.sfuCommitted = true;
+    for (const participantId of room.acceptedParticipants) {
+      for (const targetSocket of connectedUsers.get(participantId) || []) {
+        io.to(targetSocket).emit("call-sfu-commit", { roomId: String(roomId) });
+      }
+    }
+  };
 
   io.use((socket, next) => {
     try {
@@ -191,7 +200,7 @@ const initSocket = (httpServer) => {
         }
         const group = await getGroupAccess(id, Number(socket.userId));
         if (!canAccessGroup(group, socket.userRole)) {
-          return socket.emit("message-error", { message: "You are not a member of this group." });
+          return;
         }
         if (group.groupType === "community") {
           if (!Number.isSafeInteger(requestedChannelId) || requestedChannelId < 1) {
@@ -300,17 +309,44 @@ const initSocket = (httpServer) => {
         if (eventName === "offer" && roomId) {
           let room = activeCallRooms.get(roomId);
           if (!room) {
-            room = { hostId: socket.userId, participants: new Set([socket.userId]) };
+            room = {
+              hostId: socket.userId,
+              participants: new Set([socket.userId]),
+              acceptedParticipants: new Set([socket.userId]),
+              sfuReadyParticipants: new Set(),
+              callType: payload.callType,
+              mode: "mesh",
+              sfuCommitted: false,
+            };
             activeCallRooms.set(roomId, room);
           }
-          const invitePermission = canInviteToCallRoom(room, socket.userId, recipientId);
-          if (!invitePermission.allowed && invitePermission.reason === "not-host") {
-            return socket.emit("call-room-error", { message: "Only the call organizer can invite participants." });
+          if (room.mode === "sfu" && String(room.hostId) === String(socket.userId)) {
+            const invitePermission = canInviteToCallRoom(room, socket.userId, recipientId);
+            if (!invitePermission.allowed && invitePermission.reason === "full") {
+              return socket.emit("call-room-error", { message: "Calls are limited to eight people." });
+            }
+            if (!invitePermission.allowed) return;
+            room.participants.add(recipientId);
+            for (const targetSocket of connectedUsers.get(recipientId) || []) {
+              io.to(targetSocket).emit("sfu-call-invite", {
+                from: socket.userId,
+                fromName: socket.userName,
+                roomId,
+                callType: room.callType,
+              });
+            }
+            return;
           }
-          if (!invitePermission.allowed && invitePermission.reason === "full") {
-            return socket.emit("call-room-error", { message: "Small calls are limited to four people." });
+          const offerPermission = canNegotiateCallRoomOffer(room, socket.userId, recipientId);
+          if (!offerPermission.allowed && offerPermission.reason === "full") {
+            return socket.emit("call-room-error", { message: "Calls are limited to eight people." });
           }
-          room.participants.add(recipientId);
+          if (!offerPermission.allowed) {
+            return socket.emit("call-room-error", { message: "Only call participants can connect to each other." });
+          }
+          if (offerPermission.reason !== "mesh") {
+            room.participants.add(recipientId);
+          }
         } else if (roomId) {
           const room = activeCallRooms.get(roomId);
           if (!room || !room.participants.has(socket.userId) || !room.participants.has(recipientId)) return;
@@ -319,13 +355,54 @@ const initSocket = (httpServer) => {
               for (const participantId of room.participants) {
                 if (participantId === socket.userId) continue;
                 for (const targetSocket of connectedUsers.get(participantId) || []) {
-                  io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+                  io.to(targetSocket).emit("hangup", { from: socket.userId, roomId, roomEnded: true });
                 }
               }
               activeCallRooms.delete(roomId);
               return;
             }
             room.participants.delete(socket.userId);
+            room.acceptedParticipants.delete(String(socket.userId));
+            room.sfuReadyParticipants.delete(String(socket.userId));
+            commitSfuUpgrade(roomId, room);
+            for (const participantId of room.participants) {
+              for (const targetSocket of connectedUsers.get(participantId) || []) {
+                io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+              }
+            }
+            return;
+          }
+          if (eventName === "answer") {
+            room.acceptedParticipants.add(String(socket.userId));
+            if (shouldUpgradeCallRoomToSfu(room)) {
+              if (process.env.LIVEKIT_PUBLIC_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+                room.mode = "sfu";
+                for (const participantId of room.acceptedParticipants) {
+                  for (const targetSocket of connectedUsers.get(participantId) || []) {
+                    io.to(targetSocket).emit("call-sfu-upgrade", { roomId, callType: room.callType });
+                  }
+                }
+              } else if (!room.sfuUnavailableNotified) {
+                room.sfuUnavailableNotified = true;
+                for (const targetSocket of connectedUsers.get(String(room.hostId)) || []) {
+                  io.to(targetSocket).emit("call-room-error", {
+                    message: "More than four participants requires LiveKit server configuration.",
+                  });
+                }
+              }
+            } else if (room.mode === "mesh") {
+              for (const participantId of room.acceptedParticipants) {
+                if (participantId === String(socket.userId) || participantId === String(room.hostId)) continue;
+                for (const targetSocket of connectedUsers.get(participantId) || []) {
+                  io.to(targetSocket).emit("call-participant-joined", {
+                    participantId: socket.userId,
+                    participantName: socket.userName,
+                    roomId,
+                    callType: room.callType,
+                  });
+                }
+              }
+            }
           }
         }
         const { to, ...signalData } = payload;
@@ -334,6 +411,42 @@ const initSocket = (httpServer) => {
         }
       });
     }
+
+    socket.on("sfu-invite-participant", ({ roomId, participantId } = {}) => {
+      const room = activeCallRooms.get(String(roomId || ""));
+      const recipientId = String(participantId || "");
+      if (!room || room.mode !== "sfu" || String(room.hostId) !== String(socket.userId)) {
+        return socket.emit("call-room-error", { message: "Only the call organizer can invite participants." });
+      }
+      const permission = canInviteToCallRoom(room, socket.userId, recipientId);
+      if (!permission.allowed && permission.reason === "full") {
+        return socket.emit("call-room-error", { message: "Calls are limited to eight people." });
+      }
+      if (!permission.allowed || !connectedUsers.has(recipientId)) return;
+      room.participants.add(recipientId);
+      for (const targetSocket of connectedUsers.get(recipientId) || []) {
+        io.to(targetSocket).emit("sfu-call-invite", {
+          from: socket.userId,
+          fromName: socket.userName,
+          roomId: String(roomId),
+          callType: room.callType,
+        });
+      }
+    });
+
+    socket.on("call-sfu-ready", ({ roomId } = {}) => {
+      const room = activeCallRooms.get(String(roomId || ""));
+      const participantId = String(socket.userId);
+      if (!room || room.mode !== "sfu" || !room.acceptedParticipants.has(participantId)) return;
+      room.sfuReadyParticipants.add(participantId);
+      if (room.sfuCommitted) {
+        for (const targetSocket of connectedUsers.get(participantId) || []) {
+          io.to(targetSocket).emit("call-sfu-commit", { roomId: String(roomId) });
+        }
+      } else {
+        commitSfuUpgrade(String(roomId), room);
+      }
+    });
 
     // Step 4: Handle disconnect
     socket.on("disconnect", () => {
@@ -347,14 +460,19 @@ const initSocket = (httpServer) => {
             for (const participantId of room.participants) {
               if (participantId === socket.userId) continue;
               for (const targetSocket of connectedUsers.get(participantId) || []) {
-                io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+                io.to(targetSocket).emit("hangup", { from: socket.userId, roomId, roomEnded: true });
               }
             }
             activeCallRooms.delete(roomId);
           } else {
             room.participants.delete(socket.userId);
-            for (const targetSocket of connectedUsers.get(room.hostId) || []) {
-              io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+            room.acceptedParticipants.delete(String(socket.userId));
+            room.sfuReadyParticipants.delete(String(socket.userId));
+            commitSfuUpgrade(roomId, room);
+            for (const participantId of room.participants) {
+              for (const targetSocket of connectedUsers.get(participantId) || []) {
+                io.to(targetSocket).emit("hangup", { from: socket.userId, roomId });
+              }
             }
           }
         }

@@ -18,7 +18,13 @@ const groupLifecycleMigration = require("../migrations/202611010005_group_lifecy
 const groupInvitationsMigration = require("../migrations/202611010006_group_invitations");
 const groupInvitationKeyMigration = require("../migrations/202611010007_group_invitation_pending_key");
 const scheduledMeetingsMigration = require("../migrations/202611010008_scheduled_meetings");
-const { canInviteToCallRoom, MAX_CALL_PARTICIPANTS } = require("../services/callRoomPolicy");
+const {
+  canInviteToCallRoom,
+  canNegotiateCallRoomOffer,
+  canJoinSfuCallRoom,
+  shouldUpgradeCallRoomToSfu,
+  MAX_CALL_PARTICIPANTS,
+} = require("../services/callRoomPolicy");
 const { sendMeetingReminders } = require("../services/meetingReminders");
 const { validateGroupMessageTarget } = require("../services/groupAccess");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
@@ -224,13 +230,45 @@ test("scheduled meetings migration creates meetings, participants, and reminder 
   assert.match(statements[2], /DROP TABLE IF EXISTS meeting_participants/);
 });
 
-test("call room invitations are host-only and capped at four participants", () => {
-  const room = { hostId: "10", participants: new Set(["10", "11", "12"]) };
-  assert.deepEqual(canInviteToCallRoom(room, "10", "13"), { allowed: true, reason: null });
-  assert.deepEqual(canInviteToCallRoom(room, "11", "13"), { allowed: false, reason: "not-host" });
-  room.participants.add("13");
+test("call room invitations are host-only and capped at eight participants", () => {
+  const room = { hostId: "10", participants: new Set(["10", "11", "12", "13", "14", "15", "16"]) };
+  assert.deepEqual(canInviteToCallRoom(room, "10", "17"), { allowed: true, reason: null });
+  assert.deepEqual(canInviteToCallRoom(room, "11", "17"), { allowed: false, reason: "not-host" });
+  room.participants.add("17");
   assert.equal(room.participants.size, MAX_CALL_PARTICIPANTS);
-  assert.deepEqual(canInviteToCallRoom(room, "10", "14"), { allowed: false, reason: "full" });
+  assert.deepEqual(canInviteToCallRoom(room, "10", "18"), { allowed: false, reason: "full" });
+});
+
+test("call room guests can negotiate only with existing participants", () => {
+  const room = { hostId: "10", participants: new Set(["10", "11", "12"]) };
+  assert.deepEqual(canNegotiateCallRoomOffer(room, "11", "12"), { allowed: true, reason: "mesh" });
+  assert.deepEqual(canNegotiateCallRoomOffer(room, "11", "13"), { allowed: false, reason: "not-participant" });
+  assert.deepEqual(canNegotiateCallRoomOffer(room, "13", "11"), { allowed: false, reason: "not-participant" });
+});
+
+test("call room upgrades to SFU only after the fifth participant accepts", () => {
+  const room = {
+    mode: "mesh",
+    acceptedParticipants: new Set(["10", "11", "12", "13"]),
+  };
+  assert.equal(shouldUpgradeCallRoomToSfu(room), false);
+  room.acceptedParticipants.add("14");
+  assert.equal(shouldUpgradeCallRoomToSfu(room), true);
+  room.mode = "sfu";
+  assert.equal(shouldUpgradeCallRoomToSfu(room), false);
+});
+
+test("SFU rooms reject new peer-to-peer negotiation", () => {
+  const room = { mode: "sfu", hostId: "10", participants: new Set(["10", "11", "12"]) };
+  assert.deepEqual(canNegotiateCallRoomOffer(room, "11", "12"), { allowed: false, reason: "mesh-disabled" });
+});
+
+test("SFU tokens are limited to invited room participants", () => {
+  const room = { mode: "sfu", participants: new Set(["10", "11", "12"]) };
+  assert.equal(canJoinSfuCallRoom(room, "11"), true);
+  assert.equal(canJoinSfuCallRoom(room, "13"), false);
+  room.mode = "mesh";
+  assert.equal(canJoinSfuCallRoom(room, "11"), false);
 });
 
 test("meeting reminders notify the organizer and accepted attendees only once", async () => {

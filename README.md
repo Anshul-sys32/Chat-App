@@ -251,6 +251,20 @@ VITE_SOCKET_URL=http://localhost:5175
 
 These URLs should point to the backend server reachable by the browser. Use the correct host and protocol for your environment.
 
+### Group video calls
+
+Calls use the existing peer-to-peer mesh through four accepted participants. When a fifth participant accepts, the room upgrades to LiveKit SFU. The server issues short-lived participant tokens; keep the API secret on the backend only.
+
+Configure these values in `chatserver/.env`:
+
+```dotenv
+LIVEKIT_PUBLIC_URL=wss://your-livekit-host.example.com
+LIVEKIT_API_KEY=your-livekit-api-key
+LIVEKIT_API_SECRET=your-livekit-api-secret
+```
+
+Deploy LiveKit separately and make its secure WebSocket endpoint and media/ICE connectivity reachable by browsers and Android devices. Without these values, calls stay on mesh and the host receives a configuration warning when the fifth person accepts. Calls remain capped at eight participants.
+
 ### 5. Install and run the frontend
 
 From the `chatapp` directory:

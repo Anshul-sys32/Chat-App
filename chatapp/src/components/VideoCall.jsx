@@ -9,12 +9,42 @@ import useFloatingPanel from "../useFloatingPanel";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
+const addLocalTracksToPeer = async (peer, stream) => {
+  stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+};
+
+const applyVideoUplinkBudget = async (peers) => {
+  const videoSenders = [...peers].flatMap((peer) => peer.getSenders())
+    .filter((sender) => sender.track?.kind === "video");
+  if (!videoSenders.length) return;
+  const maxBitrate = Math.max(120_000, Math.min(600_000, Math.floor(900_000 / videoSenders.length)));
+  await Promise.all(videoSenders.map(async (sender) => {
+    try {
+      const parameters = sender.getParameters();
+      if (!parameters.encodings?.length) parameters.encodings = [{}];
+      parameters.encodings[0].maxBitrate = maxBitrate;
+      parameters.encodings[0].maxFramerate = 24;
+      parameters.degradationPreference = "maintain-framerate";
+      await sender.setParameters(parameters);
+    } catch (parameterError) {
+      console.warn("Could not apply low-latency video sender settings:", parameterError);
+    }
+  }));
+};
+
 export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const localVideo = useRef();
   const peerConnections = useRef(new Map());
   const remoteMediaElements = useRef(new Map());
   const localStream = useRef(null);
   const pendingCandidates = useRef(new Map());
+  const createOutgoingPeerRef = useRef(null);
+  const connectToSfuRef = useRef(null);
+  const sfuRoomRef = useRef(null);
+  const sfuConnectPromiseRef = useRef(null);
+  const sfuRemoteStreams = useRef(new Map());
+  const sfuCommittedRef = useRef(false);
+  const callParticipantIds = useRef(new Set());
   const currentPeerName = useRef(peerName);
   const onCloseRef = useRef(onClose);
   const [error, setError] = useState("");
@@ -26,12 +56,12 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const [visible, setVisible] = useState(isOpen);
   const [minimized, setMinimized] = useState(false);
   const [hasLocalMedia, setHasLocalMedia] = useState(false);
-  const [selfViewPosition, setSelfViewPosition] = useState(null);
   const [audioRoutes, setAudioRoutes] = useState([]);
   const [selectedAudioRoute, setSelectedAudioRoute] = useState("");
   const [audioRouteError, setAudioRouteError] = useState("");
   const [showAudioRoutes, setShowAudioRoutes] = useState(false);
   const [remotePeers, setRemotePeers] = useState([]);
+  const [usingSfu, setUsingSfu] = useState(false);
   const [isCallHost, setIsCallHost] = useState(false);
   const [showInviteParticipant, setShowInviteParticipant] = useState(false);
   const [inviteIdentifier, setInviteIdentifier] = useState("");
@@ -44,17 +74,26 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   currentPeerName.current = peerName;
   onCloseRef.current = onClose;
   const displayPeerName = callPeerName || peerName || "Private call";
+  const videoParticipantCount = remotePeers.length + (hasLocalMedia && !incomingOffer ? 1 : 0);
   useEffect(() => setVisible(isOpen), [isOpen]);
   useEffect(() => {
     if (!peerConnections.current.size && !incomingOffer) setActiveCallType(callType);
   }, [callType, incomingOffer]);
   useEffect(() => {
-    if (activeCallType === "video" && localVideo.current && localStream.current) localVideo.current.srcObject = localStream.current;
+    if (activeCallType === "video" && localVideo.current && localStream.current) {
+      const preview = localVideo.current;
+      preview.muted = true;
+      if (preview.srcObject !== localStream.current) preview.srcObject = localStream.current;
+      preview.play().catch((playError) => {
+        console.warn("Could not start local camera preview:", playError);
+        setError("Your camera is connected, but the local preview could not start.");
+      });
+    }
     for (const remotePeer of remotePeers) {
       const element = remoteMediaElements.current.get(remotePeer.userId);
       if (element && element.srcObject !== remotePeer.stream) element.srcObject = remotePeer.stream;
     }
-  }, [activeCallType, hasLocalMedia, remotePeers, visible]);
+  }, [activeCallType, hasLocalMedia, incomingOffer, remotePeers, visible]);
 
   useEffect(() => {
     if (!visible) return undefined;
@@ -112,6 +151,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       const devicePreferences = readMediaDevicePreferences();
       localStream.current = await mediaDevices.getUserMedia({
         video: mediaType === "video" ? {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 24, max: 30 },
           ...(devicePreferences.videoInputId ? { deviceId: { ideal: devicePreferences.videoInputId } } : {}),
         } : false,
         audio: devicePreferences.audioInputId
@@ -123,23 +165,6 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     if (mediaType === "video" && localVideo.current) localVideo.current.srcObject = localStream.current;
     return localStream.current;
   };
-
-  useEffect(() => {
-    const positionSelfView = () => {
-      const width = Math.min(560, Math.max(220, window.innerWidth * 0.5));
-      const height = width * 9 / 16;
-      setSelfViewPosition((position) => {
-        const maxX = Math.max(8, window.innerWidth - width - 8);
-        const maxY = Math.max(8, window.innerHeight - height - 8);
-        return position
-          ? { x: Math.min(position.x, maxX), y: Math.min(position.y, maxY) }
-          : { x: Math.max(16, maxX - 12), y: Math.max(80, maxY - 104) };
-      });
-    };
-    positionSelfView();
-    window.addEventListener("resize", positionSelfView);
-    return () => window.removeEventListener("resize", positionSelfView);
-  }, []);
 
   useEffect(() => {
     const positionMinimizedCall = () => {
@@ -158,27 +183,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     return () => window.removeEventListener("resize", positionMinimizedCall);
   }, []);
 
-  const moveSelfView = (event) => {
-    const card = event.currentTarget.closest("[data-self-view]");
-    if (!card) return;
-    const width = card.offsetWidth;
-    const height = card.offsetHeight;
-    setSelfViewPosition({
-      x: Math.min(Math.max(8, event.clientX - dragOffset.current.x), window.innerWidth - width - 8),
-      y: Math.min(Math.max(8, event.clientY - dragOffset.current.y), window.innerHeight - height - 8),
-    });
-  };
-
   const dragOffset = useRef({ x: 0, y: 0 });
-  const startSelfViewDrag = (event) => {
-    const card = event.currentTarget.closest("[data-self-view]");
-    if (!card) return;
-    const rect = card.getBoundingClientRect();
-    dragOffset.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  };
-
   const startMinimizedDrag = (event) => {
     if (event.target.closest("button")) return;
     const card = event.currentTarget.closest("[data-minimized-call]");
@@ -201,15 +206,91 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   };
 
   useEffect(() => {
-    const handleOffer = ({ offer, from, fromName, roomId, callType: incomingCallType }) => {
-      if (peerConnections.current.has(String(from)) || peerConnections.current.size > 0) return;
+    const handleOffer = async ({ offer, from, fromName, roomId, callType: incomingCallType }) => {
+      const peerId = String(from);
+      if (peerConnections.current.has(peerId)) return;
       const requestedType = incomingCallType === "audio" ? "audio" : "video";
+      if (peerConnections.current.size > 0) {
+        if (!localStream.current || callRoomId.current !== roomId) return;
+        const peer = createPeerConnection(peerId);
+        peerConnections.current.set(peerId, peer);
+        peerNames.current.set(peerId, fromName || "Participant");
+        callParticipantIds.current.add(peerId);
+        try {
+          await addLocalTracksToPeer(peer, localStream.current);
+          await applyVideoUplinkBudget(peerConnections.current.values());
+          await peer.setRemoteDescription(new RTCSessionDescription(offer));
+          for (const candidate of pendingCandidates.current.get(peerId) || []) {
+            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+          pendingCandidates.current.delete(peerId);
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          Socket.emit("answer", { answer, to: from, roomId });
+        } catch (callError) {
+          peer.close();
+          peerConnections.current.delete(peerId);
+          setError(callError.message || "Could not connect another call participant.");
+        }
+        return;
+      }
+      callParticipantIds.current.add(peerId);
       setCallPeerName(fromName || currentPeerName.current || "Caller");
       setIsCallHost(false);
       setIncomingOffer({ offer, from, fromName, roomId, callType: requestedType });
       setActiveCallType(requestedType);
       setMinimized(false);
       setVisible(true);
+      setError("");
+    };
+
+    const handleParticipantJoined = ({ participantId, participantName, roomId, callType: roomCallType }) => {
+      const id = String(participantId);
+      if (!roomId || roomId !== callRoomId.current || !localStream.current || peerConnections.current.has(id)) return;
+      callParticipantIds.current.add(id);
+      peerNames.current.set(id, participantName || "Participant");
+      createOutgoingPeerRef.current?.(id, participantName || "Participant", localStream.current, roomCallType === "audio" ? "audio" : "video")
+        .catch((callError) => setError(callError.message || "Could not connect another call participant."));
+    };
+
+    const handleSfuInvite = (invite) => {
+      if (peerConnections.current.size || sfuRoomRef.current) return;
+      setIncomingOffer({
+        sfu: true,
+        from: invite.from,
+        fromName: invite.fromName,
+        roomId: invite.roomId,
+        callType: invite.callType === "audio" ? "audio" : "video",
+      });
+      setCallPeerName(invite.fromName || "Caller");
+      setActiveCallType(invite.callType === "audio" ? "audio" : "video");
+      setIsCallHost(false);
+      setVisible(true);
+      setMinimized(false);
+      setError("");
+    };
+
+    const handleSfuUpgrade = ({ roomId }) => {
+      connectToSfuRef.current?.(roomId).catch((callError) => {
+        setError(callError.message || "Could not move this call to the group media server.");
+      });
+    };
+    const handleSfuCommit = ({ roomId }) => {
+      if (roomId !== callRoomId.current || !sfuRoomRef.current) return;
+      sfuCommittedRef.current = true;
+      peerConnections.current.forEach((peer) => peer.close());
+      peerConnections.current.clear();
+      pendingCandidates.current.clear();
+      remoteMediaElements.current.forEach((element) => { element.srcObject = null; });
+      remoteMediaElements.current.clear();
+      setRemotePeers([...sfuRemoteStreams.current.entries()].map(([userId, stream]) => ({
+        userId,
+        name: peerNames.current.get(userId) || "Participant",
+        stream,
+      })));
+      setUsingSfu(true);
+      setCalling(false);
+      setCallStatus("Connected");
       setError("");
     };
 
@@ -243,8 +324,20 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
         setError(callError.message || "Could not connect the call network.");
       }
     };
-    const handleHangup = ({ from }) => {
+    const handleHangup = ({ from, roomEnded = false }) => {
+      if (roomEnded) {
+        cleanupCall();
+        setIncomingOffer(null);
+        setCalling(false);
+        setCallStatus("Call ended");
+        setMinimized(false);
+        setVisible(false);
+        callRoomId.current = null;
+        onCloseRef.current?.();
+        return;
+      }
       const peerId = String(from);
+      callParticipantIds.current.delete(peerId);
       peerConnections.current.get(peerId)?.close();
       peerConnections.current.delete(peerId);
       pendingCandidates.current.delete(peerId);
@@ -252,7 +345,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       if (remoteElement) remoteElement.srcObject = null;
       remoteMediaElements.current.delete(peerId);
       setRemotePeers((current) => current.filter((peer) => peer.userId !== peerId));
-      if (!peerConnections.current.size) {
+      applyVideoUplinkBudget(peerConnections.current.values());
+      sfuRemoteStreams.current.delete(peerId);
+      if (!peerConnections.current.size && !sfuRoomRef.current) {
         cleanupCall();
         setIncomingOffer(null);
         setCalling(false);
@@ -265,6 +360,10 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     const handleCallRoomError = ({ message }) => setError(message || "Could not add that participant to the call.");
 
     Socket.on("offer", handleOffer);
+    Socket.on("call-participant-joined", handleParticipantJoined);
+    Socket.on("sfu-call-invite", handleSfuInvite);
+    Socket.on("call-sfu-upgrade", handleSfuUpgrade);
+    Socket.on("call-sfu-commit", handleSfuCommit);
     Socket.on("answer", handleAnswer);
     Socket.on("ice-candidate", handleCandidate);
     Socket.on("hangup", handleHangup);
@@ -272,6 +371,10 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
     return () => {
       Socket.off("offer", handleOffer);
+      Socket.off("call-participant-joined", handleParticipantJoined);
+      Socket.off("sfu-call-invite", handleSfuInvite);
+      Socket.off("call-sfu-upgrade", handleSfuUpgrade);
+      Socket.off("call-sfu-commit", handleSfuCommit);
       Socket.off("answer", handleAnswer);
       Socket.off("ice-candidate", handleCandidate);
       Socket.off("hangup", handleHangup);
@@ -281,6 +384,13 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   }, []);
 
   const cleanupCall = () => {
+    const sfuRoom = sfuRoomRef.current;
+    sfuRoomRef.current = null;
+    if (sfuRoom) sfuRoom.disconnect();
+    sfuRemoteStreams.current.clear();
+    sfuCommittedRef.current = false;
+    callParticipantIds.current.clear();
+    setUsingSfu(false);
     peerConnections.current.forEach((peer) => peer.close());
     peerConnections.current.clear();
     localStream.current?.getTracks().forEach((track) => track.stop());
@@ -329,14 +439,109 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const createOutgoingPeer = async (targetId, targetName, stream, mediaType) => {
     const id = String(targetId);
     if (peerConnections.current.has(id)) return;
+    callParticipantIds.current.add(id);
     peerNames.current.set(id, targetName || "Participant");
     const peer = createPeerConnection(id);
     peerConnections.current.set(id, peer);
-    stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+    await addLocalTracksToPeer(peer, stream);
+    await applyVideoUplinkBudget(peerConnections.current.values());
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
     Socket.emit("offer", { offer, to: id, callType: mediaType, roomId: callRoomId.current });
   };
+  createOutgoingPeerRef.current = createOutgoingPeer;
+
+  const connectToSfu = async (roomId) => {
+    const roomName = `chat-${roomId}`;
+    if (sfuRoomRef.current?.name === roomName) return;
+    if (sfuConnectPromiseRef.current) return sfuConnectPromiseRef.current;
+    const connection = (async () => {
+      let room;
+      try {
+        const { data } = await axios.post(
+          `${API_URL}/api/call-rooms/${encodeURIComponent(roomId)}/sfu-token`,
+          {},
+          { headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` }, withCredentials: true }
+        );
+        const { Room, RoomEvent, Track } = await import("livekit-client");
+        room = new Room({ adaptiveStream: true, dynacast: true });
+        const updateRemoteParticipant = (participantId, participantName, track, remove = false) => {
+          const id = String(participantId);
+          let stream = sfuRemoteStreams.current.get(id);
+          if (!stream && !remove) {
+            stream = new MediaStream();
+            sfuRemoteStreams.current.set(id, stream);
+          }
+          if (!stream) return;
+          if (remove) stream.removeTrack(track.mediaStreamTrack);
+          else if (!stream.getTracks().includes(track.mediaStreamTrack)) stream.addTrack(track.mediaStreamTrack);
+          peerNames.current.set(id, participantName || "Participant");
+          callParticipantIds.current.add(id);
+          if (!stream.getTracks().some((mediaTrack) => mediaTrack.readyState === "live")) {
+            sfuRemoteStreams.current.delete(id);
+            callParticipantIds.current.delete(id);
+          }
+          if (sfuCommittedRef.current) {
+            setRemotePeers([...sfuRemoteStreams.current.entries()].map(([userId, mediaStream]) => ({
+              userId,
+              name: peerNames.current.get(userId) || "Participant",
+              stream: mediaStream,
+            })));
+          }
+        };
+        room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
+          updateRemoteParticipant(participant.identity, participant.name, track);
+        });
+        room.on(RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
+          updateRemoteParticipant(participant.identity, participant.name, track, true);
+        });
+        room.on(RoomEvent.ParticipantDisconnected, (participant) => {
+          sfuRemoteStreams.current.delete(String(participant.identity));
+          callParticipantIds.current.delete(String(participant.identity));
+          if (sfuCommittedRef.current) {
+            setRemotePeers([...sfuRemoteStreams.current.entries()].map(([userId, stream]) => ({
+              userId,
+              name: peerNames.current.get(userId) || "Participant",
+              stream,
+            })));
+          }
+        });
+        room.on(RoomEvent.Disconnected, () => {
+          if (sfuRoomRef.current === room) {
+            setCallStatus("SFU connection lost");
+            setError("The group media connection was interrupted.");
+          }
+        });
+        await room.connect(data.url, data.token);
+        for (const track of localStream.current?.getTracks() || []) {
+          await room.localParticipant.publishTrack(track, {
+            source: track.kind === "video" ? Track.Source.Camera : Track.Source.Microphone,
+          });
+        }
+        sfuRoomRef.current = room;
+        sfuCommittedRef.current = false;
+        for (const participant of room.remoteParticipants.values()) {
+          callParticipantIds.current.add(String(participant.identity));
+          peerNames.current.set(String(participant.identity), participant.name || "Participant");
+        }
+        setUsingSfu(true);
+        setCalling(false);
+        setCallStatus("Connecting participants to group media");
+        Socket.emit("call-sfu-ready", { roomId });
+        setError("");
+      } catch (callError) {
+        if (room && room !== sfuRoomRef.current) await room.disconnect();
+        throw new Error(callError.response?.data?.message || callError.message || "Could not connect to the group media server.");
+      }
+    })();
+    sfuConnectPromiseRef.current = connection;
+    try {
+      await connection;
+    } finally {
+      if (sfuConnectPromiseRef.current === connection) sfuConnectPromiseRef.current = null;
+    }
+  };
+  connectToSfuRef.current = connectToSfu;
 
   const callUser = async () => {
     if (!to || calling || !Socket.connected) {
@@ -375,6 +580,23 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   const acceptCall = async () => {
     if (!incomingOffer) return;
+    if (incomingOffer.sfu) {
+      try {
+        callRoomId.current = incomingOffer.roomId;
+        setCallPeerName(incomingOffer.fromName || callPeerName);
+        setActiveCallType(incomingOffer.callType);
+        await ensureLocalMedia(incomingOffer.callType);
+        await connectToSfuRef.current?.(incomingOffer.roomId);
+        setIncomingOffer(null);
+        setCalling(false);
+        setCallStatus("Connected");
+        setError("");
+        return;
+      } catch (callError) {
+        setError(callError.message || "Could not join the group media call.");
+        return;
+      }
+    }
     const incomingId = String(incomingOffer.from);
     const existingPeer = peerConnections.current.get(incomingId);
     if (existingPeer && existingPeer.remoteDescription) return;
@@ -386,8 +608,10 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       if (!existingPeer) {
         peerConnections.current.set(incomingId, peer);
       }
+      callParticipantIds.current.add(incomingId);
       peerNames.current.set(incomingId, incomingOffer.fromName || callPeerName);
-      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      await addLocalTracksToPeer(peer, stream);
+      await applyVideoUplinkBudget(peerConnections.current.values());
       await peer.setRemoteDescription(new RTCSessionDescription(offer));
       for (const candidate of pendingCandidates.current.get(incomingId) || []) {
         await peer.addIceCandidate(new RTCIceCandidate(candidate));
@@ -409,9 +633,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const inviteParticipant = async (event) => {
     event.preventDefault();
     const identifier = inviteIdentifier.trim();
-    if (!identifier || !Socket.connected || !peerConnections.current.size) return;
-    if (peerConnections.current.size >= 3) {
-      setError("Small calls support up to four people, including you.");
+    if (!identifier || !Socket.connected || (!peerConnections.current.size && !usingSfu)) return;
+    if (callParticipantIds.current.size >= 7) {
+      setError("Calls are limited to eight people, including you.");
       return;
     }
     setInvitingParticipant(true);
@@ -421,8 +645,15 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
         headers: { Authorization: `Bearer ${localStorage.getItem("token") || ""}` },
         withCredentials: true,
       });
-      if (peerConnections.current.has(String(participant._id))) {
+      if (callParticipantIds.current.has(String(participant._id))) {
         setError("That person is already in this call.");
+        return;
+      }
+      if (usingSfu) {
+        Socket.emit("sfu-invite-participant", { participantId: participant._id, roomId: callRoomId.current });
+        callParticipantIds.current.add(String(participant._id));
+        setInviteIdentifier("");
+        setCallStatus(`Invited ${participant.username}`);
         return;
       }
       const stream = await ensureLocalMedia(activeCallType);
@@ -439,7 +670,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   const closeCall = () => {
     if (Socket.connected) {
-      peerConnections.current.forEach((_, participantId) => Socket.emit("hangup", { to: participantId, roomId: callRoomId.current }));
+      for (const participantId of callParticipantIds.current) {
+        Socket.emit("hangup", { to: participantId, roomId: callRoomId.current });
+      }
     }
     cleanupCall();
     if (callHistoryId.current) {
@@ -473,22 +706,50 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       <section className="relative h-full w-full overflow-hidden" role="dialog" aria-modal={!minimized} aria-label={`${activeCallType} call`}>
         {activeCallType === "video" ? (
           <>
-            {remotePeers.length > 0 ? remotePeers.map((remotePeer, index) => (
-              <div key={remotePeer.userId} style={index > 0 ? { top: `${80 + (index - 1) * 148}px` } : undefined} className={index === 0 ? "absolute inset-0" : "absolute right-4 z-20 aspect-video w-[min(28vw,240px)] overflow-hidden rounded-xl border border-white/30 shadow-xl"}>
-                <video
-                  ref={(element) => {
-                    if (element) {
-                      element.srcObject = remotePeer.stream;
-                      remoteMediaElements.current.set(remotePeer.userId, element);
-                    } else remoteMediaElements.current.delete(remotePeer.userId);
-                  }}
-                  autoPlay
-                  playsInline
-                  className="h-full w-full bg-[#071315] object-cover"
-                />
-                <span className="absolute bottom-2 left-2 rounded bg-black/55 px-2 py-1 text-xs text-white">{remotePeer.name}</span>
+            {(remotePeers.length > 0 || (hasLocalMedia && !incomingOffer)) ? (
+              <div
+                data-participant-count={videoParticipantCount}
+                className="call-video-grid absolute inset-0 grid content-center gap-2 overflow-y-auto px-3 pb-32 pt-24 sm:gap-3 sm:px-5 sm:pb-44 sm:pt-28"
+              >
+                {hasLocalMedia && !incomingOffer && (
+                  <div className="call-video-tile relative aspect-video min-h-0 overflow-hidden rounded-lg border border-white/20 bg-black shadow-lg">
+                    <video
+                      ref={localVideo}
+                      autoPlay
+                      muted
+                      playsInline
+                      onLoadedMetadata={(event) => {
+                        event.currentTarget.play().catch((playError) => {
+                          console.warn("Could not start local camera preview:", playError);
+                          setError("Your camera is connected, but the local preview could not start.");
+                        });
+                      }}
+                      className="h-full w-full object-cover"
+                    />
+                    <span className="absolute bottom-2 left-2 rounded bg-black/55 px-2 py-1 text-xs text-white">You</span>
+                  </div>
+                )}
+                {remotePeers.map((remotePeer) => (
+                  <div key={remotePeer.userId} className="call-video-tile relative aspect-video min-h-0 overflow-hidden rounded-lg border border-white/20 bg-black shadow-lg">
+                    <video
+                      ref={(element) => {
+                        if (element) {
+                          element.srcObject = remotePeer.stream;
+                          remoteMediaElements.current.set(remotePeer.userId, element);
+                        } else remoteMediaElements.current.delete(remotePeer.userId);
+                      }}
+                      autoPlay
+                      playsInline
+                      className="h-full w-full object-cover"
+                    />
+                    <span className="absolute bottom-2 left-2 max-w-[calc(100%-1rem)] truncate rounded bg-black/55 px-2 py-1 text-xs text-white">{remotePeer.name}</span>
+                  </div>
+                ))}
+                {remotePeers.length === 2 && hasLocalMedia && !incomingOffer && (
+                  <div aria-hidden="true" className="call-video-tile call-video-empty aspect-video rounded-lg bg-black" />
+                )}
               </div>
-            )) : !incomingOffer && (
+            ) : !incomingOffer && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
                 <div className="grid h-28 w-28 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl ring-8 ring-white/5 sm:h-40 sm:w-40 sm:text-5xl">
                   {displayPeerName.slice(0, 1).toUpperCase()}
@@ -536,8 +797,8 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
           <div className="relative flex items-center gap-2">
             {!incomingOffer && (
               <div className="relative">
-                <button type="button" onClick={() => setShowInviteParticipant((open) => !open)} disabled={!isCallHost || !peerConnections.current.size || peerConnections.current.size >= 3} aria-label="Invite participant" aria-expanded={showInviteParticipant} title={peerConnections.current.size >= 3 ? "Small calls are limited to four people" : "Invite participant"} className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15 disabled:opacity-40"><FaUserPlus /></button>
-                {showInviteParticipant && <form onSubmit={inviteParticipant} className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-[#071315]/95 p-3 shadow-2xl backdrop-blur"><p className="mb-2 text-xs text-white/70">Invite up to three guests to this call.</p><div className="flex gap-2"><input value={inviteIdentifier} onChange={(event) => setInviteIdentifier(event.target.value)} placeholder="Username or email" aria-label="Participant username or email" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white" /><button type="submit" disabled={invitingParticipant || !inviteIdentifier.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">{invitingParticipant ? "Inviting…" : "Invite"}</button></div>{remotePeers.length > 0 && <ul className="mt-2 space-y-1">{remotePeers.map((peer) => <li key={peer.userId} className="text-xs text-white/60">{peer.name} connected</li>)}</ul>}</form>}
+                <button type="button" onClick={() => setShowInviteParticipant((open) => !open)} disabled={!isCallHost || (!peerConnections.current.size && !usingSfu) || callParticipantIds.current.size >= 7} aria-label="Invite participant" aria-expanded={showInviteParticipant} title={callParticipantIds.current.size >= 7 ? "Calls are limited to eight people" : "Invite participant"} className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15 disabled:opacity-40"><FaUserPlus /></button>
+                {showInviteParticipant && <form onSubmit={inviteParticipant} className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-[#071315]/95 p-3 shadow-2xl backdrop-blur"><p className="mb-2 text-xs text-white/70">Invite up to seven guests to this call.</p><div className="flex gap-2"><input value={inviteIdentifier} onChange={(event) => setInviteIdentifier(event.target.value)} placeholder="Username or email" aria-label="Participant username or email" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white" /><button type="submit" disabled={invitingParticipant || !inviteIdentifier.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">{invitingParticipant ? "Inviting…" : "Invite"}</button></div>{remotePeers.length > 0 && <ul className="mt-2 space-y-1">{remotePeers.map((peer) => <li key={peer.userId} className="text-xs text-white/60">{peer.name} connected</li>)}</ul>}</form>}
               </div>
             )}
             {!incomingOffer && (
@@ -595,35 +856,10 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
         {!minimized && activeCallType === "audio" && !incomingOffer && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
-            <div className="flex flex-wrap justify-center gap-5">{remotePeers.map((remotePeer) => <div key={remotePeer.userId} className="flex flex-col items-center gap-2"><div className="grid h-28 w-28 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5 sm:h-36 sm:w-36">{remotePeer.name.slice(0, 1).toUpperCase()}</div><span className="max-w-36 truncate text-sm text-white/80">{remotePeer.name}</span></div>)}</div>
+            <div className="grid w-full max-w-5xl grid-cols-2 gap-3 px-4 min-[900px]:grid-cols-3 xl:grid-cols-4"><div className="flex min-w-0 flex-col items-center gap-2"><div className="grid aspect-square w-full max-w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5">Y</div><span className="max-w-full truncate text-sm text-white/80">You</span></div>{remotePeers.map((remotePeer) => <div key={remotePeer.userId} className="flex min-w-0 flex-col items-center gap-2"><div className="grid aspect-square w-full max-w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5">{remotePeer.name.slice(0, 1).toUpperCase()}</div><span className="max-w-full truncate text-sm text-white/80">{remotePeer.name}</span></div>)}</div>
             <p className="text-sm text-white/70">Audio call · {remotePeers.length + 1} participants</p>
           </div>
         )}
-        {!minimized && activeCallType === "video" && hasLocalMedia && !incomingOffer && (
-          <div
-            data-self-view
-            onPointerDown={startSelfViewDrag}
-            onPointerMove={(event) => {
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) moveSelfView(event);
-            }}
-            onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-            onPointerCancel={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
-            className="absolute z-20 aspect-video touch-none cursor-grab overflow-hidden rounded-2xl border border-white/30 bg-black shadow-2xl shadow-black/50 ring-1 ring-black/20 active:cursor-grabbing"
-            style={{
-              width: "50vw",
-              minWidth: 220,
-              maxWidth: 560,
-              left: selfViewPosition?.x ?? 16,
-              top: selfViewPosition?.y ?? 80,
-            }}
-          >
-            <video ref={localVideo} autoPlay muted playsInline className="pointer-events-none h-full w-full object-cover" />
-            <span className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-center bg-gradient-to-b from-black/60 to-transparent px-2 pb-3 pt-2 text-[10px] font-medium text-white/90 sm:text-xs">
-              Your camera · drag to move
-            </span>
-          </div>
-        )}
-
         {!minimized && incomingOffer && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 px-5 backdrop-blur-sm">
             <div className="w-full max-w-sm rounded-3xl border border-white/15 bg-[#102426]/90 p-7 text-center shadow-2xl">

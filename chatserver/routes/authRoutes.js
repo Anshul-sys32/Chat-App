@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const { AccessToken } = require("livekit-server-sdk");
 
 const path = require("node:path");
 const {
@@ -20,6 +21,8 @@ const User = require("../models/User");
 const { pool } = require("../config/db");
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
+const { activeCallRooms } = require("../services/callRoomRegistry");
+const { canJoinSfuCallRoom } = require("../services/callRoomPolicy");
 const { parseFile } = require("music-metadata");
 const {
 	getNotificationPreferences,
@@ -260,6 +263,38 @@ router.post("/call-invitees", protect, async (req, res) => {
 		return res.status(500).json({ message: "Could not find that person." });
 	}
 });
+router.post("/call-rooms/:roomId/sfu-token", protect, async (req, res) => {
+	const roomId = String(req.params.roomId || "");
+	const room = activeCallRooms.get(roomId);
+	if (!canJoinSfuCallRoom(room, req.user.id)) {
+		return res.status(403).json({ message: "You are not invited to this SFU call." });
+	}
+	const apiKey = process.env.LIVEKIT_API_KEY;
+	const apiSecret = process.env.LIVEKIT_API_SECRET;
+	const livekitUrl = process.env.LIVEKIT_PUBLIC_URL;
+	if (!apiKey || !apiSecret || !livekitUrl) {
+		return res.status(503).json({ message: "Group calls need LiveKit configured on the server." });
+	}
+	try {
+		const livekitRoomName = `chat-${roomId}`;
+		const token = new AccessToken(apiKey, apiSecret, {
+			identity: String(req.user.id),
+			name: req.user.username,
+			ttl: "1h",
+		});
+		token.addGrant({
+			roomJoin: true,
+			room: livekitRoomName,
+			canPublish: true,
+			canSubscribe: true,
+		});
+		room.acceptedParticipants.add(String(req.user.id));
+		return res.json({ url: livekitUrl, token: await token.toJwt(), roomName: livekitRoomName });
+	} catch (error) {
+		console.error("LiveKit token creation failed:", error.message);
+		return res.status(500).json({ message: "Could not prepare the group call connection." });
+	}
+});
 router.get("/call-history", protect, async (req, res) => {
 	try {
 		const [calls] = await pool.execute(
@@ -374,8 +409,8 @@ router.post("/meetings", protect, async (req, res) => {
 	const scheduledTime = typeof req.body.scheduledAt === "string" ? Date.parse(req.body.scheduledAt) : NaN;
 	const invitees = Array.isArray(req.body.invitees) ? [...new Set(req.body.invitees.map((item) => String(item).trim()).filter(Boolean))] : [];
 	if (!title || title.length > 120 || description.length > 1000 || !Number.isFinite(scheduledTime)
-		|| scheduledTime <= Date.now() || invitees.length > 30) {
-		return res.status(400).json({ message: "Enter a title, a future date, and up to 30 invitees." });
+		|| scheduledTime <= Date.now()) {
+		return res.status(400).json({ message: "Enter a title and a future date." });
 	}
 	const connection = await pool.getConnection();
 	const scheduledAtUtc = new Date(scheduledTime).toISOString().slice(0, 19).replace("T", " ");

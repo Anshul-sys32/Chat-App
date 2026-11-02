@@ -33,6 +33,74 @@ body {
   }
 }
 
+/* Call tiles use count-aware columns so responsive utilities cannot override the phone layout. */
+.call-video-grid {
+  align-content: stretch;
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.call-video-grid .call-video-tile {
+  aspect-ratio: auto;
+  min-height: 0;
+}
+
+.call-video-empty {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .call-video-grid[data-participant-count="2"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    align-content: stretch;
+  }
+
+  .call-video-grid[data-participant-count="3"],
+  .call-video-grid[data-participant-count="4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    align-content: stretch;
+  }
+
+  .call-video-grid .call-video-empty {
+    display: block;
+    border: 0;
+    box-shadow: none;
+  }
+}
+
+@media (min-width: 640px) {
+  .call-video-grid[data-participant-count="2"],
+  .call-video-grid[data-participant-count="3"],
+  .call-video-grid[data-participant-count="4"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .call-video-grid[data-participant-count="5"],
+  .call-video-grid[data-participant-count="6"],
+  .call-video-grid[data-participant-count="7"],
+  .call-video-grid[data-participant-count="8"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .call-video-grid[data-participant-count="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .call-video-grid[data-participant-count="5"],
+  .call-video-grid[data-participant-count="6"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .call-video-grid[data-participant-count="7"],
+  .call-video-grid[data-participant-count="8"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @layer components {
   .glass-panel {
     @apply border border-white/10 bg-white/[0.055] backdrop-blur-2xl;
