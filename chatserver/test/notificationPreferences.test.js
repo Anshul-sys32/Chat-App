@@ -1,13 +1,13 @@
 const assert = require("node:assert/strict");
 const { afterEach, mock, test } = require("node:test");
 const { pool } = require("../config/db");
+const { notifyDirectMessage, notifyGroupMessage } = require("../services/realtimeMessageNotifications");
 const {
   getNotificationPreferences,
   updateNotificationPreferences,
 } = require("../controllers/notificationPreferencesController");
 const preferencesMigration = require("../migrations/202611010001_user_notification_preferences");
 const { runMigrations } = require("../utils/migrations");
-const { createMessageNotifications } = require("../services/messageNotifications");
 const {
   getConversationNotificationPreferences,
   updateConversationNotificationPreferences,
@@ -239,6 +239,53 @@ test("call room invitations are host-only and capped at eight participants", () 
   assert.deepEqual(canInviteToCallRoom(room, "10", "18"), { allowed: false, reason: "full" });
 });
 
+test("direct message system notifications emit only to the recipient without persistence", async () => {
+  const statements = [];
+  mock.method(pool, "execute", async (sql) => {
+    statements.push(sql);
+    return [[{ userId: 9, senderName: "Ari" }], []];
+  });
+  const emitted = [];
+  const io = { to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }) };
+
+  const count = await notifyDirectMessage(io, {
+    _id: 701, sender: 4, receiver: 9, content: "Hello",
+  });
+
+  assert.equal(count, 1);
+  assert.equal(statements.length, 1);
+  assert.deepEqual(emitted.map(({ room, event }) => ({ room, event })), [
+    { room: "user:9", event: "direct-message-notification" },
+  ]);
+  assert.equal(emitted[0].payload.title, "New message from Ari");
+  assert.equal(emitted[0].payload.body, "Hello");
+});
+
+test("group message system notifications emit to unmuted members only", async () => {
+  const statements = [];
+  mock.method(pool, "execute", async (sql) => {
+    statements.push(sql);
+    return [[
+      { userId: 11, senderName: "Ari", groupName: "Study Room", channelName: "General" },
+      { userId: 12, senderName: "Ari", groupName: "Study Room", channelName: "General" },
+    ], []];
+  });
+  const emitted = [];
+  const io = { to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }) };
+
+  const count = await notifyGroupMessage(io, {
+    _id: 801, sender: 7, groupId: 22, channelId: 3, content: "Question",
+  });
+
+  assert.equal(count, 2);
+  assert.match(statements[0], /conversation_preferences\.muted/);
+  assert.deepEqual(emitted.map(({ room, event }) => ({ room, event })), [
+    { room: "user:11", event: "group-message-notification" },
+    { room: "user:12", event: "group-message-notification" },
+  ]);
+  assert.equal(emitted[0].payload.title, "New message in Study Room #General");
+});
+
 test("call room guests can negotiate only with existing participants", () => {
   const room = { hostId: "10", participants: new Set(["10", "11", "12"]) };
   assert.deepEqual(canNegotiateCallRoomOffer(room, "11", "12"), { allowed: true, reason: "mesh" });
@@ -307,119 +354,6 @@ test("meeting reminders notify the organizer and accepted attendees only once", 
   const sent = await sendMeetingReminders(io, new Date("2026-11-02T12:50:00Z"));
   assert.equal(sent, 2);
   assert.deepEqual(events.map((event) => event.room), ["user:10", "user:12"]);
-});
-
-test("direct-message notifications persist and emit a conversation target to the recipient room", async () => {
-  const statements = [];
-  mock.method(pool, "execute", async (sql, values) => {
-    statements.push({ sql, values });
-    if (sql.includes("FROM users recipient")) {
-      return [[{ userId: 9, senderName: "Ari", targetName: "Ari", notificationsEnabled: 1 }], []];
-    }
-    if (sql.includes("INSERT IGNORE INTO notifications")) return [{ affectedRows: 1 }, []];
-    return [[{
-      _id: 501,
-      userId: 9,
-      category: "direct_message",
-      targetType: "direct",
-      targetId: 4,
-      targetName: "Ari",
-      title: "New message from Ari",
-      body: "Hello",
-    }], []];
-  });
-  const emitted = [];
-  const io = { to: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }) };
-
-  const count = await createMessageNotifications({
-    type: "direct",
-    message: { _id: 701, sender: 4, receiver: 9, content: "Hello" },
-    io,
-  });
-
-  assert.equal(count, 1);
-  assert.match(statements[0].sql, /COALESCE\(preferences\.direct_messages, TRUE\) = TRUE/);
-  assert.match(statements[0].sql, /COALESCE\(conversation_preferences\.muted, FALSE\) = FALSE/);
-  assert.ok(statements[1].sql.includes("source_message_id"));
-  assert.ok(statements[1].values.includes("direct_message"));
-  assert.ok(statements[1].values.includes(701));
-  assert.deepEqual(emitted.map(({ room, event }) => ({ room, event })), [
-    { room: "user:9", event: "notification" },
-  ]);
-  assert.equal(emitted[0].payload.targetId, 4);
-});
-
-test("group-message notifications use member recipients and the group navigation target", async () => {
-  const statements = [];
-  mock.method(pool, "execute", async (sql, values) => {
-    statements.push({ sql, values });
-    if (sql.includes("FROM group_members member")) {
-      return [[
-        { userId: 11, senderName: "Ari", targetName: "Study Room", notificationsEnabled: 1 },
-        { userId: 12, senderName: "Ari", targetName: "Study Room", notificationsEnabled: 1 },
-      ], []];
-    }
-    if (sql.includes("INSERT IGNORE INTO notifications")) return [{ affectedRows: 2 }, []];
-    return [[
-      { _id: 601, userId: 11, category: "group_message", targetType: "group", targetId: 22, targetName: "Study Room" },
-      { _id: 602, userId: 12, category: "group_message", targetType: "group", targetId: 22, targetName: "Study Room" },
-    ], []];
-  });
-  const emittedRooms = [];
-  const io = { to: (room) => ({ emit: () => emittedRooms.push(room) }) };
-
-  const count = await createMessageNotifications({
-    type: "group",
-    message: { _id: 801, sender: 7, groupId: 22, content: "Question" },
-    io,
-  });
-
-  assert.equal(count, 2);
-  assert.match(statements[0].sql, /member\.user_id <> \?/);
-  assert.match(statements[0].sql, /COALESCE\(preferences\.group_messages, TRUE\) = TRUE/);
-  assert.match(statements[0].sql, /COALESCE\(conversation_preferences\.muted, FALSE\) = FALSE/);
-  assert.deepEqual(emittedRooms, ["user:11", "user:12"]);
-  assert.ok(statements[1].values.includes("Study Room"));
-});
-
-test("community channel notifications retain channel-specific navigation metadata", async () => {
-  const statements = [];
-  mock.method(pool, "execute", async (sql, values) => {
-    statements.push({ sql, values });
-    if (sql.includes("FROM group_members member")) {
-      assert.equal(values[1], 16);
-      return [[{
-        userId: 31,
-        senderName: "Ari",
-        targetName: "Dev Guild",
-        groupType: "community",
-        targetChannelName: "Rust Help",
-        notificationsEnabled: 1,
-      }], []];
-    }
-    if (sql.includes("INSERT IGNORE INTO notifications")) return [{ affectedRows: 1 }, []];
-    return [[{
-      _id: 703,
-      userId: 31,
-      targetType: "channel",
-      targetId: 20,
-      targetChannelId: 16,
-      targetChannelName: "Rust Help",
-    }], []];
-  });
-  const emitted = [];
-  const io = { to: (room) => ({ emit: (_event, notification) => emitted.push({ room, notification }) }) };
-
-  await createMessageNotifications({
-    type: "group",
-    message: { _id: 702, sender: 8, groupId: 20, channelId: 16, content: "Help" },
-    io,
-  });
-
-  assert.ok(statements[1].sql.includes("target_channel_id"));
-  assert.ok(statements[1].values.includes(16));
-  assert.ok(statements[1].values.includes("Rust Help"));
-  assert.equal(emitted[0].notification.targetType, "channel");
 });
 
 test("conversation mute settings require membership and persist the authenticated user's value", async () => {

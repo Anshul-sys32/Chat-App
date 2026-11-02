@@ -3,7 +3,7 @@ const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/db");
 const { corsOrigin } = require("../utils/cors");
-const { createMessageNotifications } = require("../services/messageNotifications");
+const { notifyDirectMessage, notifyGroupMessage } = require("../services/realtimeMessageNotifications");
 const { canNegotiateCallRoomOffer, canInviteToCallRoom, shouldUpgradeCallRoomToSfu } = require("../services/callRoomPolicy");
 const { activeCallRooms } = require("../services/callRoomRegistry");
 const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
@@ -176,8 +176,8 @@ const initSocket = (httpServer) => {
           [result.insertId]
         );
         const message = rows[0];
-        createMessageNotifications({ type: "direct", message, io }).catch((error) => {
-          console.error("Direct message notification error:", error.message);
+        notifyDirectMessage(io, message).catch((error) => {
+          console.error("Direct message system notification error:", error.message);
         });
         for (const socketId of connectedUsers.get(String(receiverId)) || []) {
           io.to(socketId).emit("receive-message", message);
@@ -289,8 +289,8 @@ const initSocket = (httpServer) => {
            WHERE gm.id = ?`,
           [result.insertId]
         );
-        createMessageNotifications({ type: "group", message: rows[0], io }).catch((error) => {
-          console.error("Group message notification error:", error.message);
+        notifyGroupMessage(io, rows[0]).catch((error) => {
+          console.error("Group message system notification error:", error.message);
         });
         const roomName = channelId ? `group:${id}:channel:${channelId}` : `group:${id}`;
         io.to(roomName).emit("group-message", rows[0]);

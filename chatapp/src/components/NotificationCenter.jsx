@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { FaBell, FaCheck, FaCheckDouble, FaCog, FaTimes, FaVolumeUp } from "react-icons/fa";
 import Socket from "../Socket";
+import { requestMessageNotificationPermission, showSystemNotification } from "../messageNotificationDelivery";
 import FloatingPanel from "./FloatingPanel";
 import useFloatingPanel from "../useFloatingPanel";
 
@@ -84,16 +85,14 @@ export default function NotificationCenter({ onNavigate }) {
   const updatePreference = async (preference, enabled) => {
     setError("");
     if (preference === "browserNotifications" && enabled) {
-      if (!("Notification" in window)) {
-        setError("Browser notifications are not supported on this device.");
-        return;
-      }
-      let permission = Notification.permission;
-      if (permission === "default") permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setError(permission === "denied"
-          ? "Browser notifications are blocked. Change this site’s permission in browser settings."
-          : "Browser notification permission was not granted.");
+      try {
+        const granted = await requestMessageNotificationPermission();
+        if (!granted) {
+          setError("System notification permission was not granted. Check this app’s notification settings.");
+          return;
+        }
+      } catch (permissionError) {
+        setError(permissionError.message || "Could not request system notification permission.");
         return;
       }
     }
@@ -119,6 +118,7 @@ export default function NotificationCenter({ onNavigate }) {
       })
       .finally(() => setPreferencesLoading(false));
     const receiveNotification = (notification) => {
+      if (["direct_message", "group_message"].includes(notification?.category)) return;
       const notificationId = String(notification?._id || "");
       const isInvitationUpdate = notification?.category === "group_invite" && notification?.invitationStatus !== "pending";
       if (notificationId && receivedNotificationIdsRef.current.has(notificationId) && !isInvitationUpdate) return;
@@ -127,35 +127,59 @@ export default function NotificationCenter({ onNavigate }) {
       if (!notification.isRead && !existing?.isRead) setUnreadCount((count) => count + 1);
       if (notification.isRead && existing && !existing.isRead) setUnreadCount((count) => Math.max(0, count - 1));
       setNotifications((current) => [notification, ...current.filter((item) => String(item._id) !== String(notification._id))].slice(0, 50));
-      if (document.visibilityState === "hidden"
-        && preferencesRef.current.browserNotifications
-        && "Notification" in window && Notification.permission === "granted") {
-        try {
-          const systemNotification = new Notification(notification.title, {
-            body: notification.body,
-            tag: notificationId || undefined,
-          });
-          systemNotification.onclick = () => {
-            window.focus();
-            systemNotification.close();
-            if (notification.targetType && notification.targetId) {
-              onNavigateRef.current?.({
-                targetType: notification.targetType,
-                targetId: notification.targetId,
-                targetName: notification.targetName,
-                targetChannelId: notification.targetChannelId,
-                targetChannelName: notification.targetChannelName,
-              });
-            }
-          };
-        } catch (notificationError) {
-          setError(notificationError.message || "Could not show a browser notification.");
-        }
+      if (document.visibilityState === "hidden" && preferencesRef.current.browserNotifications) {
+        showSystemNotification({
+          title: notification.title,
+          body: notification.body,
+          notificationId,
+          target: {
+            targetType: notification.targetType,
+            targetId: notification.targetId,
+            targetName: notification.targetName,
+            targetChannelId: notification.targetChannelId,
+            targetChannelName: notification.targetChannelName,
+          },
+        }).catch((notificationError) => {
+          console.warn("Could not show a system alert:", notificationError.message);
+        });
       }
       if (preferencesRef.current.notificationSounds) playNotificationSound();
     };
+    const showMessageNotification = async (notification, preference) => {
+      if (!preferencesRef.current.browserNotifications || !preferencesRef.current[preference]
+        || document.visibilityState !== "hidden") return;
+      try {
+        await showSystemNotification({
+          ...notification,
+          target: {
+            targetType: notification.targetType,
+            targetId: notification.targetId,
+            targetName: notification.targetName,
+            targetChannelId: notification.targetChannelId,
+            targetChannelName: notification.targetChannelName,
+          },
+        });
+        if (preferencesRef.current.notificationSounds) playNotificationSound();
+      } catch (notificationError) {
+        console.warn("Could not show a chat system notification:", notificationError.message);
+      }
+    };
+    const receiveDirectMessage = (notification) => showMessageNotification(notification, "directMessages");
+    const receiveGroupMessage = (notification) => showMessageNotification(notification, "groupMessages");
+    const handleNotificationClick = (event) => {
+      const target = event.detail;
+      if (target?.targetType && target?.targetId) onNavigateRef.current?.(target);
+    };
     Socket.on("notification", receiveNotification);
-    return () => Socket.off("notification", receiveNotification);
+    Socket.on("direct-message-notification", receiveDirectMessage);
+    Socket.on("group-message-notification", receiveGroupMessage);
+    window.addEventListener("chat-notification-click", handleNotificationClick);
+    return () => {
+      Socket.off("notification", receiveNotification);
+      Socket.off("direct-message-notification", receiveDirectMessage);
+      Socket.off("group-message-notification", receiveGroupMessage);
+      window.removeEventListener("chat-notification-click", handleNotificationClick);
+    };
   }, [loadNotifications]);
 
   const markRead = async (notificationId) => {
@@ -304,25 +328,13 @@ export default function NotificationCenter({ onNavigate }) {
           {error && <p role="alert" className="mt-2 text-xs text-rose-400">{error}</p>}
           {isSettingsOpen && (
             <div aria-label="Notification preferences" className="mt-3 space-y-3 border-y border-white/10 py-3">
-              <p className="theme-muted text-xs font-semibold uppercase">Message alerts</p>
+              <p className="theme-muted text-xs font-semibold uppercase">Chat system notifications</p>
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={preferences.directMessages}
-                  disabled={preferencesLoading}
-                  onChange={(event) => updatePreference("directMessages", event.target.checked)}
-                  className="accent-teal-500"
-                />
+                <input type="checkbox" checked={preferences.directMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("directMessages", event.target.checked)} className="accent-teal-500" />
                 Direct messages
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={preferences.groupMessages}
-                  disabled={preferencesLoading}
-                  onChange={(event) => updatePreference("groupMessages", event.target.checked)}
-                  className="accent-teal-500"
-                />
+                <input type="checkbox" checked={preferences.groupMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("groupMessages", event.target.checked)} className="accent-teal-500" />
                 Group messages
               </label>
               <p className="theme-muted text-xs font-semibold uppercase">Delivery</p>
@@ -335,8 +347,8 @@ export default function NotificationCenter({ onNavigate }) {
                   className="mt-1 accent-teal-500"
                 />
                 <span>
-                  Browser notifications
-                  <span className="theme-muted mt-0.5 block text-xs">Show alerts while this app is open in a hidden tab. Closed-app delivery requires optional push setup.</span>
+                  System notifications
+                  <span className="theme-muted mt-0.5 block text-xs">Show chat notifications while this app is in the background.</span>
                 </span>
               </label>
               <label className="flex items-center gap-2 text-sm">

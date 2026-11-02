@@ -588,7 +588,9 @@ router.patch(
 router.get("/notifications", protect, async (req, res) => {
 	try {
 		const [[{ unreadCount }]] = await pool.execute(
-			"SELECT COUNT(*) AS unreadCount FROM notifications WHERE user_id = ? AND is_read = FALSE",
+			`SELECT COUNT(*) AS unreadCount FROM notifications
+			 WHERE user_id = ? AND is_read = FALSE
+			   AND COALESCE(category, '') NOT IN ('direct_message', 'group_message')`,
 			[req.user.id]
 		);
 		const [notifications] = await pool.execute(
@@ -605,7 +607,8 @@ router.get("/notifications", protect, async (req, res) => {
 				   ON meeting_participant.meeting_id = n.target_id
 				  AND meeting_participant.user_id = n.user_id
 				  AND n.category = 'meeting_invite'
-			 WHERE n.user_id = ?
+				 WHERE n.user_id = ?
+				   AND COALESCE(n.category, '') NOT IN ('direct_message', 'group_message')
 			 ORDER BY n.created_at DESC, n.id DESC
 			 LIMIT 50`,
 			[req.user.id]
