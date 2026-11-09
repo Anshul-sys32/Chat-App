@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Chat from "./components/Chat";
 import UserForm from "./components/UserForm";
 import AdminPanel from "./components/AdminPanel";
+import { readAccentPreference } from "./appearancePreferences";
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
@@ -21,6 +22,7 @@ export default function App() {
     const savedTheme = localStorage.getItem("theme");
     return savedTheme === "light" ? "light" : "dark";
   });
+  const [accent, setAccent] = useState(readAccentPreference);
   const [user, setUser] = useState(() => {
     try {
       return localStorage.getItem("token")
@@ -39,6 +41,10 @@ export default function App() {
       localStorage.setItem("theme", nextTheme);
       return nextTheme;
     });
+  };
+  const updateAccent = (nextAccent) => {
+    setAccent(nextAccent);
+    localStorage.setItem("accentColor", nextAccent);
   };
   const updateUser = (updatedUser) => {
     setUser(updatedUser);
@@ -120,7 +126,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app-theme min-h-screen" data-theme={theme}>
+    <div className="app-theme min-h-screen" data-theme={theme} data-accent={accent}>
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/chat" replace /> : <UserForm onAuthenticated={setUser} />} />
         <Route
@@ -137,6 +143,8 @@ export default function App() {
               onUserUpdated={updateUser}
               theme={theme}
               onToggleTheme={updateTheme}
+              accent={accent}
+              onChangeAccent={updateAccent}
             />
           ) : <Navigate to="/login" replace />}
         />

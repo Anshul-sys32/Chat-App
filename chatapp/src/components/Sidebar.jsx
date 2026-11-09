@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   FaUsers,
@@ -23,10 +23,29 @@ import SettingsPanel from './SettingsPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
-const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) => {
+const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, accent, onChangeAccent, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) => {
   const [activeTab, setActiveTab] = useState('localUsers');
   const [search, setSearch] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const menuButtonRef = useRef(null);
+  const closeButtonRef = useRef(null);
+  const wasOpen = useRef(isOpen);
+
+  useEffect(() => {
+    if (isOpen && !wasOpen.current) closeButtonRef.current?.focus();
+    if (!isOpen && wasOpen.current) menuButtonRef.current?.focus();
+    wasOpen.current = isOpen;
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') onCloseSidebar();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen, onCloseSidebar]);
+
   const handleSelectChat = (chat) => {
     onSelectChat(chat);
     setIsProfileOpen(false);
@@ -46,7 +65,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       case 'meetings':
         return <Meetings />;
       case 'settings':
-        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
+        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} accent={accent} onChangeAccent={onChangeAccent} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
       default:
         return null;
     }
@@ -62,10 +81,15 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
         style={{ top: 'calc(env(safe-area-inset-top, 0px) + 1rem)', left: 'calc(env(safe-area-inset-left, 0px) + 1rem)' }}
       >
         <button
+          ref={menuButtonRef}
+          type="button"
           onClick={toggleSidebar}
           className="theme-menu-button rounded-lg p-2 shadow-md"
-
-          title="Open Menu"
+          aria-label="Open navigation menu"
+          aria-controls="chat-navigation"
+          aria-expanded={isOpen}
+          tabIndex={isOpen ? -1 : 0}
+          title="Open navigation menu"
         >
           <FaBars size={20} />
         </button>
@@ -74,13 +98,18 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       <button
         type="button"
         aria-label="Close navigation menu"
-        tabIndex={isOpen ? 0 : -1}
+        aria-hidden="true"
+        tabIndex={-1}
         onClick={onCloseSidebar}
         className={`fixed inset-0 z-[35] bg-black/35 transition-opacity duration-300 ease-in-out ${isOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
       />
 
       {/* Sidebar Container */}
       <div
+        id="chat-navigation"
+        aria-label="Chat navigation"
+        aria-hidden={!isOpen}
+        inert={!isOpen}
         style={{
           top: 'env(safe-area-inset-top, 0px)',
           bottom: 'env(safe-area-inset-bottom, 0px)',
@@ -94,8 +123,11 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
           {/* FaTimes to close */}
           <div className="absolute top-4 left-5">
             <button
-              onClick={toggleSidebar}
+              ref={closeButtonRef}
+              type="button"
+              onClick={onCloseSidebar}
               className="theme-text hover:text-teal-500"
+              aria-label="Close navigation menu"
               title="Close Menu"
             >
               <FaTimes size={20} />
@@ -160,6 +192,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             {activeTab !== 'settings' && <input
               type="text"
+              aria-label="Search people, groups, and meetings"
               placeholder="Search..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -214,7 +247,6 @@ const IconButton = ({ icon, label, onClick, active }) => (
       type="button"
       onClick={onClick}
       aria-label={label}
-      title={label}
       className={`theme-icon-button rounded-lg p-2 text-xl transition ${
         active ? 'is-active' : ''
       }`}

@@ -373,28 +373,35 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
       <ul className="space-y-1.5">
         {!loading && visibleGroups.length === 0 && <li className="rounded-md border border-dashed border-gray-700 px-3 py-4 text-center text-xs text-gray-400">No groups found</li>}
         {visibleGroups.map((group) => (
-          <li key={group._id} className={`relative rounded-xl border transition ${activeGroup?._id === group._id ? 'border-teal-200/30 bg-teal-300/[0.1]' : 'border-white/[0.07] bg-white/[0.045] hover:bg-white/[0.08]'}`}>
+          <li key={group._id} className={`relative rounded-xl border transition ${activeGroup?._id === group._id ? 'border-teal-200/30 bg-teal-300/[0.1]' : 'border-white/[0.07] bg-white/[0.045] hover:border-teal-200/20 hover:bg-teal-300/[0.08]'}`}>
             <div className="flex items-center gap-2 px-2.5 py-2">
-              <button type="button" onClick={() => showManagement(group)} className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-teal-300" title={`Manage ${group.name}`} aria-label={`Manage ${group.name}`}>
+              <button type="button" onClick={() => showManagement(group)} className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-teal-300" aria-label={`Manage ${group.name}`}>
                 <Avatar src={group.avatarUrl} name={group.name} group className="h-9 w-9 text-sm" />
               </button>
               <button
                 type="button"
-                onClick={() => onSelectGroup?.({ ...group, type: 'group' })}
-                className="min-w-0 flex-1 text-left"
-                title={`Open ${group.name}`}
+                onClick={() => group.groupType === 'community'
+                  ? toggleChannels(group)
+                  : onSelectGroup?.({ ...group, type: 'group' })}
+                className="group relative min-w-0 flex-1 text-left"
+                aria-label={group.groupType === 'community'
+                  ? `${activeGroup?._id === group._id ? 'Hide' : 'Show'} channels in ${group.name}`
+                  : `Open ${group.name}`}
+                aria-expanded={group.groupType === 'community' ? String(activeGroup?._id === group._id) : undefined}
               >
                 <span className="block truncate text-sm font-semibold">{group.name}</span>
                 <span className="mt-0.5 flex items-center gap-1 text-[11px] text-white/55">
                   <FaUsers size={10} /> {group.members} · {group.role} {group.isActive === 0 && <span className="text-rose-300">· inactive</span>}
                 </span>
               </button>
-              <button type="button" onClick={() => toggleChannels(group)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-300 transition hover:bg-white/10 hover:text-white" aria-label={`Show channels of ${group.name}`} title="Show group channels">{activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}</button>
+              {group.groupType === 'community' && <button type="button" onClick={() => toggleChannels(group)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-300 transition hover:bg-white/10 hover:text-white" aria-label={`${activeGroup?._id === group._id ? 'Hide' : 'Show'} channels of ${group.name}`}>{activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}</button>}
             </div>
-            {activeGroup?._id === group._id && !isManagementOpen && (
+            {group.groupType === 'community' && activeGroup?._id === group._id && !isManagementOpen && (
               <div className="border-t border-white/10 px-2.5 py-2.5">
-                <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{group.groupType === 'community' ? channels.length : 'None'}</span></div>
-                {group.groupType === 'community' ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-teal-300/10 hover:text-teal-200"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span></button></li>)}</ul> : <p className="text-xs text-white/45">This standard group has no channels.</p>}
+                <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{channels.length}</span></div>
+                {channels.length > 0
+                  ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-teal-300/10 hover:text-teal-200"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span></button></li>)}</ul>
+                  : <p className="text-xs text-white/45">No channels yet.</p>}
               </div>
             )}
             {/* Group actions live in the avatar menu so the list stays scannable. */}

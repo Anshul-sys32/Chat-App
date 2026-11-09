@@ -47,7 +47,7 @@ const formatFileSize = (size) => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, theme, onToggleTheme }) {
+export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, theme, onToggleTheme, accent, onChangeAccent }) {
   const [msg, setMsg] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [voiceFile, setVoiceFile] = useState(null);
@@ -940,6 +940,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         onUserUpdated={onUserUpdated}
         theme={theme}
         onToggleTheme={onToggleTheme}
+        accent={accent}
+        onChangeAccent={onChangeAccent}
         selectedChat={selectedChat}
         conversationMuted={conversationMuted}
         conversationMuteLoading={conversationMuteLoading}
@@ -1420,21 +1422,6 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <FaPaperclip />
               <span>Attach</span>
             </button>
-            {replyTo && (
-              <div className="flex min-w-0 max-w-[42%] shrink items-center gap-1.5 rounded-xl border border-teal-300/30 bg-slate-950/40 px-2 py-1.5 text-xs">
-                <FaReply className="shrink-0 text-teal-300" />
-                <span className="min-w-0 flex-1 truncate">{replyTo.content || 'Attachment'}</span>
-                <button
-                  type="button"
-                  onClick={() => setReplyTo(null)}
-                  className="shrink-0 text-white/60 hover:text-white"
-                  aria-label="Cancel reply"
-                  title="Cancel reply"
-                >
-                  ×
-                </button>
-              </div>
-            )}
             <button
               className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"
@@ -1443,6 +1430,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               {isSending ? 'Sending…' : 'Send'}
             </button>
           </form>
+          {replyTo && (
+            <div className="mx-auto mt-2 flex max-w-4xl items-start gap-2 rounded-lg border border-teal-300/30 px-3 py-2 text-xs sm:items-center" role="status" aria-label="Reply preview">
+              <FaReply className="mt-0.5 shrink-0 text-teal-300 sm:mt-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">Replying to {replyTo.senderName || (String(replyTo.sender) === String(user?._id) ? 'yourself' : 'message')}</span>
+                <span className="block max-h-10 overflow-hidden break-words leading-5 sm:max-h-5 sm:truncate">{replyTo.content || 'Attachment'}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setReplyTo(null)}
+                className="shrink-0 text-white/60 hover:text-white"
+                aria-label="Cancel reply"
+                title="Cancel reply"
+              >
+                ×
+              </button>
+            </div>
+          )}
           {voiceFile && (
             <div className="mx-auto mt-2 flex max-w-4xl items-center gap-2 rounded-lg border border-teal-300/30 px-3 py-2">
               <span className="shrink-0 text-xs font-medium">Voice preview</span>
