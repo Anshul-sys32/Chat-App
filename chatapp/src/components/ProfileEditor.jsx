@@ -21,6 +21,62 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
   const [avatarPreview, setAvatarPreview] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarInput = useRef(null);
+  const dialogRef = useRef(null);
+  const previousFocusRef = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return undefined;
+    previousFocusRef.current = document.activeElement;
+    const getFocusableElements = () => [...dialog.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((element) => element.getClientRects().length > 0);
+    const focusableElements = getFocusableElements();
+    (focusableElements[0] || dialog).focus({ preventScroll: true });
+
+    const containFocus = (event) => {
+      if (event.key !== "Tab") return;
+      const currentFocusableElements = getFocusableElements();
+      if (!currentFocusableElements.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = currentFocusableElements[0];
+      const last = currentFocusableElements[currentFocusableElements.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const keepFocusInside = (event) => {
+      if (dialog.contains(event.target)) return;
+      (getFocusableElements()[0] || dialog).focus({ preventScroll: true });
+    };
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRef.current?.();
+    };
+    document.addEventListener("keydown", containFocus, true);
+    document.addEventListener("keydown", closeOnEscape, true);
+    document.addEventListener("focusin", keepFocusInside, true);
+    return () => {
+      document.removeEventListener("keydown", containFocus, true);
+      document.removeEventListener("keydown", closeOnEscape, true);
+      document.removeEventListener("focusin", keepFocusInside, true);
+      if (previousFocusRef.current instanceof HTMLElement && previousFocusRef.current.isConnected) {
+        previousFocusRef.current.focus({ preventScroll: true });
+      }
+      previousFocusRef.current = null;
+    };
+  }, []);
 
   useEffect(() => () => {
     if (avatarPreview) URL.revokeObjectURL(avatarPreview);
@@ -80,7 +136,7 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" className="glass-panel min-w-0 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl p-5 shadow-2xl sm:p-6">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" tabIndex={-1} className="glass-panel min-w-0 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl p-5 shadow-2xl sm:p-6">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 id="profile-editor-title" className="text-xl font-semibold text-white">

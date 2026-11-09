@@ -14,6 +14,7 @@ import Avatar from './Avatar';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 import FloatingPanel from './FloatingPanel';
 import useFloatingPanel from '../useFloatingPanel';
+import { normalizeNotificationTarget } from '../notificationDeliveryPolicy';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const MAX_FILES_PER_MESSAGE = 5;
@@ -103,6 +104,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
   const replyDrag = React.useRef(null);
   const suppressMessageClick = React.useRef(false);
+  const joinGroupKeyRef = React.useRef('');
   const [replySwipe, setReplySwipe] = useState({ messageId: null, offset: 0, dragging: false });
   const bulkPanel = useFloatingPanel(openBulkMenu, () => setOpenBulkMenu(false));
   const stickerPanel = useFloatingPanel(showStickers, () => setShowStickers(false));
@@ -328,7 +330,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         ? previous
         : [...previous, data]);
     };
-    const handleMessageError = ({ message }) => window.alert(message);
+    const handleMessageError = ({ message }) => {
+      const isTransientGroupJoinError = message === 'Could not join this group right now.'
+        && selectedChatRef.current?.type === 'group';
+      if (isTransientGroupJoinError) return;
+      window.alert(message);
+    };
     const handleGroupMessage = (data) => {
       if (selectedChatRef.current?.type !== 'group') return;
       if (String(data.groupId) !== String(selectedChatRef.current?._id)) return;
@@ -484,21 +491,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   };
 
   const navigateToNotificationTarget = ({ targetType, targetId, targetName, targetChannelId, targetChannelName }) => {
-    const id = Number(targetId);
-    if (!Number.isSafeInteger(id) || id < 1) return;
-    if (targetType === 'group' || targetType === 'channel') {
-      onSelectChat({
-        _id: id,
-        type: 'group',
-        name: targetName || 'Group',
-        ...(targetType === 'channel' ? {
-          channelId: Number(targetChannelId),
-          channelName: targetChannelName,
-        } : {}),
-      });
-      return;
-    }
-    onSelectChat({ _id: id, type: 'user', username: targetName || 'User' });
+    const target = normalizeNotificationTarget({ targetType, targetId, targetName, targetChannelId, targetChannelName });
+    if (target) onSelectChat(target);
   };
 
   useEffect(() => {
@@ -522,7 +516,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setMessagesLoading(true);
     scrollToLatestOnLoad.current = true;
     const joinGroup = () => {
-      if (Socket.connected) Socket.emit('join-group', {
+      const nextJoinKey = `${selectedChat._id}:${selectedChat.type}:${selectedChat.channelId ?? 'default'}`;
+      if (!Socket.connected || joinGroupKeyRef.current === nextJoinKey) return;
+      joinGroupKeyRef.current = nextJoinKey;
+      Socket.emit('join-group', {
         groupId: selectedChat._id,
         ...(selectedChat.channelId ? { channelId: selectedChat.channelId } : {}),
       });
@@ -593,6 +590,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       active = false;
       if (messagesRequestId.current === requestId) messagesRequestId.current += 1;
       if (isGroup) Socket.off('connect', joinGroup);
+      joinGroupKeyRef.current = '';
       window.removeEventListener('pageshow', refreshWhenVisible);
       window.removeEventListener('online', refreshWhenVisible);
       document.removeEventListener('visibilitychange', refreshWhenVisible);

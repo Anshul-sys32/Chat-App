@@ -13,6 +13,17 @@ export const requestMessageNotificationPermission = async () => {
   return permission === "granted";
 };
 
+export const addNativeNotificationTapListener = async (listener) => {
+  if (!Capacitor.isNativePlatform()) return { remove: async () => {} };
+  return NativeMessageNotifications.addListener("notificationTap", listener);
+};
+
+export const playNativeMessageNotificationSound = async () => {
+  if (!Capacitor.isNativePlatform()) return false;
+  await NativeMessageNotifications.playSound();
+  return true;
+};
+
 export const showSystemNotification = async ({ title, body, notificationId, target }) => {
   if (Capacitor.isNativePlatform()) {
     await NativeMessageNotifications.show({

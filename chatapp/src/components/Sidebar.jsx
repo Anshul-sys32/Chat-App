@@ -66,7 +66,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       case 'meetings':
         return <Meetings />;
       case 'settings':
-        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} accent={accent} onChangeAccent={onChangeAccent} restoreFocusRef={settingsButtonRef} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
+        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} accent={accent} onChangeAccent={onChangeAccent} restoreFocusRef={settingsButtonRef} nestedDialogOpen={isProfileOpen} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
       default:
         return null;
     }

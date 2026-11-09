@@ -16,14 +16,16 @@ const sections = [
   { id: "devices", label: "Audio & video", icon: FaVideo },
 ];
 
-export default function SettingsPanel({ user, theme, onToggleTheme, accent, onChangeAccent, restoreFocusRef, onOpenProfile, onCloseSettings, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) {
+export default function SettingsPanel({ user, theme, onToggleTheme, accent, onChangeAccent, restoreFocusRef, nestedDialogOpen, onOpenProfile, onCloseSettings, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) {
   const [activeSection, setActiveSection] = useState("account");
   const [preferences, setPreferences] = useState({ browserNotifications: false, notificationSounds: false });
   const [error, setError] = useState("");
   const [chatSettingsSurface, setChatSettingsSurface] = useState(null);
   const settingsDialogRef = useRef(null);
   const previousFocusRef = useRef(null);
+  const nestedDialogOpenRef = useRef(nestedDialogOpen);
   const onCloseSettingsRef = useRef(onCloseSettings);
+  nestedDialogOpenRef.current = nestedDialogOpen;
   onCloseSettingsRef.current = onCloseSettings;
   const visibleSections = selectedChat
     ? [...sections, { id: "conversation", label: "Current conversation", icon: FaBell }]
@@ -44,6 +46,7 @@ export default function SettingsPanel({ user, theme, onToggleTheme, accent, onCh
     (focusableElements[0] || dialog).focus({ preventScroll: true });
 
     const containFocus = (event) => {
+      if (nestedDialogOpenRef.current) return;
       if (event.key !== "Tab") return;
       const currentFocusableElements = getFocusableElements();
       if (!currentFocusableElements.length) {
@@ -62,10 +65,12 @@ export default function SettingsPanel({ user, theme, onToggleTheme, accent, onCh
       }
     };
     const keepFocusInside = (event) => {
+      if (nestedDialogOpenRef.current) return;
       if (dialog.contains(event.target)) return;
       (getFocusableElements()[0] || dialog).focus({ preventScroll: true });
     };
     const closeOnEscape = (event) => {
+      if (nestedDialogOpenRef.current) return;
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();

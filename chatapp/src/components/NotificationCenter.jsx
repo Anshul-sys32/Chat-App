@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
+import { Capacitor } from "@capacitor/core";
 import { FaBell, FaCheck, FaCheckDouble, FaCog, FaTimes, FaVolumeUp } from "react-icons/fa";
 import Socket from "../Socket";
-import { requestMessageNotificationPermission, showSystemNotification } from "../messageNotificationDelivery";
+import { addNativeNotificationTapListener, playNativeMessageNotificationSound, requestMessageNotificationPermission, showSystemNotification } from "../messageNotificationDelivery";
+import { createNotificationIdDeduper, getMessageNotificationActions } from "../notificationDeliveryPolicy";
 import FloatingPanel from "./FloatingPanel";
 import useFloatingPanel from "../useFloatingPanel";
 
@@ -30,6 +32,8 @@ export default function NotificationCenter({ onNavigate }) {
   const preferencesRef = useRef(preferences);
   const notificationsRef = useRef(notifications);
   const receivedNotificationIdsRef = useRef(new Set());
+  const receivedMessageNotificationRef = useRef(createNotificationIdDeduper());
+  const receivedNotificationTapRef = useRef(createNotificationIdDeduper());
   const audioContextRef = useRef(null);
   const onNavigateRef = useRef(onNavigate);
   preferencesRef.current = preferences;
@@ -51,6 +55,12 @@ export default function NotificationCenter({ onNavigate }) {
   }, []);
 
   const playNotificationSound = () => {
+    if (Capacitor.isNativePlatform()) {
+      playNativeMessageNotificationSound().catch((soundError) => {
+        console.warn("Could not play a native notification sound:", soundError.message);
+      });
+      return true;
+    }
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return false;
     try {
@@ -146,9 +156,16 @@ export default function NotificationCenter({ onNavigate }) {
       if (preferencesRef.current.notificationSounds) playNotificationSound();
     };
     const showMessageNotification = async (notification, preference) => {
-      if (!preferencesRef.current[preference] || document.visibilityState !== "hidden") return;
-      if (preferencesRef.current.notificationSounds) playNotificationSound();
-      if (!preferencesRef.current.browserNotifications) return;
+      const actions = getMessageNotificationActions({
+        categoryEnabled: preferencesRef.current[preference],
+        isHidden: document.visibilityState === "hidden",
+        browserNotifications: preferencesRef.current.browserNotifications,
+        notificationSounds: preferencesRef.current.notificationSounds,
+      });
+      if (!actions.playSound && !actions.showSystemNotification) return;
+      if (!receivedMessageNotificationRef.current(notification.notificationId)) return;
+      if (actions.playSound) playNotificationSound();
+      if (!actions.showSystemNotification) return;
       try {
         await showSystemNotification({
           ...notification,
@@ -168,13 +185,27 @@ export default function NotificationCenter({ onNavigate }) {
     const receiveGroupMessage = (notification) => showMessageNotification(notification, "groupMessages");
     const handleNotificationClick = (event) => {
       const target = event.detail;
-      if (target?.targetType && target?.targetId) onNavigateRef.current?.(target);
+      if (!target?.targetType || !target?.targetId) return;
+      if (!receivedNotificationTapRef.current(target.notificationId)) return;
+      onNavigateRef.current?.(target);
     };
     Socket.on("notification", receiveNotification);
     Socket.on("direct-message-notification", receiveDirectMessage);
     Socket.on("group-message-notification", receiveGroupMessage);
     window.addEventListener("chat-notification-click", handleNotificationClick);
+    let active = true;
+    let nativeTapListener;
+    addNativeNotificationTapListener((target) => {
+      window.dispatchEvent(new CustomEvent("chat-notification-click", { detail: target }));
+    }).then((listener) => {
+      if (active) nativeTapListener = listener;
+      else listener.remove();
+    }).catch((listenerError) => {
+      console.warn("Could not listen for native notification taps:", listenerError.message);
+    });
     return () => {
+      active = false;
+      nativeTapListener?.remove();
       Socket.off("notification", receiveNotification);
       Socket.off("direct-message-notification", receiveDirectMessage);
       Socket.off("group-message-notification", receiveGroupMessage);
