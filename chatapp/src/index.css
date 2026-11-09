@@ -95,7 +95,7 @@ body {
   }
 
   .glass-input {
-    @apply border border-white/10 bg-white/[0.07] transition focus:border-teal-200/60 focus:ring-2 focus:ring-teal-300/20;
+    @apply border border-white/10 bg-white/[0.07] transition;
   }
 }
 
@@ -104,7 +104,7 @@ body {
   --theme-muted: #a9bfba;
   --theme-page: #000;
   --theme-page-gradient: #080a0b;
-  --theme-focus: #5eead4;
+  --theme-focus: var(--theme-accent);
   --theme-surface: rgb(10 12 13 / 94%);
   --theme-popover: #42474f;
   --theme-popover-text: #ffffff;
@@ -228,93 +228,6 @@ body {
   background-color: var(--theme-page);
 }
 
-.app-theme [class~="text-teal-50"],
-.app-theme [class~="text-teal-100"],
-.app-theme [class~="text-teal-200"],
-.app-theme [class~="text-teal-300"],
-.app-theme [class~="text-teal-400"],
-.app-theme [class~="text-teal-500"] {
-  color: var(--theme-accent-text) !important;
-}
-
-.app-theme [class~="text-teal-800"] {
-  color: var(--theme-accent-deep) !important;
-}
-
-.app-theme [class~="bg-teal-400"],
-.app-theme [class~="bg-teal-500"] {
-  color: var(--theme-accent-contrast) !important;
-  background-color: var(--theme-accent) !important;
-}
-
-.app-theme [class~="hover:bg-teal-300"]:hover {
-  background-color: var(--theme-accent-hover) !important;
-}
-
-.app-theme [class*="bg-teal-300/"]:not([class*="hover:bg-teal-"]),
-.app-theme [class*="bg-teal-100/"]:not([class*="hover:bg-teal-"]),
-.app-theme [class*="bg-teal-400/"]:not([class*="hover:bg-teal-"]),
-.app-theme [class*="bg-teal-500/"]:not([class*="hover:bg-teal-"]) {
-  background-color: var(--theme-accent-soft) !important;
-}
-
-.app-theme [class*="hover:bg-teal-"]:not([class~="hover:bg-teal-300"]):hover {
-  background-color: var(--theme-accent-soft) !important;
-}
-
-.app-theme [class*="border-teal-"]:not([class*="hover:border-teal-"]) {
-  border-color: var(--theme-accent-border) !important;
-}
-
-.app-theme [class*="hover:border-teal-"]:hover {
-  border-color: var(--theme-accent-border) !important;
-}
-
-.app-theme [class*="ring-teal-"] {
-  --tw-ring-color: var(--theme-accent-border) !important;
-}
-
-.app-theme [class*="accent-teal-"] {
-  accent-color: var(--theme-accent) !important;
-}
-
-.app-theme [class~="hover:text-teal-300"]:hover,
-.app-theme [class~="hover:text-teal-500"]:hover {
-  color: var(--theme-accent-text) !important;
-}
-
-.app-theme .chat-bubble-own {
-  background: var(--theme-accent-message);
-}
-
-.app-theme .theme-auth-heading,
-.app-theme .theme-auth-link {
-  color: var(--theme-accent-text);
-}
-
-.app-theme .theme-auth-submit {
-  color: var(--theme-accent-contrast);
-  background: var(--theme-accent);
-}
-
-.app-theme .theme-auth-submit:hover {
-  background: var(--theme-accent-hover);
-}
-
-.app-theme [class~="focus:border-teal-300"]:focus,
-.app-theme [class~="focus:border-teal-300/60"]:focus {
-  border-color: var(--theme-accent) !important;
-}
-
-.app-theme [class~="bg-teal-300"],
-.app-theme [class~="hover:bg-teal-300"]:hover {
-  background-color: var(--theme-accent-hover) !important;
-}
-
-.chat-bubble-own {
-  background: var(--theme-accent-message);
-}
-
 .theme-auth-heading,
 .theme-auth-link {
   color: var(--theme-accent-text);
@@ -334,8 +247,8 @@ body {
   box-shadow: 0 0 0 2px var(--theme-accent-soft);
 }
 
-.accent-swatch[aria-checked="true"] {
-  border-color: var(--theme-accent) !important;
+.accent-swatch[aria-pressed="true"] {
+  border-color: var(--theme-accent);
   background: var(--theme-accent-soft);
   box-shadow: 0 0 0 1px var(--theme-accent-border);
 }
@@ -431,7 +344,15 @@ body {
 
 .chat-bubble-own {
   color: #fff;
-  background: #0f887b;
+  background: var(--theme-accent-message);
+}
+
+.chat-message-time {
+  color: var(--theme-muted);
+}
+
+.chat-bubble-own .chat-message-time {
+  color: rgb(255 255 255 / 78%);
 }
 
 .chat-bubble-peer {
@@ -496,7 +417,7 @@ body {
   border: 1px solid transparent;
 }
 
-.app-theme [aria-label="Settings sections"] button:not([class*="bg-teal-"]):hover {
+.app-theme [aria-label="Settings sections"] button:hover {
   border-color: var(--theme-accent-border);
   color: var(--theme-accent-text);
   background: var(--theme-accent-soft);
@@ -540,6 +461,14 @@ body {
 .theme-tooltip {
   color: var(--theme-accent-contrast);
   background: var(--theme-accent);
+}
+
+.call-idle-backdrop {
+  background: radial-gradient(ellipse at top, color-mix(in srgb, var(--theme-accent) 18%, transparent), #102426 62%, #050b0c 100%);
+}
+
+.accent-shadow {
+  box-shadow: 0 25px 50px -12px var(--theme-accent-soft);
 }
 
 .theme-auth-page {

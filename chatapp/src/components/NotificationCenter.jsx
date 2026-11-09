@@ -146,8 +146,9 @@ export default function NotificationCenter({ onNavigate }) {
       if (preferencesRef.current.notificationSounds) playNotificationSound();
     };
     const showMessageNotification = async (notification, preference) => {
-      if (!preferencesRef.current.browserNotifications || !preferencesRef.current[preference]
-        || document.visibilityState !== "hidden") return;
+      if (!preferencesRef.current[preference] || document.visibilityState !== "hidden") return;
+      if (preferencesRef.current.notificationSounds) playNotificationSound();
+      if (!preferencesRef.current.browserNotifications) return;
       try {
         await showSystemNotification({
           ...notification,
@@ -159,7 +160,6 @@ export default function NotificationCenter({ onNavigate }) {
             targetChannelName: notification.targetChannelName,
           },
         });
-        if (preferencesRef.current.notificationSounds) playNotificationSound();
       } catch (notificationError) {
         console.warn("Could not show a chat system notification:", notificationError.message);
       }
@@ -281,7 +281,7 @@ export default function NotificationCenter({ onNavigate }) {
         onClick={() => setIsOpen((open) => !open)}
         aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
         aria-expanded={isOpen}
-        className="chat-action theme-text relative inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-teal-500"
+        className="chat-action theme-text relative inline-flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-accent-text"
       >
         <FaBell />
         <span>Alerts</span>
@@ -310,7 +310,7 @@ export default function NotificationCenter({ onNavigate }) {
                 aria-label="Notification settings"
                 aria-expanded={isSettingsOpen}
                 title="Notification settings"
-                className="theme-muted hover:text-teal-500"
+                className="theme-muted hover:text-accent-text"
               >
                 <FaCog />
               </button>
@@ -318,7 +318,7 @@ export default function NotificationCenter({ onNavigate }) {
                 <button
                   type="button"
                   onClick={markAllRead}
-                  className="inline-flex items-center gap-1 text-xs text-teal-500 hover:underline"
+                  className="inline-flex items-center gap-1 text-xs text-accent-text hover:underline"
                 >
                   <FaCheckDouble size={11} /> Mark all read
                 </button>
@@ -330,11 +330,11 @@ export default function NotificationCenter({ onNavigate }) {
             <div aria-label="Notification preferences" className="mt-3 space-y-3 border-y border-white/10 py-3">
               <p className="theme-muted text-xs font-semibold uppercase">Chat system notifications</p>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={preferences.directMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("directMessages", event.target.checked)} className="accent-teal-500" />
+                <input type="checkbox" checked={preferences.directMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("directMessages", event.target.checked)} className="accent-accent" />
                 Direct messages
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={preferences.groupMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("groupMessages", event.target.checked)} className="accent-teal-500" />
+                <input type="checkbox" checked={preferences.groupMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("groupMessages", event.target.checked)} className="accent-accent" />
                 Group messages
               </label>
               <p className="theme-muted text-xs font-semibold uppercase">Delivery</p>
@@ -344,7 +344,7 @@ export default function NotificationCenter({ onNavigate }) {
                   checked={preferences.browserNotifications}
                   disabled={preferencesLoading}
                   onChange={(event) => updatePreference("browserNotifications", event.target.checked)}
-                  className="mt-1 accent-teal-500"
+                  className="mt-1 accent-accent"
                 />
                 <span>
                   System notifications
@@ -357,7 +357,7 @@ export default function NotificationCenter({ onNavigate }) {
                   checked={preferences.notificationSounds}
                   disabled={preferencesLoading}
                   onChange={(event) => updatePreference("notificationSounds", event.target.checked)}
-                  className="accent-teal-500"
+                  className="accent-accent"
                 />
                 Notification sounds
               </label>
@@ -365,7 +365,7 @@ export default function NotificationCenter({ onNavigate }) {
                 type="button"
                 onClick={playNotificationSound}
                 disabled={preferencesLoading}
-                className="inline-flex items-center gap-2 text-xs text-teal-500 hover:underline disabled:opacity-50"
+                className="inline-flex items-center gap-2 text-xs text-accent-text hover:underline disabled:opacity-50"
               >
                 <FaVolumeUp /> Preview sound
               </button>
@@ -401,7 +401,7 @@ function NotificationItem({ notification, index, onOpen, onRespond, onMeetingRes
     <>
       <span className="flex items-start justify-between gap-2">
         <span className="font-medium">{notification.title}</span>
-        {!notification.isRead && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-teal-400" />}
+        {!notification.isRead && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-accent" />}
       </span>
       <span className="mt-1 block whitespace-pre-wrap break-words text-sm">{notification.body}</span>
       <span className="theme-muted mt-2 block text-xs">
@@ -413,15 +413,15 @@ function NotificationItem({ notification, index, onOpen, onRespond, onMeetingRes
   return (
     <li style={{ "--notification-index": Math.min(index, 8) }} className="notification-item-enter">
       {isPendingInvite || isPendingMeetingInvite ? (
-        <div className="w-full rounded-lg border border-teal-400/30 bg-teal-400/5 p-3">
+        <div className="w-full rounded-lg border border-accent-border bg-accent-soft p-3">
           {content}
           <div className="mt-3 flex gap-2">
-            <button type="button" onClick={() => isPendingInvite ? onRespond(notification, "accept") : onMeetingRespond(notification, "accept")} className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-slate-950 hover:bg-emerald-400"><FaCheck /> Accept</button>
+            <button type="button" onClick={() => isPendingInvite ? onRespond(notification, "accept") : onMeetingRespond(notification, "accept")} className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-accent-contrast hover:bg-emerald-400"><FaCheck /> Accept</button>
             <button type="button" onClick={() => isPendingInvite ? onRespond(notification, "reject") : onMeetingRespond(notification, "decline")} className="inline-flex items-center gap-1 rounded-md border border-rose-300/30 px-2.5 py-1.5 text-xs text-rose-200 hover:bg-rose-500/10"><FaTimes /> {isPendingInvite ? "Reject" : "Decline"}</button>
           </div>
         </div>
       ) : (
-        <button type="button" onClick={() => onOpen(notification)} className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${notification.isRead ? "border-white/5 opacity-75" : "border-teal-400/30 bg-teal-400/5"}`}>
+        <button type="button" onClick={() => onOpen(notification)} className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${notification.isRead ? "border-white/5 opacity-75" : "border-accent-border bg-accent-soft"}`}>
           {content}
         </button>
       )}

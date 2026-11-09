@@ -141,7 +141,7 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
           {error && <p role="alert" className="rounded-lg bg-rose-950/70 px-3 py-2 text-sm text-rose-200">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10">Cancel</button>
-            <button type="submit" disabled={saving} className="rounded-lg bg-teal-400 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:opacity-60">
+            <button type="submit" disabled={saving} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:opacity-60">
               {saving ? "Saving…" : "Save changes"}
             </button>
           </div>

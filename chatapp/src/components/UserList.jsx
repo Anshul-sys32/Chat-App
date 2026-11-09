@@ -134,7 +134,7 @@ export default function UserList({ currentUser, onStartChat, search = '', scope 
               <li
                 key={user._id}
                 onClick={() => handleStartChat(user)}
-                className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2.5 transition hover:border-teal-200/20 hover:bg-teal-300/[0.08]"
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2.5 transition hover:border-accent-border hover:bg-accent-soft"
                 tabIndex={0}
                 role="button"
                 onKeyDown={(e) => {

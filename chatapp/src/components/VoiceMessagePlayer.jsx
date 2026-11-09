@@ -86,7 +86,7 @@ export default function VoiceMessagePlayer({ src, mimeType, duration: expectedDu
       {error ? (
         <div className="flex items-center gap-2 text-sm" role="alert">
           <span className="min-w-0 flex-1 text-rose-300">{error}</span>
-          <button type="button" onClick={retry} aria-label="Retry voice message" title="Retry" className="shrink-0 rounded p-1 hover:text-teal-300">
+          <button type="button" onClick={retry} aria-label="Retry voice message" title="Retry" className="shrink-0 rounded p-1 hover:text-accent-text">
             <FaRedoAlt />
           </button>
         </div>
@@ -98,17 +98,17 @@ export default function VoiceMessagePlayer({ src, mimeType, duration: expectedDu
               onClick={togglePlayback}
               disabled={isLoading && !duration}
               aria-label={isPlaying ? "Pause voice message" : "Play voice message"}
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-teal-500 text-slate-950 disabled:opacity-50"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-accent text-accent-contrast disabled:opacity-50"
             >
               {isLoading ? <span className="text-[10px]">…</span> : isPlaying ? <FaPause /> : <FaPlay />}
             </button>
             <div className="min-w-0 flex-1">
-              <div className="relative flex h-9 items-center rounded focus-within:ring-2 focus-within:ring-teal-400" aria-label="Voice message timeline">
+              <div className="relative flex h-9 items-center rounded focus-within:ring-2 focus-within:ring-accent-border" aria-label="Voice message timeline">
                 <div className="pointer-events-none flex h-8 w-full items-center justify-between gap-[2px] px-1" aria-hidden="true">
                   {WAVEFORM_BARS.map((height, index) => (
                     <span
                       key={index}
-                      className={`w-[3px] shrink-0 rounded-full ${index / WAVEFORM_BARS.length <= progress ? "bg-teal-300" : "bg-current opacity-35"}`}
+                      className={`w-[3px] shrink-0 rounded-full ${index / WAVEFORM_BARS.length <= progress ? "bg-accent" : "bg-current opacity-35"}`}
                       style={{ height: `${height}px` }}
                     />
                   ))}

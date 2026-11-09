@@ -22,6 +22,8 @@ export const showSystemNotification = async ({ title, body, notificationId, targ
       targetType: target?.targetType || "",
       targetId: String(target?.targetId || ""),
       targetName: target?.targetName || "",
+      targetChannelId: String(target?.targetChannelId || ""),
+      targetChannelName: target?.targetChannelName || "",
     });
     return;
   }

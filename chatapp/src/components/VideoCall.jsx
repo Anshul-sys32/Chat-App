@@ -759,7 +759,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             )}
           </>
         ) : (
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-teal-900/60 via-[#102426] to-[#050b0c]" />
+          <div className="call-idle-backdrop absolute inset-0" />
         )}
         {!minimized && <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/55 via-transparent to-black/70" />}
 
@@ -798,7 +798,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             {!incomingOffer && (
               <div className="relative">
                 <button type="button" onClick={() => setShowInviteParticipant((open) => !open)} disabled={!isCallHost || (!peerConnections.current.size && !usingSfu) || callParticipantIds.current.size >= 7} aria-label="Invite participant" aria-expanded={showInviteParticipant} title={callParticipantIds.current.size >= 7 ? "Calls are limited to eight people" : "Invite participant"} className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15 disabled:opacity-40"><FaUserPlus /></button>
-                {showInviteParticipant && <form onSubmit={inviteParticipant} className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-[#071315]/95 p-3 shadow-2xl backdrop-blur"><p className="mb-2 text-xs text-white/70">Invite up to seven guests to this call.</p><div className="flex gap-2"><input value={inviteIdentifier} onChange={(event) => setInviteIdentifier(event.target.value)} placeholder="Username or email" aria-label="Participant username or email" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white" /><button type="submit" disabled={invitingParticipant || !inviteIdentifier.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">{invitingParticipant ? "Inviting…" : "Invite"}</button></div>{remotePeers.length > 0 && <ul className="mt-2 space-y-1">{remotePeers.map((peer) => <li key={peer.userId} className="text-xs text-white/60">{peer.name} connected</li>)}</ul>}</form>}
+                {showInviteParticipant && <form onSubmit={inviteParticipant} className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-[#071315]/95 p-3 shadow-2xl backdrop-blur"><p className="mb-2 text-xs text-white/70">Invite up to seven guests to this call.</p><div className="flex gap-2"><input value={inviteIdentifier} onChange={(event) => setInviteIdentifier(event.target.value)} placeholder="Username or email" aria-label="Participant username or email" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white" /><button type="submit" disabled={invitingParticipant || !inviteIdentifier.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-50">{invitingParticipant ? "Inviting…" : "Invite"}</button></div>{remotePeers.length > 0 && <ul className="mt-2 space-y-1">{remotePeers.map((peer) => <li key={peer.userId} className="text-xs text-white/60">{peer.name} connected</li>)}</ul>}</form>}
               </div>
             )}
             {!incomingOffer && (
@@ -856,14 +856,14 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
         {!minimized && activeCallType === "audio" && !incomingOffer && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
-            <div className="grid w-full max-w-5xl grid-cols-2 gap-3 px-4 min-[900px]:grid-cols-3 xl:grid-cols-4"><div className="flex min-w-0 flex-col items-center gap-2"><div className="grid aspect-square w-full max-w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5">Y</div><span className="max-w-full truncate text-sm text-white/80">You</span></div>{remotePeers.map((remotePeer) => <div key={remotePeer.userId} className="flex min-w-0 flex-col items-center gap-2"><div className="grid aspect-square w-full max-w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light shadow-2xl shadow-teal-950/40 ring-8 ring-white/5">{remotePeer.name.slice(0, 1).toUpperCase()}</div><span className="max-w-full truncate text-sm text-white/80">{remotePeer.name}</span></div>)}</div>
+            <div className="grid w-full max-w-5xl grid-cols-2 gap-3 px-4 min-[900px]:grid-cols-3 xl:grid-cols-4"><div className="flex min-w-0 flex-col items-center gap-2"><div className="accent-shadow grid aspect-square w-full max-w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light ring-8 ring-white/5">Y</div><span className="max-w-full truncate text-sm text-white/80">You</span></div>{remotePeers.map((remotePeer) => <div key={remotePeer.userId} className="flex min-w-0 flex-col items-center gap-2"><div className="accent-shadow grid aspect-square w-full max-w-36 place-items-center rounded-full border border-white/15 bg-white/10 text-4xl font-light ring-8 ring-white/5">{remotePeer.name.slice(0, 1).toUpperCase()}</div><span className="max-w-full truncate text-sm text-white/80">{remotePeer.name}</span></div>)}</div>
             <p className="text-sm text-white/70">Audio call · {remotePeers.length + 1} participants</p>
           </div>
         )}
         {!minimized && incomingOffer && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 px-5 backdrop-blur-sm">
             <div className="w-full max-w-sm rounded-3xl border border-white/15 bg-[#102426]/90 p-7 text-center shadow-2xl">
-              <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-full bg-teal-400/15 text-3xl font-semibold text-teal-100 ring-8 ring-teal-300/5">
+              <div className="mx-auto mb-5 grid h-20 w-20 place-items-center rounded-full bg-accent-soft text-3xl font-semibold text-accent-text ring-8 ring-accent-border">
                 {displayPeerName.slice(0, 1).toUpperCase()}
               </div>
               <p className="text-xl font-semibold">{displayPeerName} is calling</p>

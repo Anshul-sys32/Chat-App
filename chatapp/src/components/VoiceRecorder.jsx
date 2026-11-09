@@ -205,7 +205,7 @@ export default function VoiceRecorder({ onRecorded, onClose, maxDurationSeconds 
               }} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2">
                 <FaPause /> Pause
               </button>
-              <button type="button" onClick={stopRecording} className="inline-flex items-center gap-2 rounded-lg bg-teal-500 px-4 py-2 font-semibold text-slate-950">
+              <button type="button" onClick={stopRecording} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-semibold text-accent-contrast">
                 <FaStop /> Stop
               </button>
             </>
@@ -219,7 +219,7 @@ export default function VoiceRecorder({ onRecorded, onClose, maxDurationSeconds 
               }} className="inline-flex items-center gap-2 rounded-lg border px-4 py-2">
                 <FaPlay /> Resume
               </button>
-              <button type="button" onClick={stopRecording} className="inline-flex items-center gap-2 rounded-lg bg-teal-500 px-4 py-2 font-semibold text-slate-950">
+              <button type="button" onClick={stopRecording} className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-semibold text-accent-contrast">
                 <FaStop /> Stop
               </button>
             </>
@@ -230,7 +230,7 @@ export default function VoiceRecorder({ onRecorded, onClose, maxDurationSeconds 
             </button>
           )}
           {recordingFile && (
-            <button type="button" onClick={confirmRecording} className="rounded-lg bg-teal-500 px-4 py-2 font-semibold text-slate-950">
+            <button type="button" onClick={confirmRecording} className="rounded-lg bg-accent px-4 py-2 font-semibold text-accent-contrast">
               Add recording
             </button>
           )}

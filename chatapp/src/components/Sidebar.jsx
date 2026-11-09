@@ -29,6 +29,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
+  const settingsButtonRef = useRef(null);
   const wasOpen = useRef(isOpen);
 
   useEffect(() => {
@@ -65,7 +66,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
       case 'meetings':
         return <Meetings />;
       case 'settings':
-        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} accent={accent} onChangeAccent={onChangeAccent} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
+        return <SettingsPanel user={user} theme={theme} onToggleTheme={onToggleTheme} accent={accent} onChangeAccent={onChangeAccent} restoreFocusRef={settingsButtonRef} onOpenProfile={() => setIsProfileOpen(true)} onCloseSettings={() => setActiveTab('localUsers')} selectedChat={selectedChat} conversationMuted={conversationMuted} conversationMuteLoading={conversationMuteLoading} conversationMuteSaving={conversationMuteSaving} conversationMuteError={conversationMuteError} onToggleConversationMute={onToggleConversationMute} />;
       default:
         return null;
     }
@@ -126,7 +127,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
               ref={closeButtonRef}
               type="button"
               onClick={onCloseSidebar}
-              className="theme-text hover:text-teal-500"
+              className="theme-text hover:text-accent-text"
               aria-label="Close navigation menu"
               title="Close Menu"
             >
@@ -168,7 +169,11 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
             <IconButton
               icon={<FaCog />}
               label="Settings"
-              onClick={() => setActiveTab('settings')}
+              buttonRef={settingsButtonRef}
+              onClick={(event) => {
+                settingsButtonRef.current = event.currentTarget;
+                setActiveTab('settings');
+              }}
               active={activeTab === 'settings'}
             />
             {user?.role === 'admin' && <IconButton
@@ -196,7 +201,7 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
               placeholder="Search..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="glass-input theme-text mb-4 w-full rounded-lg p-2.5 placeholder:opacity-60 focus:outline-none focus:ring-2 focus:ring-teal-300/60"
+              className="glass-input theme-text mb-4 w-full rounded-lg p-2.5 placeholder:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent-border"
             />}
             {renderContent()}
           </div>
@@ -241,9 +246,10 @@ const Sidebar = ({ isOpen, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAd
   );
 };
 
-const IconButton = ({ icon, label, onClick, active }) => (
+const IconButton = ({ icon, label, onClick, active, buttonRef }) => (
   <div className="group relative z-10 hover:z-[100]">
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       aria-label={label}

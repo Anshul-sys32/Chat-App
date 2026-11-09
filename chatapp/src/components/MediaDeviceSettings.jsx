@@ -180,7 +180,7 @@ export default function MediaDeviceSettings({ userId }) {
           ))}
         </select>
       </label>
-      <button type="button" onClick={() => startTest("audio")} disabled={testMode === "audio-requesting"} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:border-teal-300 disabled:opacity-50">
+      <button type="button" onClick={() => startTest("audio")} disabled={testMode === "audio-requesting"} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:border-accent-border disabled:opacity-50">
         {testMode === "audio" ? <FaStop /> : <FaMicrophone />}
         {testMode === "audio" ? "Stop microphone test" : testMode === "audio-requesting" ? "Requesting microphone…" : "Test microphone"}
       </button>
@@ -188,7 +188,7 @@ export default function MediaDeviceSettings({ userId }) {
         <div>
           <label htmlFor="microphone-level" className="mb-1 block text-xs text-white/65">Microphone level</label>
           {audioContextRef.current
-            ? <progress id="microphone-level" max="100" value={microphoneLevel} className="h-2 w-full accent-teal-400" />
+            ? <progress id="microphone-level" max="100" value={microphoneLevel} className="h-2 w-full accent-accent" />
             : <p role="status" className="text-xs text-white/60">Level metering is unavailable on this device.</p>}
         </div>
       )}
@@ -201,7 +201,7 @@ export default function MediaDeviceSettings({ userId }) {
           ))}
         </select>
       </label>
-      <button type="button" onClick={() => startTest("video")} disabled={testMode === "video-requesting"} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:border-teal-300 disabled:opacity-50">
+      <button type="button" onClick={() => startTest("video")} disabled={testMode === "video-requesting"} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:border-accent-border disabled:opacity-50">
         {testMode === "video" ? <FaStop /> : <FaCamera />}
         {testMode === "video" ? "Stop camera preview" : testMode === "video-requesting" ? "Requesting camera…" : "Preview camera"}
       </button>
@@ -216,7 +216,7 @@ export default function MediaDeviceSettings({ userId }) {
         </select>
       </label>
       <p className="text-xs text-white/60">Speaker selection is applied when a call starts. Device availability varies by browser and Android version.</p>
-      <button type="button" onClick={refreshDevices} className="text-xs text-teal-300 hover:underline">Refresh devices</button>
+      <button type="button" onClick={refreshDevices} className="text-xs text-accent-text hover:underline">Refresh devices</button>
     </section>
   );
 }

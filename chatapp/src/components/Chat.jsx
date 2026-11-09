@@ -1019,7 +1019,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               title="Start Audio Call"
               disabled={!selectedChat || selectedChat.type === 'group'}
               aria-label="Start audio call"
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-30"
+              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30"
             >
               <FaPhone />
             </button>
@@ -1028,7 +1028,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               title="Start Video Call"
               disabled={!selectedChat || selectedChat.type === 'group'}
               aria-label="Start video call"
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-30"
+              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30"
             >
               <FaVideo />
             </button>
@@ -1049,7 +1049,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         >
           <div className="chat-content-panel glass-panel mx-auto flex min-h-full w-full max-w-5xl flex-col space-y-3 rounded-2xl p-3 sm:p-5">
             {!selectedChat && <div className="flex h-full min-h-[55vh] flex-col items-center justify-center text-center">
-              <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-teal-200/20 bg-teal-100/10 text-teal-100"><FaUsers size={25} /></div>
+              <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-accent-border bg-accent-soft text-accent-text"><FaUsers size={25} /></div>
               <h2 className="text-xl font-semibold">Your conversations</h2>
               <p className="theme-muted mt-1 text-sm">Choose a person or group from the sidebar to start chatting.</p>
             </div>}
@@ -1143,7 +1143,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               >
                 <div
                   data-message-id={m._id}
-                  className={`relative max-w-[min(82%,34rem)] rounded-2xl px-4 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
+                  className={`relative max-w-[min(82%,34rem)] rounded-2xl pl-4 pr-10 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
                     ? 'chat-bubble-own rounded-br-sm'
                     : 'chat-bubble-peer rounded-bl-sm'
                     }`}
@@ -1197,9 +1197,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     document.body,
                   )}
                   {selectedMessageIds.includes(String(m._id)) && (
-                    <span className="absolute -left-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-teal-400 text-[10px] font-bold text-slate-950">✓</span>
+                    <span className="absolute -left-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-accent text-[10px] font-bold text-accent-contrast">✓</span>
                   )}
-                  {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id)) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) ? 'text-teal-100' : 'text-teal-800'}`}>
+                  {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id)) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) ? 'text-accent-text' : 'text-accent-deep'}`}>
                     {String(m.sender) === String(user?._id) ? 'You' : m.senderName || selectedChat.username}
                   </p>}
                   {m.content && (
@@ -1220,7 +1220,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   {m.stickerId && !m.isDeleted && (
                     <a
                       hidden={Boolean(getStickerUrl(m))}
-                      className="mt-1 block text-xs text-teal-200 underline"
+                      className="mt-1 block text-xs text-accent-text underline"
                     >
                       Sticker unavailable.
                     </a>
@@ -1232,9 +1232,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       return (
                         <div
                           onClick={() => jumpToMessage(quoted)}
-                          className="flex min-w-0 max-w-[52%] cursor-pointer items-center gap-2 rounded-md border border-teal-200/40 bg-slate-950/80 px-2 py-1.5 text-left text-xs text-teal-50 shadow-inner"
+                          className="flex min-w-0 max-w-[52%] cursor-pointer items-center gap-2 rounded-md border border-accent-border bg-slate-950/80 px-2 py-1.5 text-left text-xs text-accent-text shadow-inner"
                         >
-                          <FaReply className="shrink-0 text-teal-300" />
+                          <FaReply className="shrink-0 text-accent-text" />
                           <span className="min-w-0">
                             <span className="block truncate font-semibold">Replying to {quoted?.senderName || m.replySenderName || (String(quoted?.sender) === String(user?._id) ? 'You' : 'message')}</span>
                             <span className="block truncate">{quoted?.content || m.replyContent || 'Attachment'}</span>
@@ -1291,7 +1291,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   )}
                     </div>
                   )}
-                  <span className={`mt-1 block text-right text-[10px] ${String(m.sender) === String(user?._id) ? 'text-teal-100/70' : 'text-gray-500'}`}>
+                  <span className="chat-message-time mt-1 block text-right text-[10px]">
                     {new Date(m.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
@@ -1314,7 +1314,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </p>
           )}
           {pendingForward && (
-            <p className="mx-auto mb-2 max-w-4xl text-xs text-teal-200">
+            <p className="mx-auto mb-2 max-w-4xl text-xs text-accent-text">
               Choose a chat from the sidebar to forward this message.
             </p>
           )}
@@ -1334,7 +1334,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 ref={stickerPanel.triggerRef}
                 onClick={() => setShowStickers((current) => !current)}
                 disabled={!selectedChat || isSending}
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-50"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-50"
                 title="Stickers"
                 aria-label="Open stickers"
               >
@@ -1343,13 +1343,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <FloatingPanel open={showStickers} panelRef={stickerPanel.panelRef} style={stickerPanel.style} className="w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-white/15 bg-slate-950 p-3 shadow-xl">
                   <div className="mb-2 flex flex-wrap gap-1 border-b border-white/10 pb-2">
                     {['all', 'favorites', 'recent', ...stickerCategories].map((category) => (
-                      <button type="button" key={category} onClick={() => setStickerCategory(category)} className={`rounded px-2 py-1 text-[11px] capitalize ${stickerCategory === category ? 'bg-teal-500 text-slate-950' : 'text-white/70 hover:bg-white/10'}`}>
+                      <button type="button" key={category} onClick={() => setStickerCategory(category)} className={`rounded px-2 py-1 text-[11px] capitalize ${stickerCategory === category ? 'bg-accent text-accent-contrast' : 'text-white/70 hover:bg-white/10'}`}>
                         {category === 'all' ? 'All' : category}
                       </button>
                     ))}
                   </div>
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <button type="button" onClick={() => setShowAddSticker((current) => !current)} className="rounded bg-teal-500 px-2 py-1 text-[11px] font-semibold text-slate-950">
+                    <button type="button" onClick={() => setShowAddSticker((current) => !current)} className="rounded bg-accent px-2 py-1 text-[11px] font-semibold text-accent-contrast">
                       {showAddSticker ? 'Close add' : 'Add sticker'}
                     </button>
                     <span className="text-[11px] text-white/50">Images and GIFs</span>
@@ -1366,7 +1366,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       </div>
                       <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="w-full text-[11px] text-white/70" />
                       {stickerError && <p className="text-xs text-rose-300">{stickerError}</p>}
-                      <button type="button" onClick={addSticker} className="rounded bg-teal-500 px-2 py-1 text-[11px] font-semibold text-slate-950">Add</button>
+                      <button type="button" onClick={addSticker} className="rounded bg-accent px-2 py-1 text-[11px] font-semibold text-accent-contrast">Add</button>
                     </div>
                   )}
                   {displayedStickers.length ? (
@@ -1398,7 +1398,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               type="button"
               onClick={() => setShowVoiceRecorder(true)}
               disabled={!selectedChat || isSending}
-              className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-teal-500 disabled:opacity-50"
+              className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-50"
               title="Record a voice message"
               aria-label="Record a voice message"
             >
@@ -1417,13 +1417,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               aria-label="Attach files"
               onClick={() => fileInputRef.current?.click()}
               disabled={!selectedChat || isSending}
-              className="chat-action theme-text inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-teal-500 disabled:opacity-50"
+              className="chat-action theme-text inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-accent-text disabled:opacity-50"
             >
               <FaPaperclip />
               <span>Attach</span>
             </button>
             <button
-              className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"
               disabled={!selectedChat || (!msg.trim() && !selectedFiles.length && !voiceFile) || !socketConnected || isSending}
             >
@@ -1431,8 +1431,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </button>
           </form>
           {replyTo && (
-            <div className="mx-auto mt-2 flex max-w-4xl items-start gap-2 rounded-lg border border-teal-300/30 px-3 py-2 text-xs sm:items-center" role="status" aria-label="Reply preview">
-              <FaReply className="mt-0.5 shrink-0 text-teal-300 sm:mt-0" />
+            <div className="mx-auto mt-2 flex max-w-4xl items-start gap-2 rounded-lg border border-accent-border px-3 py-2 text-xs sm:items-center" role="status" aria-label="Reply preview">
+              <FaReply className="mt-0.5 shrink-0 text-accent-text sm:mt-0" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">Replying to {replyTo.senderName || (String(replyTo.sender) === String(user?._id) ? 'yourself' : 'message')}</span>
                 <span className="block max-h-10 overflow-hidden break-words leading-5 sm:max-h-5 sm:truncate">{replyTo.content || 'Attachment'}</span>
@@ -1449,7 +1449,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </div>
           )}
           {voiceFile && (
-            <div className="mx-auto mt-2 flex max-w-4xl items-center gap-2 rounded-lg border border-teal-300/30 px-3 py-2">
+            <div className="mx-auto mt-2 flex max-w-4xl items-center gap-2 rounded-lg border border-accent-border px-3 py-2">
               <span className="shrink-0 text-xs font-medium">Voice preview</span>
               {voicePreviewUrl && <audio controls preload="metadata" src={voicePreviewUrl} className="min-w-0 flex-1" />}
               <button

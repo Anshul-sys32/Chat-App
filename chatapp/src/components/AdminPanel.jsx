@@ -294,7 +294,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                 onChange={(event) => setNotificationTitle(event.target.value)}
                 maxLength={120}
                 required
-                className="w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+                className="w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
               />
             </label>
             <label className="block text-sm">
@@ -305,7 +305,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                 maxLength={2000}
                 rows={3}
                 required
-                className="w-full resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+                className="w-full resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
               />
             </label>
             <label className="block text-sm">
@@ -326,7 +326,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                   value={notificationRecipientQuery}
                   onChange={(event) => setNotificationRecipientQuery(event.target.value)}
                   placeholder="alice, bob, charlie"
-                  className="mb-2 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+                  className="mb-2 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
                 />
                 <select
                   multiple
@@ -347,7 +347,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
             <button
               type="submit"
               disabled={sendingNotification || (notificationAudience === "selected" && !notificationRecipients.length)}
-              className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sendingNotification ? "Sending…" : "Send notification"}
             </button>
@@ -365,12 +365,12 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               required
               placeholder="Write a quote to show on the sign-in page"
               aria-label="New login quote"
-              className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-teal-300/60"
+              className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
             />
             <button
               type="submit"
               disabled={!newQuote.trim()}
-              className="self-end rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27] transition hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-50"
+              className="self-end rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               Add quote
             </button>
@@ -386,7 +386,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                     maxLength={500}
                     rows={2}
                     aria-label="Edit login quote"
-                    className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none focus:border-teal-300/60"
+                    className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none focus:border-accent"
                   />
                 ) : (
                   <p className="min-w-0 flex-1 text-sm text-white/80">“{quote.quote}”</p>
@@ -394,7 +394,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                 <div className="flex shrink-0 gap-2">
                   {String(editingQuoteId) === String(quote._id) ? (
                     <>
-                      <button type="button" onClick={() => saveLoginQuote(quote._id)} disabled={!editingQuoteText.trim()} className="rounded-md border border-teal-200/20 px-3 py-1.5 text-xs text-teal-100 hover:bg-teal-300/10 disabled:opacity-50">Save</button>
+                      <button type="button" onClick={() => saveLoginQuote(quote._id)} disabled={!editingQuoteText.trim()} className="rounded-md border border-accent-border px-3 py-1.5 text-xs text-accent-text hover:bg-accent-soft disabled:opacity-50">Save</button>
                       <button type="button" onClick={() => setEditingQuoteId(null)} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Cancel</button>
                     </>
                   ) : (
@@ -416,7 +416,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               {stickerCategories.map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
             <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="min-w-0 text-sm text-white/70" />
-            <button type="submit" className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-[#062a27]">Add sticker</button>
+            <button type="submit" className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast">Add sticker</button>
           </form>
           <div className="mt-3 flex gap-2">
             <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
@@ -486,7 +486,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                   <button
                     type="button"
                     onClick={() => setEditingUser(candidate)}
-                    className="inline-flex items-center justify-center gap-2 rounded-md border border-teal-200/20 px-3 py-2 text-sm text-teal-100 transition hover:bg-teal-300/10"
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-accent-border px-3 py-2 text-sm text-accent-text transition hover:bg-accent-soft"
                     title={`Edit ${candidate.username}'s profile or password`}
                   >
                     <FaEdit size={12} /> Edit

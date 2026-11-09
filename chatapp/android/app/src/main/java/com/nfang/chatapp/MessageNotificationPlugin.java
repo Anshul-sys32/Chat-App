@@ -70,6 +70,9 @@ public class MessageNotificationPlugin extends Plugin {
             launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             launchIntent.putExtra("chatTargetType", call.getString("targetType", ""));
             launchIntent.putExtra("chatTargetId", call.getString("targetId", ""));
+            launchIntent.putExtra("chatTargetName", call.getString("targetName", ""));
+            launchIntent.putExtra("chatTargetChannelId", call.getString("targetChannelId", ""));
+            launchIntent.putExtra("chatTargetChannelName", call.getString("targetChannelName", ""));
         }
         PendingIntent contentIntent = launchIntent == null ? null : PendingIntent.getActivity(
             context,

@@ -14,7 +14,7 @@ export default function Avatar({ src, name = "", className = "", group = false }
   }, [imageUrl]);
 
   return (
-    <span className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-teal-500/15 text-teal-100 ${className}`}>
+    <span className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-accent-soft text-accent-text ${className}`}>
       {imageUrl && !imageFailed ? (
         <img
           src={imageUrl}
