@@ -18,6 +18,7 @@ const groupLifecycleMigration = require("../migrations/202611010005_group_lifecy
 const groupInvitationsMigration = require("../migrations/202611010006_group_invitations");
 const groupInvitationKeyMigration = require("../migrations/202611010007_group_invitation_pending_key");
 const scheduledMeetingsMigration = require("../migrations/202611010008_scheduled_meetings");
+const communityPostsMigration = require("../migrations/202611010009_community_posts");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
@@ -27,6 +28,7 @@ const {
 } = require("../services/callRoomPolicy");
 const { sendMeetingReminders } = require("../services/meetingReminders");
 const { canAccessGroup, validateGroupMessageTarget } = require("../services/groupAccess");
+const { validateCommunityPost } = require("../services/communityPosts");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
 
 const createResponse = () => ({
@@ -143,6 +145,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010006_group_invitations",
     "202611010007_group_invitation_pending_key",
     "202611010008_scheduled_meetings",
+    "202611010009_community_posts",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -416,6 +419,39 @@ test("community migration adds types, channels, nullable message scope, and roll
   assert.ok(statements.some((sql) => sql.includes("FOREIGN KEY (channel_id)")));
   await communityMigration.down(connection);
   assert.ok(statements.some((sql) => sql.includes("DROP TABLE IF EXISTS group_channels")));
+});
+
+test("community posts migration adds structured posts, engagement tables, and four channel defaults", async () => {
+  const statements = [];
+  const connection = {
+    query: async (sql) => statements.push(sql),
+    execute: async (sql, values) => {
+      statements.push({ sql, values });
+      return [[{ name: "id" }], []];
+    },
+  };
+  await communityPostsMigration.up(connection);
+  assert.ok(statements.some((sql) => typeof sql === "string" && sql.includes("community_poll_votes")));
+  assert.ok(statements.some((sql) => typeof sql === "string" && sql.includes("community_event_rsvps")));
+  const seeds = statements.filter((entry) => entry && typeof entry === "object" && entry.sql.includes("INSERT IGNORE INTO group_channels"));
+  assert.deepEqual(seeds.map(({ values }) => values[0]), ["general", "announcements", "development", "help"]);
+  await communityPostsMigration.down(connection);
+  assert.ok(statements.some((sql) => typeof sql === "string" && sql.includes("DROP TABLE IF EXISTS community_event_rsvps")));
+});
+
+test("community post validation accepts bounded polls and rejects malformed options", () => {
+  const poll = validateCommunityPost({
+    messageType: "poll",
+    structuredData: { question: "Preferred runtime?", options: ["Node", "Deno"], multipleChoice: false },
+  }, true);
+  assert.equal(poll.messageType, "poll");
+  assert.deepEqual(poll.structuredData.options, ["Node", "Deno"]);
+  assert.match(validateCommunityPost({
+    messageType: "poll",
+    structuredData: { question: "Pick", options: ["same", "same"] },
+  }, true).error, /distinct options/);
+  assert.match(validateCommunityPost({ messageType: "event", structuredData: {} }, true).error, /valid start date/);
+  assert.match(validateCommunityPost({ messageType: "question", content: "Help" }, false).error, /only available in communities/);
 });
 
 test("admins cannot access a missing group record", () => {

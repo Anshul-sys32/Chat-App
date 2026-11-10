@@ -10,7 +10,7 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? "Unknown time" : date.toLocaleString();
 };
 
-export default function Meetings() {
+export default function Meetings({ search = '' }) {
   const [meetings, setMeetings] = useState([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -67,6 +67,10 @@ export default function Meetings() {
     }
   };
 
+  const visibleMeetings = meetings.filter((meeting) =>
+    `${meeting.title} ${meeting.description || ''} ${meeting.status} ${meeting.invitationStatus || ''}`.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
     <section className="space-y-5 text-white" aria-labelledby="meetings-title">
       <header><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent-text">Calendar</p><h2 id="meetings-title" className="mt-1 text-xl font-semibold">Scheduled meetings</h2><p className="mt-1 text-sm text-white/55">Plan a time, invite people, and get a reminder 15 minutes before it starts.</p></header>
@@ -80,7 +84,7 @@ export default function Meetings() {
         <label className="block text-sm"><span className="mb-1 block text-white/65">Invitees</span><textarea value={invitees} onChange={(event) => setInvitees(event.target.value)} rows={2} placeholder="Enter usernames or emails, separated by commas" className="w-full resize-y rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-white outline-none placeholder:text-white/35 focus:border-accent" /><span className="mt-1 block text-xs text-white/45">Invitations arrive in Alerts.</span></label>
         <button type="submit" disabled={saving} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast disabled:opacity-50">{saving ? "Scheduling…" : "Schedule meeting"}</button>
       </form>
-      <div className="space-y-2"><h3 className="text-sm font-semibold">Your meetings</h3>{meetings.length ? meetings.map((meeting) => <article key={meeting._id} className="flex items-start gap-3 rounded-xl border border-white/10 p-3"><FaCalendarAlt className="mt-1 shrink-0 text-accent-text" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-semibold">{meeting.title}</p><p className="mt-1 text-xs text-white/60">{formatDate(meeting.scheduledAt)}</p>{meeting.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-white/70">{meeting.description}</p>}<p className="mt-2 text-xs text-white/45">{meeting.isOrganizer ? "Organizer" : `Invitation ${meeting.invitationStatus || "pending"}`} · {meeting.status}</p></div>{meeting.isOrganizer && meeting.status === "scheduled" && <button type="button" onClick={() => cancelMeeting(meeting)} className="rounded p-2 text-white/50 hover:bg-rose-500/10 hover:text-rose-200" aria-label={`Cancel ${meeting.title}`} title="Cancel meeting"><FaTimes size={12} /></button>}</article>) : <p className="rounded-lg border border-dashed border-white/10 p-4 text-center text-sm text-white/45">No meetings scheduled.</p>}</div>
+      <div className="space-y-2"><h3 className="text-sm font-semibold">Your meetings</h3>{visibleMeetings.length ? visibleMeetings.map((meeting) => <article key={meeting._id} className="flex items-start gap-3 rounded-xl border border-white/10 p-3"><FaCalendarAlt className="mt-1 shrink-0 text-accent-text" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-semibold">{meeting.title}</p><p className="mt-1 text-xs text-white/60">{formatDate(meeting.scheduledAt)}</p>{meeting.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-white/70">{meeting.description}</p>}<p className="mt-2 text-xs text-white/45">{meeting.isOrganizer ? "Organizer" : `Invitation ${meeting.invitationStatus || "pending"}`} · {meeting.status}</p></div>{meeting.isOrganizer && meeting.status === "scheduled" && <button type="button" onClick={() => cancelMeeting(meeting)} className="rounded p-2 text-white/50 hover:bg-rose-500/10 hover:text-rose-200" aria-label={`Cancel ${meeting.title}`} title="Cancel meeting"><FaTimes size={12} /></button>}</article>) : <p className="rounded-lg border border-dashed border-white/10 p-4 text-center text-sm text-white/45">{search ? 'No matching meetings.' : 'No meetings scheduled.'}</p>}</div>
     </section>
   );
 }

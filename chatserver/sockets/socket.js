@@ -7,6 +7,7 @@ const { notifyDirectMessage, notifyGroupMessage } = require("../services/realtim
 const { canNegotiateCallRoomOffer, canInviteToCallRoom, shouldUpgradeCallRoomToSfu } = require("../services/callRoomPolicy");
 const { activeCallRooms } = require("../services/callRoomRegistry");
 const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
+const { loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 const {
@@ -229,8 +230,10 @@ const initSocket = (httpServer) => {
       const attachments = validateAttachments(messagePayload.attachments, socket.userId);
       const id = Number(groupId);
       const requestedChannelId = messagePayload.channelId === undefined ? null : Number(messagePayload.channelId);
+      const isStructuredPost = ["poll", "event"].includes(messagePayload.messageType);
       if (!Number.isSafeInteger(id) || id < 1 || attachments === null
-        || (typeof content !== "string" || !content.trim()) && !attachments.length && !(Number.isSafeInteger(stickerId) && stickerId > 0)) {
+        || (typeof content !== "string" || !content.trim()) && !attachments.length
+          && !(Number.isSafeInteger(stickerId) && stickerId > 0) && !isStructuredPost) {
         return socket.emit("message-error", { message: "A group and message are required." });
       }
       try {
@@ -238,6 +241,8 @@ const initSocket = (httpServer) => {
         if (!canAccessGroup(group, socket.userRole)) {
           return socket.emit("message-error", { message: "You are no longer a member of this group." });
         }
+        const post = validateCommunityPost(messagePayload, group.groupType === "community");
+        if (post.error) return socket.emit("message-error", { message: post.error });
         let channelId = null;
         let channel = null;
         if (group.groupType === "community") {
@@ -269,13 +274,15 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "That sticker is not available." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, channel_id, sender_id, content, attachments, reply_to_id, sticker_id, sticker_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [id, channelId, Number(socket.userId), typeof content === "string" ? content.trim() : "", JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null]
+          "INSERT INTO group_messages (group_id, channel_id, sender_id, content, attachments, reply_to_id, sticker_id, sticker_url, message_type, structured_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [id, channelId, Number(socket.userId), post.content, JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null, post.messageType, post.structuredData ? JSON.stringify(post.structuredData) : null]
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.channel_id AS channelId,
                   channel.name AS channelName, gm.sender_id AS sender,
                   u.username AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
+                  gm.message_type AS messageType, gm.structured_data AS structuredData,
+                  gm.accepted_answer_id AS acceptedAnswerId,
                   gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
                   reply_user.username AS replySenderName,
                   CASE WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
@@ -289,12 +296,13 @@ const initSocket = (httpServer) => {
            WHERE gm.id = ?`,
           [result.insertId]
         );
-        notifyGroupMessage(io, rows[0]).catch((error) => {
+        const [createdMessage] = await loadCommunityEngagement(rows, socket.userId, pool.execute.bind(pool));
+        notifyGroupMessage(io, createdMessage).catch((error) => {
           console.error("Group message system notification error:", error.message);
         });
         const roomName = channelId ? `group:${id}:channel:${channelId}` : `group:${id}`;
-        io.to(roomName).emit("group-message", rows[0]);
-        socket.emit("group-message", rows[0]);
+        io.to(roomName).emit("group-message", createdMessage);
+        socket.emit("group-message", createdMessage);
       } catch (error) {
         console.error("Group message DB error:", error.message);
         socket.emit("message-error", { message: "Group message could not be saved." });

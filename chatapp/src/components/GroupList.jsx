@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { createPortal } from 'react-dom';
-import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaHashtag, FaPlus, FaTimes, FaUserMinus, FaUserPlus, FaUsers } from 'react-icons/fa';
+import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaHashtag, FaLock, FaPlus, FaTimes, FaUserMinus, FaUserPlus, FaUsers } from 'react-icons/fa';
 import Socket from '../Socket';
 import Avatar from './Avatar';
 
@@ -400,7 +400,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
               <div className="border-t border-white/10 px-2.5 py-2.5">
                 <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{channels.length}</span></div>
                 {channels.length > 0
-                  ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-accent-soft hover:text-accent-text"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span></button></li>)}</ul>
+                  ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" title={channel.postingMode === 'admins' ? `${channel.name}: leaders can post` : channel.name} onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name, channelPostingMode: channel.postingMode })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-accent-soft hover:text-accent-text"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span>{channel.postingMode === 'admins' && <FaLock className="ml-auto shrink-0 text-[9px] text-amber-200/70" aria-label="Leaders only" />}</button></li>)}</ul>
                   : <p className="text-xs text-white/45">No channels yet.</p>}
               </div>
             )}
@@ -449,6 +449,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
                               type: 'group',
                               channelId: channel._id,
                               channelName: channel.name,
+                              channelPostingMode: channel.postingMode,
                             })}
                             className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs hover:text-accent-text"
                             title={`Open ${channel.name}`}

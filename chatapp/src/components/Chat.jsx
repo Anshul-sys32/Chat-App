@@ -11,6 +11,8 @@ import NotificationCenter from './NotificationCenter';
 import VoiceRecorder from './VoiceRecorder';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
 import Avatar from './Avatar';
+import CommunityPostCard from './CommunityPostCard';
+import MarkdownMessage from './MarkdownMessage';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 import FloatingPanel from './FloatingPanel';
 import useFloatingPanel from '../useFloatingPanel';
@@ -62,6 +64,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const fileInputRef = React.useRef(null);
   const [messages, setMessages] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDesktopPanelOpen, setIsDesktopPanelOpen] = useState(true);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [socketConnected, setSocketConnected] = useState(Socket.connected);
   const [callType, setCallType] = useState('video');
@@ -79,6 +82,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const footerRef = React.useRef(null);
   const [footerHeight, setFooterHeight] = useState(0);
   const [replyTo, setReplyTo] = useState(null);
+  const [activeThread, setActiveThread] = useState(null);
+  const [communityComposerType, setCommunityComposerType] = useState('message');
+  const [pollDraft, setPollDraft] = useState({ question: '', options: ['', ''], multipleChoice: false });
+  const [eventDraft, setEventDraft] = useState({ title: '', description: '', location: '', startsAt: '' });
   const [openMessageMenu, setOpenMessageMenu] = useState(null);
   const messageMenuRef = React.useRef(null);
   const messageMenuTriggerRef = React.useRef(null);
@@ -219,6 +226,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setIsSidebarOpen(false);
     setSelectedFiles([]);
     setReplyTo(null);
+    setActiveThread(null);
+    setCommunityComposerType('message');
     setOpenMessageMenu(null);
     setSelectedMessageIds([]);
     setIsSelectionMode(false);
@@ -344,6 +353,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         ? previous
         : [...previous, data]);
     };
+    const handleGroupEngagement = (data) => {
+      if (selectedChatRef.current?.type !== 'group'
+        || String(data.groupId) !== String(selectedChatRef.current?._id)
+        || String(data.channelId || '') !== String(selectedChatRef.current?.channelId || '')) return;
+      setMessages((previous) => previous.map((message) => String(message._id) === String(data._id)
+        ? { ...message, ...(data.pollResults ? { pollResults: data.pollResults } : {}), ...(data.eventResults ? { eventResults: data.eventResults } : {}) }
+        : message));
+    };
     const handleMessageUpdated = (data) => {
       if (data.groupId) {
         if (selectedChatRef.current?.type !== 'group'
@@ -402,6 +419,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('message-sent', handleSent);
     Socket.on('message-error', handleMessageError);
     Socket.on('group-message', handleGroupMessage);
+    Socket.on('group-message-engagement', handleGroupEngagement);
     Socket.on('message-updated', handleMessageUpdated);
     Socket.on('group-message-updated', handleMessageUpdated);
     Socket.on('message-hidden-for-user', handleMessageHiddenForUser);
@@ -416,6 +434,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('message-sent', handleSent);
       Socket.off('message-error', handleMessageError);
       Socket.off('group-message', handleGroupMessage);
+      Socket.off('group-message-engagement', handleGroupEngagement);
       Socket.off('message-updated', handleMessageUpdated);
       Socket.off('group-message-updated', handleMessageUpdated);
       Socket.off('message-hidden-for-user', handleMessageHiddenForUser);
@@ -678,7 +697,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
   const sendMessage = async (event) => {
     event.preventDefault();
-    if ((!msg.trim() && !selectedFiles.length && !voiceFile) || !selectedChat?._id || isSending) return;
+    const isCommunity = selectedChat?.type === 'group' && selectedChat.groupType === 'community';
+    const composerType = isCommunity ? communityComposerType : 'message';
+    const isStructured = ['poll', 'event'].includes(composerType);
+    const hasContent = composerType === 'poll'
+      ? pollDraft.question.trim() && pollDraft.options.filter((option) => option.trim()).length >= 2
+      : composerType === 'event'
+        ? eventDraft.title.trim() && eventDraft.startsAt
+        : msg.trim();
+    if ((!hasContent && !selectedFiles.length && !voiceFile) || !selectedChat?._id || isSending || !canPostToCommunityChannel) return;
+    if (isStructured && (selectedFiles.length || voiceFile)) return;
     if (!Socket.connected) {
       setSocketConnected(false);
       return;
@@ -712,9 +740,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         attachments = [...attachments, ...data];
       }
       const payload = {
-        content: msg.trim(),
+        content: composerType === 'poll'
+          ? pollDraft.question.trim()
+          : composerType === 'event'
+            ? eventDraft.title.trim()
+            : msg.trim(),
         ...(replyTo?._id ? { replyToId: replyTo._id } : {}),
         ...(attachments.length ? { attachments } : {}),
+        ...(isCommunity ? { messageType: composerType } : {}),
+        ...(composerType === 'poll' ? {
+          structuredData: {
+            question: pollDraft.question.trim(),
+            options: pollDraft.options.map((option) => option.trim()).filter(Boolean),
+            multipleChoice: pollDraft.multipleChoice,
+          },
+        } : {}),
+        ...(composerType === 'event' ? {
+          structuredData: { ...eventDraft, startsAt: new Date(eventDraft.startsAt).toISOString() },
+        } : {}),
       };
 
       if (chat.type === 'group') {
@@ -730,10 +773,53 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       setSelectedFiles([]);
       setVoiceFile(null);
       setReplyTo(null);
+      if (composerType === 'poll') setPollDraft({ question: '', options: ['', ''], multipleChoice: false });
+      if (composerType === 'event') setEventDraft({ title: '', description: '', location: '', startsAt: '' });
     } catch (error) {
       window.alert(error.response?.data?.message || 'Could not upload the selected files.');
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const updateCommunityEngagement = async (message, action, payload) => {
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group' || chat.groupType !== 'community') return;
+    try {
+      const request = action === 'event-rsvp' ? axios.put : axios.post;
+      const { data } = await request(
+        `${API_URL}/api/groups/${chat._id}/messages/${message._id}/${action}`,
+        payload,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, withCredentials: true }
+      );
+      setMessages((previous) => previous.map((item) => String(item._id) === String(message._id)
+        ? { ...item, ...data }
+        : item));
+    } catch (error) {
+      window.alert(error.response?.data?.message || 'Could not update this community post.');
+    }
+  };
+
+  const voteInPoll = (message, optionIndexes) => updateCommunityEngagement(message, 'poll-votes', { optionIndexes });
+  const respondToEvent = (message, response) => updateCommunityEngagement(message, 'event-rsvp', { response });
+
+  const setAcceptedAnswer = async (question, answerId) => {
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group') return;
+    try {
+      const { data } = await axios.patch(
+        `${API_URL}/api/groups/${chat._id}/messages/${question._id}/accepted-answer`,
+        { answerId },
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, withCredentials: true }
+      );
+      setMessages((previous) => previous.map((item) => String(item._id) === String(question._id)
+        ? { ...item, ...data }
+        : item));
+      setActiveThread((current) => current && String(current._id) === String(question._id)
+        ? { ...current, ...data }
+        : current);
+    } catch (error) {
+      window.alert(error.response?.data?.message || 'Could not mark that answer.');
     }
   };
 
@@ -926,10 +1012,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     cancelSelection();
   };
 
+  const isCommunityChat = selectedChat?.type === 'group' && selectedChat.groupType === 'community';
+  const isStructuredComposer = isCommunityChat && ['poll', 'event'].includes(communityComposerType);
+  const canPostToCommunityChannel = !isCommunityChat || selectedChat.channelPostingMode !== 'admins'
+    || selectedChat.role === 'admin' || user?.role === 'admin';
+  const composerCanSend = isCommunityChat
+    ? communityComposerType === 'poll'
+      ? Boolean(pollDraft.question.trim() && pollDraft.options.filter((option) => option.trim()).length >= 2)
+      : communityComposerType === 'event'
+        ? Boolean(eventDraft.title.trim() && eventDraft.startsAt)
+        : Boolean(msg.trim())
+    : Boolean(msg.trim());
+
   return (
     <div style={{ height: 'var(--app-height, 100dvh)', width: 'var(--app-width, 100vw)' }} className="theme-page flex h-screen w-screen overflow-hidden">
       <Sidebar
         isOpen={isSidebarOpen}
+        isDesktopPanelOpen={isDesktopPanelOpen}
+        onToggleDesktopPanel={() => setIsDesktopPanelOpen((open) => !open)}
         toggleSidebar={toggleSidebar}
         onCloseSidebar={closeSidebar}
         onSelectChat={onSelectChat}
@@ -950,7 +1050,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
 
       <div
-        className={`relative ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out sm:ml-16 ${isSidebarOpen ? 'sm:ml-[22rem]' : ''}`}
+        className={`relative ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out ${isDesktopPanelOpen ? 'sm:ml-[22rem]' : 'sm:ml-16'}`}
       >
         {/* Header */}
         <header className="theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 rounded-b-2xl border py-3 pl-[max(4rem,calc(3rem+env(safe-area-inset-left)))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:py-4 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))]">
@@ -1200,9 +1300,28 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id)) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) ? 'text-accent-text' : 'text-accent-deep'}`}>
                     {String(m.sender) === String(user?._id) ? 'You' : m.senderName || selectedChat.username}
                   </p>}
-                  {m.content && (
-                    <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
-                  )}
+                  {selectedChat.type === 'group' && selectedChat.groupType === 'community' && !m.isDeleted
+                    && ['question', 'poll', 'event'].includes(m.messageType) ? (
+                      <CommunityPostCard
+                        message={m}
+                        threadCount={messages.filter((item) => String(item.replyToId) === String(m._id)).length}
+                        onVote={voteInPoll}
+                        onRsvp={respondToEvent}
+                        onOpenThread={setActiveThread}
+                      />
+                    ) : m.content && (
+                      selectedChat.type === 'group' && selectedChat.groupType === 'community'
+                        ? <MarkdownMessage>{m.content}</MarkdownMessage>
+                        : <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
+                    )}
+                  {selectedChat.type === 'group' && selectedChat.groupType === 'community'
+                    && !['question', 'poll', 'event'].includes(m.messageType) && (
+                      <button type="button" onClick={() => setActiveThread(m)} className="mt-1 block text-[10px] text-sky-200/75 hover:text-white">
+                        {messages.filter((item) => String(item.replyToId) === String(m._id)).length
+                          ? `Open thread · ${messages.filter((item) => String(item.replyToId) === String(m._id)).length} replies`
+                          : 'Start thread'}
+                      </button>
+                    )}
                   {getStickerUrl(m) && !m.isDeleted && (
                                     <img
                                       src={resolveStickerUrl(getStickerUrl(m))}
@@ -1304,17 +1423,63 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         {/* Footer */}
         <footer
           ref={footerRef}
-          className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border pt-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:py-4 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
+          style={{ '--desktop-sidebar-offset': isDesktopPanelOpen ? '22rem' : '4rem' }}
+          className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border pt-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:left-[var(--desktop-sidebar-offset)] sm:right-0 sm:w-[calc(100%-var(--desktop-sidebar-offset))] sm:py-4 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
           {selectedChat && !socketConnected && (
             <p role="status" className="mx-auto mb-2 max-w-4xl text-xs text-amber-200">
               Reconnecting to chat… Messages will send when the connection is restored.
             </p>
           )}
+          {isCommunityChat && !canPostToCommunityChannel && (
+            <p role="status" className="mx-auto mb-2 max-w-4xl text-xs text-amber-200">Only community leaders can post in this channel.</p>
+          )}
           {pendingForward && (
             <p className="mx-auto mb-2 max-w-4xl text-xs text-accent-text">
               Choose a chat from the sidebar to forward this message.
             </p>
+          )}
+          {isCommunityChat && (
+            <div className="mx-auto mb-2 flex max-w-4xl items-center gap-1 overflow-x-auto rounded-lg border border-white/10 bg-black/10 p-1" role="group" aria-label="Community post type">
+              {[
+                ['message', 'Message'], ['question', 'Question'], ['poll', 'Poll'], ['event', 'Event'],
+              ].map(([type, label]) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setCommunityComposerType(type)}
+                  aria-pressed={communityComposerType === type}
+                  className={`shrink-0 rounded px-3 py-1.5 text-xs font-medium ${communityComposerType === type ? 'bg-accent text-accent-contrast' : 'theme-muted hover:bg-white/10'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {isCommunityChat && communityComposerType === 'poll' && (
+            <div className="mx-auto mb-2 max-w-4xl space-y-2 rounded-lg border border-sky-300/15 bg-sky-950/15 p-3">
+              <input value={pollDraft.question} onChange={(event) => setPollDraft((draft) => ({ ...draft, question: event.target.value }))} maxLength={300} placeholder="What should the community decide?" aria-label="Poll question" className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/50" />
+              <div className="grid gap-2 sm:grid-cols-2">
+                {pollDraft.options.map((option, index) => (
+                  <div key={index} className="flex min-w-0 items-center gap-1.5">
+                    <input value={option} onChange={(event) => setPollDraft((draft) => ({ ...draft, options: draft.options.map((current, optionIndex) => optionIndex === index ? event.target.value : current) }))} maxLength={100} placeholder={`Option ${index + 1}`} aria-label={`Poll option ${index + 1}`} className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white outline-none focus:border-sky-300/50" />
+                    {pollDraft.options.length > 2 && <button type="button" onClick={() => setPollDraft((draft) => ({ ...draft, options: draft.options.filter((_, optionIndex) => optionIndex !== index) }))} className="grid h-8 w-8 shrink-0 place-items-center text-white/50 hover:text-rose-300" aria-label={`Remove option ${index + 1}`}><FaTimes size={11} /></button>}
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <button type="button" onClick={() => setPollDraft((draft) => ({ ...draft, options: [...draft.options, ''] }))} disabled={pollDraft.options.length >= 8} className="text-xs text-sky-200 hover:text-white disabled:opacity-40">Add option</button>
+                <label className="flex items-center gap-2 text-xs text-white/65"><input type="checkbox" checked={pollDraft.multipleChoice} onChange={(event) => setPollDraft((draft) => ({ ...draft, multipleChoice: event.target.checked }))} className="accent-sky-400" /> Allow multiple selections</label>
+              </div>
+            </div>
+          )}
+          {isCommunityChat && communityComposerType === 'event' && (
+            <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-emerald-300/15 bg-emerald-950/15 p-3 sm:grid-cols-2">
+              <input value={eventDraft.title} onChange={(event) => setEventDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={120} placeholder="Event title" aria-label="Event title" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-emerald-300/50" />
+              <input type="datetime-local" value={eventDraft.startsAt} onChange={(event) => setEventDraft((draft) => ({ ...draft, startsAt: event.target.value }))} aria-label="Event date and time" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-emerald-300/50" />
+              <input value={eventDraft.location} onChange={(event) => setEventDraft((draft) => ({ ...draft, location: event.target.value }))} maxLength={200} placeholder="Location or meeting link" aria-label="Event location" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-emerald-300/50" />
+              <input value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} placeholder="Description (Markdown supported)" aria-label="Event description" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-emerald-300/50" />
+            </div>
           )}
           <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
             <input
@@ -1331,7 +1496,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 type="button"
                 ref={stickerPanel.triggerRef}
                 onClick={() => setShowStickers((current) => !current)}
-                disabled={!selectedChat || isSending}
+                  disabled={!selectedChat || isSending || isStructuredComposer || !canPostToCommunityChannel}
                 className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-50"
                 title="Stickers"
                 aria-label="Open stickers"
@@ -1395,26 +1560,41 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <button
               type="button"
               onClick={() => setShowVoiceRecorder(true)}
-              disabled={!selectedChat || isSending}
+              disabled={!selectedChat || isSending || isStructuredComposer || !canPostToCommunityChannel}
               className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-50"
               title="Record a voice message"
               aria-label="Record a voice message"
             >
               <FaMicrophone />
             </button>
-            <input
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-              className="theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-3 text-base outline-none placeholder:opacity-60 sm:text-sm"
-              placeholder={selectedChat ? `Message ${selectedChat.name || selectedChat.username}...` : 'Choose a conversation first'}
-              disabled={!selectedChat || isSending}
-            />
+            {isStructuredComposer ? (
+              <span className="theme-muted min-w-0 flex-1 px-3 text-xs">{communityComposerType === 'poll' ? 'Poll details above' : 'Event details above'}</span>
+            ) : isCommunityChat ? (
+              <textarea
+                data-community-composer
+                value={msg}
+                onChange={(event) => setMsg(event.target.value)}
+                rows={2}
+                maxLength={10000}
+                className="theme-composer-input min-h-11 min-w-0 flex-1 resize-y bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:opacity-60"
+                placeholder={communityComposerType === 'question' ? 'Describe the issue, expected behavior, and relevant context…' : `Message #${selectedChat.channelName || selectedChat.name}…`}
+                disabled={!selectedChat || isSending || !canPostToCommunityChannel}
+              />
+            ) : (
+              <input
+                value={msg}
+                onChange={(event) => setMsg(event.target.value)}
+                className="theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-3 text-base outline-none placeholder:opacity-60 sm:text-sm"
+                placeholder={selectedChat ? `Message ${selectedChat.name || selectedChat.username}...` : 'Choose a conversation first'}
+                disabled={!selectedChat || isSending || !canPostToCommunityChannel}
+              />
+            )}
             <button
               type="button"
               title="Attach images, audio, video, or PDF files (up to 50 MB each)"
               aria-label="Attach files"
               onClick={() => fileInputRef.current?.click()}
-              disabled={!selectedChat || isSending}
+              disabled={!selectedChat || isSending || isStructuredComposer || !canPostToCommunityChannel}
               className="chat-action theme-text inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-accent-text disabled:opacity-50"
             >
               <FaPaperclip />
@@ -1423,7 +1603,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <button
               className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"
-              disabled={!selectedChat || (!msg.trim() && !selectedFiles.length && !voiceFile) || !socketConnected || isSending}
+              disabled={!selectedChat || (!composerCanSend && !selectedFiles.length && !voiceFile) || isStructuredComposer && (selectedFiles.length > 0 || Boolean(voiceFile)) || !socketConnected || isSending || !canPostToCommunityChannel}
             >
               {isSending ? 'Sending…' : 'Send'}
             </button>
@@ -1480,6 +1660,52 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </ul>
           )}
         </footer>
+
+        {activeThread && (() => {
+          const threadRoot = messages.find((message) => String(message._id) === String(activeThread._id)) || activeThread;
+          const replies = messages.filter((message) => String(message.replyToId) === String(threadRoot._id));
+          const canAcceptAnswer = threadRoot.messageType === 'question'
+            && (String(threadRoot.sender) === String(user?._id) || selectedChat?.role === 'admin' || user?.role === 'admin');
+          return (
+            <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-5" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setActiveThread(null)}>
+              <section role="dialog" aria-modal="true" aria-label="Message thread" className="theme-page flex max-h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-white/10 shadow-2xl sm:rounded-xl">
+                <header className="theme-header flex shrink-0 items-center gap-3 border-b px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-sm font-semibold">{threadRoot.messageType === 'question' ? 'Question discussion' : 'Thread'}</h2>
+                    <p className="theme-muted mt-0.5 truncate text-xs">#{selectedChat?.channelName || 'community'}</p>
+                  </div>
+                  <button type="button" onClick={() => setActiveThread(null)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close thread"><FaTimes /></button>
+                </header>
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+                  <article className="border-b border-white/10 pb-3">
+                    <p className="mb-1 text-xs font-semibold text-sky-200">{threadRoot.senderName || 'Community member'} · original post</p>
+                    {threadRoot.messageType && ['poll', 'event'].includes(threadRoot.messageType)
+                      ? <CommunityPostCard message={threadRoot} threadCount={replies.length} onVote={voteInPoll} onRsvp={respondToEvent} onOpenThread={setActiveThread} />
+                      : <MarkdownMessage>{threadRoot.content}</MarkdownMessage>}
+                  </article>
+                  {replies.length ? replies.map((reply) => (
+                    <article key={reply._id} className={`rounded-lg border p-3 ${String(threadRoot.acceptedAnswerId) === String(reply._id) ? 'border-emerald-300/40 bg-emerald-950/20' : 'border-white/10 bg-white/[0.025]'}`}>
+                      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-white/75">{reply.senderName || 'Community member'}{String(reply.sender) === String(user?._id) ? ' · you' : ''}</p>
+                        {String(threadRoot.acceptedAnswerId) === String(reply._id) && <span className="text-[10px] font-semibold text-emerald-200">Accepted answer</span>}
+                      </div>
+                      {reply.content && <MarkdownMessage>{reply.content}</MarkdownMessage>}
+                      {canAcceptAnswer && !reply.isDeleted && (
+                        <button type="button" onClick={() => setAcceptedAnswer(threadRoot, String(threadRoot.acceptedAnswerId) === String(reply._id) ? null : reply._id)} className="mt-2 text-[10px] font-medium text-emerald-200 hover:text-white">
+                          {String(threadRoot.acceptedAnswerId) === String(reply._id) ? 'Unmark accepted answer' : 'Mark as accepted answer'}
+                        </button>
+                      )}
+                    </article>
+                  )) : <p className="theme-muted py-8 text-center text-sm">No replies yet.</p>}
+                </div>
+                <footer className="theme-footer flex shrink-0 items-center justify-between gap-3 border-t px-4 py-3">
+                  <span className="theme-muted text-xs">{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
+                  <button type="button" onClick={() => { setReplyTo(threadRoot); setActiveThread(null); }} disabled={!socketConnected || selectedChat?.channelPostingMode === 'admins' && selectedChat?.role !== 'admin' && user?.role !== 'admin'} className="rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">Reply in thread</button>
+                </footer>
+              </section>
+            </div>
+          );
+        })()}
 
         {showVoiceRecorder && (
           <VoiceRecorder

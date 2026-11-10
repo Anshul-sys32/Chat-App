@@ -115,8 +115,6 @@ export default function UserList({ currentUser, onStartChat, search = '', scope 
 
   return (
     <div className="text-white">
-      <h3 className="text-lg font-semibold mb-2">{scope === 'local' ? 'Local Users' : 'Global Users'}</h3>
-
       <ul
         onScroll={(event) => {
           const element = event.currentTarget;

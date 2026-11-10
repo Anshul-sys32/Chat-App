@@ -463,6 +463,21 @@ body {
   background: var(--theme-accent);
 }
 
+.settings-section-enter {
+  animation: settings-section-enter 180ms ease-out both;
+}
+
+@keyframes settings-section-enter {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .call-idle-backdrop {
   background: radial-gradient(ellipse at top, color-mix(in srgb, var(--theme-accent) 18%, transparent), #102426 62%, #050b0c 100%);
 }
@@ -581,6 +596,10 @@ body {
   .theme-menu-button,
   .theme-icon-button {
     transition: none;
+  }
+
+  .settings-section-enter {
+    animation: none;
   }
 
   .theme-auth-quote {

@@ -39,6 +39,8 @@ const {
 	archiveChannel,
 } = require("../controllers/groupChannelController");
 const { isGroupType } = require("../services/groupCapabilities");
+const { ensureDefaultCommunityChannels } = require("../services/communityDefaults");
+const { loadCommunityEngagement, parseStructuredData } = require("../services/communityPosts");
 const {
 	getGroupAccess,
 	getActiveChannel,
@@ -1250,12 +1252,7 @@ router.post("/groups", protect, async (req, res) => {
 			[result.insertId, req.user.id]
 		);
 		if (groupType === "community") {
-			await connection.execute(
-				`INSERT INTO group_channels
-				 (group_id, name, slug, description, posting_mode, sort_order, created_by)
-				 VALUES (?, 'general', 'general', 'General discussion', 'members', 0, ?)`,
-				[result.insertId, req.user.id]
-			);
+			await ensureDefaultCommunityChannels(connection, result.insertId, req.user.id);
 		}
 		await connection.commit();
 		res.status(201).json({ _id: result.insertId, name, groupType, isActive: 1, avatarUrl: null, members: 1, role: "admin" });
@@ -1299,12 +1296,7 @@ router.patch("/groups/:groupId", protect, async (req, res) => {
 			[nextName, nextType, nextActive, groupId]
 		);
 		if (nextType === "community") {
-			await pool.execute(
-				`INSERT IGNORE INTO group_channels
-				 (group_id, name, slug, description, posting_mode, sort_order, created_by)
-				 VALUES (?, 'general', 'general', 'General discussion', 'members', 0, ?)`,
-				[groupId, req.user.id]
-			);
+			await ensureDefaultCommunityChannels(pool, groupId, req.user.id);
 		}
 		const updated = { ...groups[0], name: nextName, groupType: nextType, isActive: nextActive ? 1 : 0 };
 		const io = req.app.get("io");
@@ -1759,6 +1751,8 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
+					gm.message_type AS messageType, gm.structured_data AS structuredData,
+					gm.accepted_answer_id AS acceptedAnswerId,
 					gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
 					reply_user.username AS replySenderName,
 					CASE WHEN reply_hidden.message_id IS NOT NULL THEN 'Message unavailable'
@@ -1776,13 +1770,148 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 			[req.user.id, groupId, channelId, req.user.id, beforeId, beforeId, limit + 1]
 		);
 		const hasMore = rows.length > limit;
-		const messages = rows.slice(0, limit).reverse();
+		const messages = await loadCommunityEngagement(rows.slice(0, limit).reverse(), req.user.id, pool.execute.bind(pool));
 		res.json({ messages, hasMore });
 	} catch (err) {
 		console.error("Fetch group messages error:", err);
 		res.status(500).json({ message: "Failed to get group messages" });
 	}
 });
+
+const authorizeCommunityMessageAction = async (groupId, messageId, user) => {
+	const group = await getGroupAccess(groupId, user.id);
+	if (!group) return { status: 404, message: "Community not found." };
+	if (!canAccessGroup(group, user.role)) return { status: 403, message: "You are not a member of this community." };
+	if (group.groupType !== "community") return { status: 400, message: "This action is only available in communities." };
+	const [rows] = await pool.execute(
+		`SELECT id AS _id, group_id AS groupId, channel_id AS channelId,
+		        sender_id AS sender, message_type AS messageType, structured_data AS structuredData,
+		        reply_to_id AS replyToId, is_deleted AS isDeleted
+		 FROM group_messages WHERE id = ? AND group_id = ? LIMIT 1`,
+		[messageId, groupId]
+	);
+	const message = rows[0];
+	if (!message || !message.channelId || !await getActiveChannel(groupId, Number(message.channelId))) {
+		return { status: 404, message: "Community post not found." };
+	}
+	return { message };
+};
+
+router.post("/groups/:groupId/messages/:messageId/poll-votes", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const messageId = Number(req.params.messageId);
+	const optionIndexes = req.body?.optionIndexes;
+	if (!validId(groupId) || !validId(messageId) || !Array.isArray(optionIndexes)
+		|| optionIndexes.length < 1 || optionIndexes.length > 8
+		|| optionIndexes.some((index) => !Number.isSafeInteger(index) || index < 0)
+		|| new Set(optionIndexes).size !== optionIndexes.length) {
+		return res.status(400).json({ message: "Choose one or more valid poll options." });
+	}
+	try {
+		const authorized = await authorizeCommunityMessageAction(groupId, messageId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		const { message } = authorized;
+		const data = parseStructuredData(message.structuredData);
+		if (message.messageType !== "poll" || message.isDeleted || !data?.options
+			|| optionIndexes.some((index) => index >= data.options.length)
+			|| (!data.multipleChoice && optionIndexes.length !== 1)) {
+			return res.status(400).json({ message: "These poll options are not valid." });
+		}
+		if (data.endsAt && Date.parse(data.endsAt) <= Date.now()) {
+			return res.status(409).json({ message: "This poll has closed." });
+		}
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			await connection.execute("DELETE FROM community_poll_votes WHERE message_id = ? AND user_id = ?", [messageId, req.user.id]);
+			for (const optionIndex of optionIndexes) {
+				await connection.execute(
+					"INSERT INTO community_poll_votes (message_id, user_id, option_index) VALUES (?, ?, ?)",
+					[messageId, req.user.id, optionIndex]
+				);
+			}
+			await connection.commit();
+		} catch (error) {
+			await connection.rollback();
+			throw error;
+		} finally {
+			connection.release();
+		}
+		const [post] = await loadCommunityEngagement([{ ...message, structuredData: data }], req.user.id, pool.execute.bind(pool));
+		const io = req.app.get("io");
+		io?.to(`group:${groupId}:channel:${message.channelId}`).emit("group-message-engagement", {
+			_id: messageId, groupId, channelId: message.channelId, pollResults: post.pollResults,
+		});
+		return res.json({ pollResults: post.pollResults });
+	} catch (error) {
+		console.error("Community poll vote error:", error);
+		return res.status(500).json({ message: "Could not save your vote." });
+	}
+});
+
+router.put("/groups/:groupId/messages/:messageId/event-rsvp", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const messageId = Number(req.params.messageId);
+	const response = req.body?.response;
+	if (!validId(groupId) || !validId(messageId) || !["going", "maybe", "not_going"].includes(response)) {
+		return res.status(400).json({ message: "Choose a valid event response." });
+	}
+	try {
+		const authorized = await authorizeCommunityMessageAction(groupId, messageId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		const { message } = authorized;
+		if (message.messageType !== "event" || message.isDeleted) return res.status(400).json({ message: "This post is not an active event." });
+		await pool.execute(
+			`INSERT INTO community_event_rsvps (message_id, user_id, response) VALUES (?, ?, ?)
+			 ON DUPLICATE KEY UPDATE response = VALUES(response)`,
+			[messageId, req.user.id, response]
+		);
+		const [post] = await loadCommunityEngagement([{ ...message, structuredData: parseStructuredData(message.structuredData) }], req.user.id, pool.execute.bind(pool));
+		const io = req.app.get("io");
+		io?.to(`group:${groupId}:channel:${message.channelId}`).emit("group-message-engagement", {
+			_id: messageId, groupId, channelId: message.channelId, eventResults: post.eventResults,
+		});
+		return res.json({ eventResults: post.eventResults });
+	} catch (error) {
+		console.error("Community event RSVP error:", error);
+		return res.status(500).json({ message: "Could not update your event response." });
+	}
+});
+
+router.patch("/groups/:groupId/messages/:messageId/accepted-answer", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const messageId = Number(req.params.messageId);
+	const answerId = req.body?.answerId === null ? null : Number(req.body?.answerId);
+	if (!validId(groupId) || !validId(messageId) || answerId !== null && !validId(answerId)) {
+		return res.status(400).json({ message: "Invalid question or answer." });
+	}
+	try {
+		const authorized = await authorizeCommunityMessageAction(groupId, messageId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		const { message } = authorized;
+		const group = await getGroupAccess(groupId, req.user.id);
+		if (message.messageType !== "question" || message.isDeleted) return res.status(400).json({ message: "This post is not an active question." });
+		if (Number(message.sender) !== Number(req.user.id) && group.groupRole !== "admin" && req.user.role !== "admin") {
+			return res.status(403).json({ message: "Only the question author or a community leader can accept an answer." });
+		}
+		if (answerId !== null) {
+			const [answers] = await pool.execute(
+				`SELECT id FROM group_messages WHERE id = ? AND group_id = ? AND channel_id = ?
+				 AND reply_to_id = ? AND is_deleted = FALSE LIMIT 1`,
+				[answerId, groupId, message.channelId, messageId]
+			);
+			if (!answers.length) return res.status(400).json({ message: "Choose an answer from this question's thread." });
+		}
+		await pool.execute("UPDATE group_messages SET accepted_answer_id = ? WHERE id = ?", [answerId, messageId]);
+		const update = { _id: messageId, groupId, channelId: message.channelId, acceptedAnswerId: answerId };
+		req.app.get("io")?.to(`group:${groupId}:channel:${message.channelId}`).emit("group-message-updated", update);
+		return res.json({ acceptedAnswerId: answerId });
+	} catch (error) {
+		console.error("Accept community answer error:", error);
+		return res.status(500).json({ message: "Could not update the accepted answer." });
+	}
+});
+
 router.delete("/groups/:groupId/messages/:messageId", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
 	const messageId = Number(req.params.messageId);

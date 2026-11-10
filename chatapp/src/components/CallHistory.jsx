@@ -13,7 +13,7 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? "Unknown time" : date.toLocaleString();
 };
 
-export default function CallHistory({ onStartChat }) {
+export default function CallHistory({ onStartChat, search = '' }) {
   const [calls, setCalls] = useState([]);
   const [error, setError] = useState("");
 
@@ -47,6 +47,10 @@ export default function CallHistory({ onStartChat }) {
     }
   };
 
+  const visibleCalls = calls.filter((call) =>
+    `${call.peerName} ${call.callType} ${call.direction} ${call.status}`.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
     <div className="text-white">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -58,11 +62,11 @@ export default function CallHistory({ onStartChat }) {
         )}
       </div>
       {error && <p role="alert" className="mb-2 text-xs text-rose-200">{error}</p>}
-      {calls.length === 0 ? (
-        <p className="text-sm text-gray-400">No calls yet.</p>
+      {visibleCalls.length === 0 ? (
+        <p className="text-sm text-gray-400">{search ? 'No matching calls.' : 'No calls yet.'}</p>
       ) : (
         <ul className="space-y-2">
-          {calls.map((call) => (
+          {visibleCalls.map((call) => (
             <li key={call._id} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2">
               <span className={call.direction === "outgoing" ? "text-emerald-300" : "text-sky-300"} title={`${call.direction} ${call.callType} call`}>
                 {call.status === "declined" || call.status === "missed" ? <FaPhoneSlash /> : <FaPhone />}
