@@ -23,8 +23,8 @@ const getActiveChannel = async (groupId, channelId) => {
   return rows[0] || null;
 };
 
-const canAccessGroup = (group, userRole) =>
-  (group?.isActive !== 0 || userRole === "admin")
+const canAccessGroup = (group, userRole) => Boolean(group)
+  && (group.isActive !== 0 || userRole === "admin")
     && (Boolean(group?.groupRole) || userRole === "admin");
 
 const canPostInChannel = (group, channel, userRole) =>

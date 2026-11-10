@@ -26,7 +26,7 @@ const {
   MAX_CALL_PARTICIPANTS,
 } = require("../services/callRoomPolicy");
 const { sendMeetingReminders } = require("../services/meetingReminders");
-const { validateGroupMessageTarget } = require("../services/groupAccess");
+const { canAccessGroup, validateGroupMessageTarget } = require("../services/groupAccess");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
 
 const createResponse = () => ({
@@ -416,6 +416,10 @@ test("community migration adds types, channels, nullable message scope, and roll
   assert.ok(statements.some((sql) => sql.includes("FOREIGN KEY (channel_id)")));
   await communityMigration.down(connection);
   assert.ok(statements.some((sql) => sql.includes("DROP TABLE IF EXISTS group_channels")));
+});
+
+test("admins cannot access a missing group record", () => {
+  assert.equal(canAccessGroup(null, "admin"), false);
 });
 
 test("channel posting mode is enforced by the shared group policy", async () => {
