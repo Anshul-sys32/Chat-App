@@ -29,6 +29,7 @@ const communityReputationMigration = require("../migrations/202611010016_communi
 const communityTasksMigration = require("../migrations/202611010017_community_tasks");
 const communityWhiteboardMigration = require("../migrations/202611010018_community_whiteboard");
 const communityCodeRoomsMigration = require("../migrations/202611010019_community_code_rooms");
+const codeRoomSnapshotMigration = require("../migrations/202611010020_code_room_snapshot");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
@@ -43,7 +44,7 @@ const { isSupportedReaction, loadCommunityEngagement, validateCommunityPost } = 
 const { nextScheduledAt } = require("../services/scheduledCommunityPosts");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
 const { normalizeSearchRequest, searchMessages } = require("../controllers/messageSearchController");
-const { parseScheduledMessage } = require("../controllers/scheduledMessagesController");
+const { listScheduledMessages, parseScheduledMessage } = require("../controllers/scheduledMessagesController");
 const { loadDirectMessageReactions, toggleReactionState } = require("../services/messageReactions");
 const { notifyMessageReaction } = require("../services/messageReactionNotifications");
 const { badgesForPoints, recordReputationEvent } = require("../services/communityReputation");
@@ -178,6 +179,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010017_community_tasks",
     "202611010018_community_whiteboard",
     "202611010019_community_code_rooms",
+    "202611010020_code_room_snapshot",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -261,6 +263,43 @@ test("community code-room migration stores a compact binary document snapshot", 
   assert.match(statements[0], /group_id INT UNSIGNED NOT NULL PRIMARY KEY/);
   await communityCodeRoomsMigration.down(connection);
   assert.match(statements[1], /DROP TABLE IF EXISTS community_code_rooms/);
+});
+
+test("code-room snapshot migration creates the current table and compacts legacy updates", async () => {
+  const statements = [];
+  const Y = require("yjs");
+  const firstDoc = new Y.Doc();
+  firstDoc.getText("code").insert(0, "const ");
+  const firstUpdate = Y.encodeStateAsUpdate(firstDoc);
+  const secondDoc = new Y.Doc();
+  Y.applyUpdate(secondDoc, firstUpdate);
+  secondDoc.getText("code").insert(6, "room = true;");
+  const secondUpdate = Y.encodeStateAsUpdate(secondDoc);
+  const connection = {
+    query: async (sql) => statements.push(sql),
+    execute: async (sql, values) => {
+      statements.push({ sql, values });
+      if (sql.includes("information_schema.tables")) return [[{ count: 1 }], []];
+      if (sql.includes("SELECT DISTINCT group_id")) return [[{ groupId: 7 }], []];
+      if (sql.includes("FROM community_code_room_updates WHERE group_id")) {
+        return [[
+          { userId: 3, documentUpdate: firstUpdate },
+          { userId: 4, documentUpdate: secondUpdate },
+        ], []];
+      }
+      return [{ affectedRows: 1 }, []];
+    },
+  };
+  await codeRoomSnapshotMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS community_code_rooms/);
+  const insert = statements.find((entry) => typeof entry === "object" && entry.sql.includes("INSERT INTO community_code_rooms"));
+  assert.deepEqual(insert.values.slice(0, 2), [7, 4]);
+  const snapshot = new Y.Doc();
+  Y.applyUpdate(snapshot, insert.values[2]);
+  assert.equal(snapshot.getText("code").toString(), "const room = true;");
+  firstDoc.destroy();
+  secondDoc.destroy();
+  snapshot.destroy();
 });
 
 test("code-room Yjs and awareness update sizes are bounded and malformed updates rejected", () => {
@@ -430,6 +469,27 @@ test("scheduled message requests accept only bounded future text", () => {
   assert.equal(Number.isFinite(Date.parse(parsed.scheduledAtIso)), true);
   assert.ok(parseScheduledMessage({ content: " ", scheduledAt: new Date(Date.now() + 60_000).toISOString() }).error);
   assert.ok(parseScheduledMessage({ content: "Too late", scheduledAt: new Date(Date.now() - 60_000).toISOString() }).error);
+});
+
+test("scheduled-message listing binds NULL channel ids for direct and standard-group chats", async () => {
+  const calls = [];
+  mock.method(pool, "execute", async (sql, values) => {
+    calls.push({ sql, values });
+    if (sql.includes("FROM users WHERE id = ? AND status = 'active'")) return [[{ id: 21 }], []];
+    if (sql.includes("FROM chat_groups group_record")) {
+      return [[{ id: 8, groupType: "standard", groupRole: "member", rolePermissions: null, isActive: 1 }], []];
+    }
+    return [[], []];
+  });
+  const directResponse = createResponse();
+  await listScheduledMessages({ query: { type: "direct", conversationId: "21" }, user: { id: 17, role: "user" } }, directResponse);
+  const groupResponse = createResponse();
+  await listScheduledMessages({ query: { type: "group", conversationId: "8" }, user: { id: 17, role: "user" } }, groupResponse);
+  const scheduledQueries = calls.filter((call) => call.sql.includes("FROM scheduled_messages"));
+  assert.equal(directResponse.statusCode, 200);
+  assert.equal(groupResponse.statusCode, 200);
+  assert.equal(scheduledQueries.length, 2);
+  assert.deepEqual(scheduledQueries.map((call) => call.values.at(-1)), [null, null]);
 });
 
 test("global search validates filters, dates, and query length", () => {

@@ -24,7 +24,7 @@ const authorizeTarget = async (type, conversationId, channelId, user) => {
       [conversationId]
     );
     if (!recipients.length) return { status: 404, message: "Recipient not found." };
-    return { recipientId: Number(conversationId) };
+    return { recipientId: Number(conversationId), channelId: null };
   }
   if (type !== "group") return { status: 400, message: "Choose a direct or group conversation." };
   const group = await getGroupAccess(conversationId, user.id);
@@ -58,7 +58,7 @@ const listScheduledMessages = async (req, res) => {
          AND ${type === "direct" ? "recipient_id = ? AND group_id IS NULL" : "group_id = ? AND recipient_id IS NULL"}
          AND channel_id <=> ?
        ORDER BY scheduled_at, id LIMIT 100`,
-      [req.user.id, conversationId, target.channelId]
+      [req.user.id, conversationId, target.channelId ?? null]
     );
     return res.json({ messages });
   } catch (error) {
