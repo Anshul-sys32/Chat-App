@@ -1,5 +1,5 @@
 export const ACCENT_OPTIONS = [
-  { id: "cobalt", label: "Cobalt", color: "#78a9ff" },
+  { id: "cobalt", label: "Indigo", color: "#818cf8" },
   { id: "coral", label: "Coral", color: "#ff947d" },
   { id: "amber", label: "Amber", color: "#f2bf63" },
   { id: "rose", label: "Rose", color: "#f18ca8" },

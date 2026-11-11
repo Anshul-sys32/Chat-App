@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { FaTimes } from 'react-icons/fa';
+import useDialogFocus from '../useDialogFocus';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || '';
 const authConfig = () => ({
@@ -22,6 +23,7 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useDialogFocus(true, onClose);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -88,7 +90,7 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="community-integrations-title" className="glass-panel flex max-h-[min(94dvh,60rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border shadow-2xl">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="community-integrations-title" className="glass-panel flex max-h-[min(94dvh,60rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0"><h2 id="community-integrations-title" className="text-sm font-semibold">Integrations · {groupName}</h2><p className="theme-muted mt-0.5 text-xs">Community connections, channel delivery, and execution history</p></div>
           <button type="button" onClick={onClose} aria-label="Close integrations" title="Close" className="grid h-9 w-9 shrink-0 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
@@ -103,7 +105,7 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
                   {integrations.map((integration) => (
                     <li key={integration.id} className="py-3">
                       <div className="flex flex-wrap items-start gap-3">
-                        <div className="min-w-0 flex-1"><p className="text-sm font-medium">{integration.name}<span className="theme-muted ml-2 text-[10px] uppercase">{integration.provider.replace('_', ' ')}</span></p><p className="theme-muted mt-1 text-xs">#{integration.channelName} · {integration.operational ? 'Operational' : 'Not operational'}</p>
+                        <div className="min-w-0 flex-1"><p className="text-sm font-medium">{integration.name}<span className="theme-muted ml-2 text-[10px] uppercase">{integration.provider.replace('_', ' ')}</span></p><p className="theme-muted mt-1 flex items-center gap-1.5 text-xs"><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${integration.operational ? 'bg-emerald-400' : 'bg-amber-400'}`} />#{integration.channelName} · {integration.operational ? 'Operational' : 'Needs setup'}</p>
                           {integration.provider === 'webhook' || integration.provider === 'github' ? <p className="mt-1 break-all font-mono text-[10px] text-accent-text">{API_URL}/api/integrations/{integration.id}/webhook</p> : null}
                           {integration.provider === 'rss' && <p className="theme-muted mt-1 text-[11px]">RSS polling is not active in this server build.</p>}
                           {integration.provider === 'google_calendar' && <p className="theme-muted mt-1 text-[11px]">OAuth authorization is not configured.</p>}

@@ -193,6 +193,11 @@ body {
   );
 }
 
+.app-theme:has(.workspace-theme)[data-theme="dark"]::before,
+.app-theme:has(.workspace-theme)[data-theme="dark"]::after {
+  display: none;
+}
+
 .app-theme *::-webkit-scrollbar {
   width: 9px;
   height: 9px;
@@ -463,6 +468,147 @@ body {
   background: var(--theme-accent);
 }
 
+.workspace-theme {
+  --theme-text: #e6e8ee;
+  --theme-muted: #9da5b5;
+  --theme-page: #111318;
+  --theme-page-gradient: #111318;
+  --theme-surface: #191c23;
+  --theme-popover: #242832;
+  --theme-popover-text: #f2f3f7;
+  --theme-popover-muted: #aab1bf;
+  --theme-surface-raised: #1d2028;
+  --theme-border: rgb(210 216 230 / 11%);
+  --theme-control: #222630;
+  --workspace-radius-sm: 6px;
+  --workspace-radius-md: 9px;
+  --workspace-radius-lg: 12px;
+  --workspace-shadow: 0 12px 36px rgb(0 0 0 / 22%);
+  min-width: 0;
+  background: var(--theme-page);
+}
+
+.app-theme[data-theme="light"] .workspace-theme {
+  --theme-text: #252a35;
+  --theme-muted: #687182;
+  --theme-page: #f3f4f7;
+  --theme-page-gradient: #f3f4f7;
+  --theme-surface: #fff;
+  --theme-popover: #fff;
+  --theme-popover-text: #252a35;
+  --theme-popover-muted: #687182;
+  --theme-surface-raised: #f8f9fb;
+  --theme-border: rgb(34 42 57 / 12%);
+  --theme-control: #f4f5f8;
+  background: var(--theme-page);
+}
+
+.app-theme:has(.workspace-theme)[data-accent="cobalt"] .workspace-theme {
+  --theme-accent: #818cf8;
+  --theme-accent-hover: #a5b4fc;
+  --theme-accent-text: #a5b4fc;
+  --theme-accent-deep: #a5b4fc;
+  --theme-accent-message: #4f46e5;
+  --theme-accent-contrast: #fff;
+  --theme-accent-soft: rgb(129 140 248 / 13%);
+  --theme-accent-border: rgb(129 140 248 / 36%);
+}
+
+.app-theme[data-theme="light"]:has(.workspace-theme)[data-accent="cobalt"] .workspace-theme {
+  --theme-accent: #5965d9;
+  --theme-accent-hover: #4652c5;
+  --theme-accent-text: #4e5acb;
+  --theme-accent-deep: #4e5acb;
+  --theme-accent-message: #5965d9;
+  --theme-accent-soft: rgb(89 101 217 / 9%);
+  --theme-accent-border: rgb(89 101 217 / 28%);
+}
+
+.workspace-theme .glass-panel,
+.workspace-theme .glass-rail,
+.workspace-theme .glass-input {
+  border-color: var(--theme-border);
+  background-color: var(--theme-surface);
+  backdrop-filter: none;
+}
+
+.workspace-theme .glass-input,
+.workspace-theme :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  border-color: var(--theme-border);
+  color: var(--theme-text);
+  background-color: var(--theme-control);
+}
+
+.workspace-theme :where(select option) {
+  color: var(--theme-text);
+  background: var(--theme-surface);
+}
+
+.workspace-theme .theme-header,
+.workspace-theme .theme-footer {
+  background: var(--theme-surface);
+  backdrop-filter: none;
+}
+
+.workspace-theme .theme-footer {
+  box-shadow: 0 -6px 20px rgb(0 0 0 / 12%);
+}
+
+.workspace-theme .chat-bubble-peer {
+  color: var(--theme-text);
+  border-color: var(--theme-border);
+  background: var(--theme-surface-raised);
+}
+
+.workspace-theme .chat-bubble-own {
+  background: var(--theme-accent-message);
+}
+
+.workspace-theme .message-reply-highlight::before {
+  background: var(--theme-accent-soft);
+}
+
+.workspace-theme :where(.chat-action, .theme-menu-button, .theme-icon-button) {
+  border-radius: var(--workspace-radius-md);
+}
+
+.workspace-theme :where(button, [role="button"]) {
+  transition-duration: 140ms;
+}
+
+.workspace-theme :where(button, a, input, select, textarea):focus-visible {
+  outline-color: var(--theme-accent);
+}
+
+@media (max-width: 639px) {
+  .workspace-theme .theme-composer {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    border-radius: var(--workspace-radius-lg);
+  }
+
+  .workspace-theme .composer-editor {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 42px;
+  }
+
+  .workspace-theme .composer-stickers,
+  .workspace-theme .composer-voice,
+  .workspace-theme .composer-attach,
+  .workspace-theme .composer-send {
+    grid-row: 2;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .workspace-theme .composer-stickers { grid-column: 1; }
+  .workspace-theme .composer-voice { grid-column: 2; }
+  .workspace-theme .composer-attach { grid-column: 3; }
+  .workspace-theme .composer-send { grid-column: 4; }
+}
+
 .settings-section-enter {
   animation: settings-section-enter 180ms ease-out both;
 }
@@ -625,5 +771,235 @@ body {
 @media (hover: none) {
   .app-theme[data-theme="dark"]::after {
     display: none;
+  }
+}
+
+.workspace-theme {
+  --workspace-radius-sm: 5px;
+  --workspace-radius-md: 8px;
+  --workspace-radius-lg: 11px;
+  --workspace-shadow: 0 16px 40px rgb(0 0 0 / 24%);
+}
+
+.workspace-theme .theme-sidebar,
+.workspace-theme #chat-navigation,
+.workspace-theme .theme-sidebar-panel {
+  background-color: var(--theme-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.workspace-theme #chat-navigation {
+  border-right: 1px solid var(--theme-border);
+}
+
+.workspace-theme .glass-rail {
+  background-color: color-mix(in srgb, var(--theme-surface) 82%, var(--theme-control));
+}
+
+.workspace-theme .theme-sidebar-panel > header {
+  border-color: var(--theme-border);
+}
+
+.workspace-theme nav[aria-label="Main navigation"] {
+  gap: 6px;
+}
+
+.workspace-theme .theme-icon-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--workspace-radius-md);
+}
+
+.workspace-theme .theme-icon-button.is-active {
+  color: var(--theme-accent-text);
+  background: var(--theme-accent-soft);
+  box-shadow: inset 2px 0 0 var(--theme-accent);
+}
+
+.workspace-theme .theme-sidebar-panel input::placeholder,
+.workspace-theme .theme-composer-input::placeholder {
+  color: var(--theme-muted);
+  opacity: 0.78;
+}
+
+.workspace-theme .theme-header {
+  border-bottom: 1px solid var(--theme-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.workspace-theme .chat-content-panel {
+  border: 0;
+  background: transparent;
+}
+
+.workspace-theme .glass-panel {
+  border-radius: var(--workspace-radius-lg);
+  box-shadow: none;
+}
+
+.workspace-theme [class*="border-white/"] {
+  border-color: var(--theme-border);
+}
+
+.workspace-theme [class~="bg-slate-950"] {
+  color: var(--theme-text);
+  background-color: var(--theme-surface);
+}
+
+.workspace-theme [role="dialog"] {
+  box-shadow: var(--workspace-shadow);
+}
+
+.workspace-theme .theme-composer {
+  background: var(--theme-surface);
+  box-shadow: 0 8px 26px rgb(0 0 0 / 12%);
+}
+
+.workspace-theme .glass-input,
+.workspace-theme :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  min-height: 36px;
+  border-radius: var(--workspace-radius-md);
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.workspace-theme select {
+  color-scheme: dark;
+}
+
+.app-theme[data-theme="light"] .workspace-theme select {
+  color-scheme: light;
+}
+
+.workspace-theme .chat-action,
+.workspace-theme .theme-icon-button,
+.workspace-theme .theme-menu-button {
+  border-color: var(--theme-border);
+  box-shadow: none;
+}
+
+.workspace-theme .chat-bubble-own,
+.workspace-theme .chat-bubble-peer {
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.workspace-theme .chat-bubble-own {
+  border-bottom-right-radius: 5px;
+}
+
+.workspace-theme .chat-bubble-peer {
+  border-bottom-left-radius: 5px;
+}
+
+.workspace-theme .message-row {
+  margin-block: 2px;
+}
+
+.workspace-theme .theme-tooltip,
+.app-theme:has(.workspace-theme) .workspace-popover {
+  border: 1px solid var(--theme-border);
+  border-radius: var(--workspace-radius-md);
+  box-shadow: var(--workspace-shadow);
+}
+
+.app-theme:has(.workspace-theme) .workspace-popover {
+  color: var(--theme-popover-text);
+  background: var(--theme-popover);
+}
+
+.app-theme:has(.workspace-theme)[data-theme="dark"] .workspace-popover {
+  --theme-popover: #242832;
+  --theme-popover-text: #f2f3f7;
+  --theme-popover-muted: #aab1bf;
+}
+
+.app-theme:has(.workspace-theme)[data-theme="light"] .workspace-popover {
+  --theme-popover: #fff;
+  --theme-popover-text: #252a35;
+  --theme-popover-muted: #687182;
+}
+
+.app-theme:has(.workspace-theme) .workspace-popover :where(button, a) {
+  color: inherit;
+}
+
+.app-theme[data-theme="light"] .workspace-theme :where(.bg-black\/10, .bg-black\/20) {
+  color: var(--theme-text);
+  background-color: var(--theme-surface-raised);
+}
+
+.app-theme[data-theme="light"] .workspace-theme :where(.text-white\/40, .text-white\/50, .text-white\/55, .text-white\/60, .text-white\/65, .text-white\/70, .text-white\/75) {
+  color: var(--theme-muted);
+}
+
+.app-theme[data-theme="light"] .workspace-theme .fixed.inset-0[class*="bg-black/"] {
+  background-color: rgb(37 42 53 / 28%);
+}
+
+.app-theme[data-theme="light"] .workspace-theme #chat-area-settings > .pointer-events-auto {
+  background-color: rgb(37 42 53 / 28%);
+}
+
+@media (min-width: 640px) and (max-width: 767px) {
+  .workspace-theme #chat-navigation {
+    width: 4rem !important;
+  }
+
+  .workspace-theme .theme-sidebar-panel {
+    width: 0 !important;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .workspace-theme #chat-navigation .glass-rail > div:first-child .group {
+    display: none;
+  }
+
+  .workspace-theme .workspace-chat-layout {
+    margin-left: 4rem !important;
+  }
+}
+
+@media (max-width: 639px) {
+  .workspace-theme .workspace-chat-header {
+    gap: 6px;
+  }
+
+  .workspace-theme .workspace-chat-header h1 {
+    font-size: 15px;
+  }
+
+  .workspace-theme .workspace-chat-header .chat-action {
+    width: 36px;
+    height: 36px;
+  }
+
+  .workspace-theme .theme-composer {
+    grid-template-rows: minmax(40px, auto) 40px;
+  }
+
+  .workspace-theme .composer-editor {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .workspace-theme .composer-attach {
+    padding-inline: 8px;
+  }
+
+  .workspace-theme .composer-attach span {
+    display: none;
+  }
+
+  .workspace-theme .composer-send {
+    padding-inline: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-theme :where(button, a, input, select, textarea) {
+    transition-duration: 0.01ms !important;
   }
 }

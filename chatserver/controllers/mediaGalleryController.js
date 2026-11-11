@@ -33,6 +33,7 @@ const normalizeGalleryFilters = (query = {}) => {
   const page = query.page === undefined ? 1 : Number(query.page);
   const pageSize = query.pageSize === undefined ? 24 : Number(query.pageSize);
   const senderId = query.senderId === undefined || query.senderId === "" ? null : Number(query.senderId);
+  const sender = typeof query.sender === "string" ? query.sender.trim() : "";
   const conversationType = query.conversationType || null;
   const conversationId = query.conversationId === undefined || query.conversationId === ""
     ? null
@@ -47,6 +48,8 @@ const normalizeGalleryFilters = (query = {}) => {
     || !Number.isSafeInteger(page) || page < 1 || page > 100
     || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 50
     || senderId !== null && (!Number.isSafeInteger(senderId) || senderId < 1)
+    || query.sender !== undefined && typeof query.sender !== "string"
+    || sender.length > 80
     || conversationType !== null && !["direct", "group"].includes(conversationType)
     || (conversationType === null) !== (conversationId === null)
     || conversationId !== null && (!Number.isSafeInteger(conversationId) || conversationId < 1)
@@ -58,7 +61,7 @@ const normalizeGalleryFilters = (query = {}) => {
     return null;
   }
 
-  return { search, mediaType, sort, page, pageSize, senderId, conversationType, conversationId, channelId, from, to };
+  return { search, mediaType, sort, page, pageSize, senderId, sender, conversationType, conversationId, channelId, from, to };
 };
 
 const buildGalleryQuery = (source, filters, userId, rowLimit) => {
@@ -100,6 +103,10 @@ const buildGalleryQuery = (source, filters, userId, rowLimit) => {
   if (filters.senderId !== null) {
     where.push("message.sender_id = ?");
     values.push(filters.senderId);
+  }
+  if (filters.sender) {
+    where.push("sender.username LIKE ? ESCAPE '!'");
+    values.push(`%${filters.sender.replace(/[!%_]/g, "!$&")}%`);
   }
   if (filters.from) {
     where.push(`${createdColumn} >= ?`);
@@ -193,6 +200,10 @@ const buildLinkQuery = (source, filters, userId, rowLimit) => {
   if (filters.senderId !== null) {
     where.push("message.sender_id = ?");
     values.push(filters.senderId);
+  }
+  if (filters.sender) {
+    where.push("sender.username LIKE ? ESCAPE '!'");
+    values.push(`%${filters.sender.replace(/[!%_]/g, "!$&")}%`);
   }
   if (filters.from) {
     where.push("message.created_at >= ?");

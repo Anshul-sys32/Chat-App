@@ -1,12 +1,15 @@
 import { createPortal } from "react-dom";
 const MARGIN = 8;
 
-export default function FloatingPanel({ open, panelRef, style, children, className = "" }) {
+export default function FloatingPanel({ open, panelRef, style, children, className = "", id, role, ariaLabel }) {
   if (!open) return null;
   const portalRoot = document.querySelector(".app-theme") || document.body;
   return createPortal(
     <div
+      id={id}
       ref={panelRef}
+      role={role}
+      aria-label={ariaLabel}
       style={{
         position: "fixed",
         left: style?.left ?? MARGIN,

@@ -21,6 +21,7 @@ test("gallery filters enforce bounded pages and valid scope, dates, and media ty
     page: 2,
     pageSize: 12,
     senderId: null,
+    sender: "",
     conversationType: null,
     conversationId: null,
     channelId: null,
@@ -46,6 +47,7 @@ test("gallery SQL applies ownership, hidden/deleted, channel, and filter predica
     conversationId: "8",
     channelId: "3",
     senderId: "12",
+    sender: "ann_%",
     mediaType: "image",
     search: "report_%",
     from: "2026-01-01",
@@ -60,11 +62,13 @@ test("gallery SQL applies ownership, hidden/deleted, channel, and filter predica
   assert.match(sql, /message\.group_id = \?/);
   assert.match(sql, /message\.channel_id = \?/);
   assert.match(sql, /message\.sender_id = \?/);
+  assert.match(sql, /sender\.username LIKE \? ESCAPE '!'/);
   assert.match(sql, /ESCAPE '!'/);
   assert.match(sql, /ORDER BY message\.created_at ASC/);
   assert.equal(values[0], 21);
   assert.equal(values.at(-1), 48);
   assert.ok(values.includes("%report!_!%%"));
+  assert.ok(values.includes("%ann!_!%%"));
 });
 
 test("direct gallery SQL scopes both conversation participants and hidden messages", () => {

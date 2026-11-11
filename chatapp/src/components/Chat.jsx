@@ -84,7 +84,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const fileInputRef = React.useRef(null);
   const [messages, setMessages] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isDesktopPanelOpen, setIsDesktopPanelOpen] = useState(true);
+  const [isDesktopPanelOpen, setIsDesktopPanelOpen] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [socketConnected, setSocketConnected] = useState(Socket.connected);
   const [callType, setCallType] = useState('video');
@@ -122,6 +122,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [conversationGalleryOpen, setConversationGalleryOpen] = useState(false);
   const [communityBotsOpen, setCommunityBotsOpen] = useState(false);
   const [communityIntegrationsOpen, setCommunityIntegrationsOpen] = useState(false);
+  const [openCommunityTools, setOpenCommunityTools] = useState(false);
   const [savedMessagesLoading, setSavedMessagesLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -178,6 +179,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const joinGroupKeyRef = React.useRef('');
   const [replySwipe, setReplySwipe] = useState({ messageId: null, offset: 0, dragging: false });
   const bulkPanel = useFloatingPanel(openBulkMenu, () => setOpenBulkMenu(false));
+  const communityToolsPanel = useFloatingPanel(openCommunityTools, () => setOpenCommunityTools(false));
   const stickerPanel = useFloatingPanel(showStickers, () => setShowStickers(false));
 
   useEffect(() => {
@@ -1652,7 +1654,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const savedMessageKeys = new Set(savedMessages.map((message) => `${message.messageType}:${message._id}`));
 
   return (
-    <div style={{ height: 'var(--app-height, 100dvh)', width: 'var(--app-width, 100vw)' }} className="theme-page flex h-screen w-screen overflow-hidden">
+    <div style={{ height: 'var(--app-height, 100dvh)', width: 'var(--app-width, 100vw)' }} className="workspace-theme theme-page flex h-screen w-screen overflow-hidden">
       <Sidebar
         isOpen={isSidebarOpen}
         isDesktopPanelOpen={isDesktopPanelOpen}
@@ -1678,10 +1680,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
 
       <div
-        className={`relative ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-all duration-300 ease-in-out ${isDesktopPanelOpen ? 'sm:ml-[22rem]' : 'sm:ml-16'}`}
+        className={`workspace-chat-layout relative ml-0 flex min-h-0 min-w-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${isDesktopPanelOpen ? 'sm:ml-[22rem]' : 'sm:ml-16'}`}
       >
         {/* Header */}
-        <header className="theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 rounded-b-2xl border py-3 pl-[max(4rem,calc(3rem+env(safe-area-inset-left)))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))] shadow-lg sm:py-4 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))]">
+        <header className="workspace-chat-header theme-header relative z-30 flex w-full shrink-0 items-center justify-between gap-2 border-b px-3 py-2.5 pl-[max(4rem,calc(3rem+env(safe-area-inset-left)))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-5 sm:py-3 sm:pl-[max(1.25rem,env(safe-area-inset-left))] sm:pr-[max(1.25rem,env(safe-area-inset-right))]">
           {/* <button onClick={toggleSidebar} className="text-white">
             <FaBars />
           </button> */}
@@ -1757,101 +1759,62 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             >
               <FaStar />
             </button>
-            <button
-              type="button"
-              onClick={() => setConversationGalleryOpen(true)}
-              title="Conversation media"
-              aria-label="Conversation media"
-              disabled={!selectedChat}
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30"
-            >
-              <FaImages />
-            </button>
-            {isCommunityChat && (
+            {selectedChat && (
               <button
                 type="button"
-                onClick={() => setCommunityBotsOpen(true)}
-                title="Manage community bots"
-                aria-label="Manage community bots"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
+                onClick={() => setConversationGalleryOpen(true)}
+                title="Conversation media"
+                aria-label="Conversation media"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-lg border transition hover:text-accent-text"
               >
-                <FaRobot />
+                <FaImages />
               </button>
             )}
             {isCommunityChat && (
-              <button
-                type="button"
-                onClick={() => setCommunityIntegrationsOpen(true)}
-                title="Manage community integrations"
-                aria-label="Manage community integrations"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
-              >
-                <FaPlug />
-              </button>
-            )}
-            {isCommunityChat && (
-              <button
-                type="button"
-                onClick={loadCommunityReputation}
-                title="Community contributions"
-                aria-label="Community contributions"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
-              >
-                <FaTrophy />
-              </button>
-            )}
-            {isCommunityChat && (
-              <button
-                type="button"
-                onClick={loadCommunityTasks}
-                title="Community task board"
-                aria-label="Community task board"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
-              >
-                <FaTasks />
-              </button>
-            )}
-            {isCommunityChat && (
-              <button
-                type="button"
-                onClick={() => setWhiteboardOpen(true)}
-                title="Community whiteboard"
-                aria-label="Community whiteboard"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
-              >
-                <FaPencilAlt />
-              </button>
-            )}
-            {isCommunityChat && (
-              <button
-                type="button"
-                onClick={() => setCodeRoomOpen(true)}
-                title="Community code room"
-                aria-label="Community code room"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
-              >
-                <FaCode />
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  ref={communityToolsPanel.triggerRef}
+                  onClick={() => setOpenCommunityTools((current) => !current)}
+                  aria-expanded={openCommunityTools}
+                  aria-controls="community-tools-panel"
+                  title="Community tools"
+                  aria-label="Community tools"
+                  className="chat-action theme-text grid h-10 w-10 place-items-center rounded-lg border transition hover:text-accent-text"
+                >
+                  <FaEllipsisV />
+                </button>
+                <FloatingPanel id="community-tools-panel" role="group" ariaLabel="Community tools" open={openCommunityTools} panelRef={communityToolsPanel.panelRef} style={communityToolsPanel.style} className="workspace-popover theme-popover z-[80] min-w-52 rounded-lg border p-1 shadow-xl">
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityBotsOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaRobot /> Bots and commands</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityIntegrationsOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaPlug /> Integrations</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityReputation(); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaTrophy /> Contributions</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityTasks(); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaTasks /> Task board</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setWhiteboardOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaPencilAlt /> Whiteboard</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCodeRoomOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaCode /> Code room</button>
+                </FloatingPanel>
+              </div>
             )}
             <NotificationCenter onNavigate={navigateToNotificationTarget} />
-            <button
-              onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'audio'); setIsVideoOpen(true); }}
-              title={isCommunityCallChannel ? 'Join audio channel' : 'Start Audio Call'}
-              disabled={!selectedChat || selectedChat.type === 'group' && selectedChat.groupType === 'community' && !(isCommunityCallChannel && selectedChat.channelType === 'audio')}
-              aria-label="Start audio call"
-              className={`chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30 ${isCommunityCallChannel && selectedChat.channelType !== 'audio' ? 'hidden' : ''}`}
-            >
-              <FaPhone />
-            </button>
-            <button
-              onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'video'); setIsVideoOpen(true); }}
-              title={isCommunityCallChannel ? 'Join video channel' : 'Start Video Call'}
-              disabled={!selectedChat || selectedChat.type === 'group' && selectedChat.groupType === 'community' && !(isCommunityCallChannel && selectedChat.channelType === 'video')}
-              aria-label="Start video call"
-              className={`chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30 ${isCommunityCallChannel && selectedChat.channelType !== 'video' ? 'hidden' : ''}`}
-            >
-              <FaVideo />
-            </button>
+            {selectedChat && <>
+              <button
+                onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'audio'); setIsVideoOpen(true); }}
+                title={isCommunityCallChannel ? 'Join audio channel' : 'Start Audio Call'}
+                disabled={selectedChat.type === 'group' && selectedChat.groupType === 'community' && !(isCommunityCallChannel && selectedChat.channelType === 'audio')}
+                aria-label="Start audio call"
+                className={`chat-action theme-text grid h-10 w-10 place-items-center rounded-lg border transition hover:text-accent-text disabled:opacity-30 ${isCommunityCallChannel && selectedChat.channelType !== 'audio' ? 'hidden' : ''}`}
+              >
+                <FaPhone />
+              </button>
+              <button
+                onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'video'); setIsVideoOpen(true); }}
+                title={isCommunityCallChannel ? 'Join video channel' : 'Start Video Call'}
+                disabled={selectedChat.type === 'group' && selectedChat.groupType === 'community' && !(isCommunityCallChannel && selectedChat.channelType === 'video')}
+                aria-label="Start video call"
+                className={`chat-action theme-text grid h-10 w-10 place-items-center rounded-lg border transition hover:text-accent-text disabled:opacity-30 ${isCommunityCallChannel && selectedChat.channelType !== 'video' ? 'hidden' : ''}`}
+              >
+                <FaVideo />
+              </button>
+            </>}
               </>
             )}
           </div>
@@ -2105,7 +2068,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           style={{ paddingBottom: `${footerHeight + 16}px` }}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-6 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
-          <div className="chat-content-panel glass-panel mx-auto flex min-h-full w-full max-w-5xl flex-col space-y-3 rounded-2xl p-3 sm:p-5">
+          <div className="chat-content-panel mx-auto flex min-h-full w-full max-w-5xl flex-col space-y-3 px-1 py-2 sm:px-2 sm:py-4">
             {!selectedChat && <div className="flex h-full min-h-[55vh] flex-col items-center justify-center text-center">
               <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-accent-border bg-accent-soft text-accent-text"><FaUsers size={25} /></div>
               <h2 className="text-xl font-semibold">Your conversations</h2>
@@ -2255,7 +2218,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     type="button"
                     onClick={(event) => toggleMessageMenu(event, m._id)}
                     onPointerDown={(event) => event.stopPropagation()}
-                    aria-label="Message actions"
+                    aria-label={`Message actions for ${m.senderName || 'message'}`}
                     title="Message actions"
                     className="absolute right-2 top-2 rounded-md p-1 opacity-60 transition hover:bg-black/20 hover:opacity-100"
                   >
@@ -2669,7 +2632,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <input value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} placeholder="Description (Markdown supported)" aria-label="Event description" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
             </div>
           )}
-          <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
+          <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-xl border p-2">
             <input
               ref={fileInputRef}
               type="file"
@@ -2679,7 +2642,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               className="sr-only"
               aria-label="Choose attachments"
             />
-            <div className="relative shrink-0">
+            <div className="composer-stickers relative shrink-0">
               <button
                 type="button"
                 ref={stickerPanel.triggerRef}
@@ -2749,7 +2712,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               type="button"
               onClick={() => setShowVoiceRecorder(true)}
               disabled={!selectedChat || isSending || isStructuredComposer || !canPostToCommunityChannel}
-              className="chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-50"
+              className="composer-voice chat-action theme-text grid h-10 w-10 shrink-0 place-items-center rounded-lg border transition hover:text-accent-text disabled:opacity-50"
               title="Record a voice message"
               aria-label="Record a voice message"
             >
@@ -2758,7 +2721,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {isStructuredComposer ? (
               <span className="theme-muted min-w-0 flex-1 px-3 text-xs">{communityComposerType === 'poll' ? 'Poll details above' : 'Event details above'}</span>
             ) : isCommunityChat ? (
-              <div className="relative min-w-0 flex-1">
+              <div className="composer-editor relative min-w-0 flex-1">
                 {matchingBotCommands.length > 0 && (
                   <ul role="listbox" aria-label="Slash commands" className="glass-panel absolute bottom-full left-0 z-[70] mb-2 max-h-56 w-full max-w-sm overflow-y-auto rounded-lg border p-1 shadow-xl">
                     {matchingBotCommands.map((command) => (
@@ -2780,7 +2743,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 onChange={(event) => setMsg(event.target.value)}
                 rows={2}
                 maxLength={10000}
-                className="theme-composer-input min-h-11 min-w-0 flex-1 resize-y bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:opacity-60"
+                className="theme-composer-input min-h-11 w-full min-w-0 resize-y bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:opacity-60"
                 placeholder={communityComposerType === 'question' ? 'Describe the issue, expected behavior, and relevant context…' : `Message #${selectedChat.channelName || selectedChat.name}…`}
                 disabled={!selectedChat || isSending || !canPostToCommunityChannel}
                 />
@@ -2789,7 +2752,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <input
                 value={msg}
                 onChange={(event) => setMsg(event.target.value)}
-                className="theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-3 text-base outline-none placeholder:opacity-60 sm:text-sm"
+                aria-label={selectedChat ? `Message ${selectedChat.name || selectedChat.username}` : 'Message'}
+                className="composer-editor theme-composer-input min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm outline-none placeholder:opacity-60"
                 placeholder={selectedChat ? `Message ${selectedChat.name || selectedChat.username}...` : 'Choose a conversation first'}
                 disabled={!selectedChat || isSending || !canPostToCommunityChannel}
               />
@@ -2800,13 +2764,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               aria-label="Attach files"
               onClick={() => fileInputRef.current?.click()}
               disabled={!selectedChat || isSending || isStructuredComposer || !canPostToCommunityChannel}
-              className="chat-action theme-text inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm transition hover:text-accent-text disabled:opacity-50"
+              className="composer-attach chat-action theme-text inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border px-3 text-sm transition hover:text-accent-text disabled:opacity-50"
             >
               <FaPaperclip />
               <span>Attach</span>
             </button>
             <button
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+              className="composer-send rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
               type="submit"
               disabled={!selectedChat || (!composerCanSend && !selectedFiles.length && !voiceFile) || isStructuredComposer && (selectedFiles.length > 0 || Boolean(voiceFile)) || !socketConnected || isSending || !canPostToCommunityChannel}
             >

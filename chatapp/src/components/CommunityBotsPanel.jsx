@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { FaTimes } from 'react-icons/fa';
+import useDialogFocus from '../useDialogFocus';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || '';
 const authConfig = () => ({
@@ -15,6 +16,7 @@ export default function CommunityBotsPanel({ groupId, groupName, onClose }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useDialogFocus(true, onClose);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -76,7 +78,7 @@ export default function CommunityBotsPanel({ groupId, groupName, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="community-bots-title" className="glass-panel flex max-h-[min(92dvh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border shadow-2xl">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="community-bots-title" className="glass-panel flex max-h-[min(92dvh,52rem)] w-full max-w-3xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0"><h2 id="community-bots-title" className="text-sm font-semibold">Bots · {groupName}</h2><p className="theme-muted mt-0.5 text-xs">Community installations and channel access</p></div>
           <button type="button" onClick={onClose} aria-label="Close bot management" title="Close" className="grid h-9 w-9 shrink-0 place-items-center rounded hover:bg-white/10"><FaTimes /></button>

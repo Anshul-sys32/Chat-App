@@ -263,7 +263,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
   };
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 text-white sm:px-8">
+    <main className="workspace-theme min-h-0 flex-1 overflow-y-auto px-4 py-6 text-white sm:px-8">
       <div className="glass-panel mx-auto max-w-5xl rounded-2xl p-4 sm:p-6">
         <div className="relative z-30 flex items-center justify-between gap-4">
           <div>

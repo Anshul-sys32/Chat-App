@@ -186,13 +186,13 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
             </div>
           </div>
           <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-2 sm:mt-10 sm:flex-col sm:items-center sm:gap-2">
-            <IconButton icon={<FaUsers />} label="Messages · People" onClick={() => selectTab('messages')} active={isDesktop && (activeTab === 'messages' || activeTab === 'localUsers')} />
+            <IconButton icon={<FaUsers />} label="Messages · People" onClick={() => selectTab('messages')} active={activeTab === 'messages' || activeTab === 'localUsers'} />
             <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Messages</span>
-            <IconButton icon={<FaLayerGroup />} label="Groups" onClick={() => selectTab('groups')} active={isDesktop && activeTab === 'groups'} />
+            <IconButton icon={<FaLayerGroup />} label="Groups" onClick={() => selectTab('groups')} active={activeTab === 'groups'} />
             <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Groups</span>
-            <IconButton icon={<FaPhone />} label="Calls" onClick={() => selectTab('calls')} active={isDesktop && activeTab === 'calls'} />
+            <IconButton icon={<FaPhone />} label="Calls" onClick={() => selectTab('calls')} active={activeTab === 'calls'} />
             <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Calls</span>
-            <IconButton icon={<FaCalendarAlt />} label="Meetings" onClick={() => selectTab('meetings')} active={isDesktop && activeTab === 'meetings'} />
+            <IconButton icon={<FaCalendarAlt />} label="Meetings" onClick={() => selectTab('meetings')} active={activeTab === 'meetings'} />
             <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Meetings</span>
             <IconButton icon={<FaImages />} label="Media gallery" onClick={() => setIsGalleryOpen(true)} active={false} />
           </nav>
@@ -206,7 +206,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
                 previousTabRef.current = activeTab === 'settings' ? previousTabRef.current : activeTab;
                 selectTab('settings');
               }}
-              active={isDesktop && activeTab === 'settings'}
+              active={activeTab === 'settings'}
             />
             {user?.role === 'admin' && <IconButton icon={<FaShieldAlt />} label="Admin" onClick={onOpenAdmin} active={false} />}
           </div>

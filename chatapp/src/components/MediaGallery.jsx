@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { FaDownload, FaExternalLinkAlt, FaFile, FaImage, FaLink, FaStar, FaTimes } from 'react-icons/fa';
+import { FaDownload, FaExternalLinkAlt, FaFile, FaLink, FaStar, FaTimes, FaVolumeUp } from 'react-icons/fa';
+import useDialogFocus from '../useDialogFocus';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || '';
 const mediaOptions = [
@@ -34,7 +35,7 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
   const conversationId = conversation?._id;
   const conversationType = conversation?.type;
   const conversationChannelId = conversation?.channelId;
-  const [filters, setFilters] = useState({ search: '', mediaType: 'all', senderId: '', from: '', to: '', sort: 'newest' });
+  const [filters, setFilters] = useState({ search: '', mediaType: 'all', sender: '', from: '', to: '', sort: 'newest' });
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const [items, setItems] = useState([]);
   const [savedKeys, setSavedKeys] = useState(() => new Set());
@@ -42,15 +43,7 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => document.removeEventListener('keydown', closeOnEscape);
-  }, [open, onClose]);
+  const dialogRef = useDialogFocus(open, onClose);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -157,7 +150,7 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-2 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="media-gallery-title" className="glass-panel flex max-h-[min(94dvh,60rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border shadow-2xl">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="media-gallery-title" className="glass-panel flex max-h-[min(94dvh,60rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <h2 id="media-gallery-title" className="text-sm font-semibold">{conversation ? `Media · ${conversation.name || conversation.username || 'Conversation'}` : 'Media gallery'}</h2>
@@ -171,7 +164,11 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
           <select value={filters.mediaType} onChange={(event) => { const mediaType = event.target.value; setFilters((current) => ({ ...current, mediaType })); }} aria-label="Media type" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-sm">
             {mediaOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <input type="number" min="1" value={filters.senderId} onChange={(event) => setFilters((current) => ({ ...current, senderId: event.target.value }))} aria-label="Filter by sender ID" placeholder="Sender ID" className="glass-input min-w-0 rounded border px-3 py-2 text-sm" />
+          <label className="min-w-0">
+            <span className="sr-only">Filter by sender</span>
+            <input list="gallery-senders" value={filters.sender} onChange={(event) => setFilters((current) => ({ ...current, sender: event.target.value }))} maxLength={80} aria-label="Filter by sender" placeholder="Sender name" className="glass-input min-w-0 w-full rounded border px-3 py-2 text-sm" />
+            <datalist id="gallery-senders">{[...new Set(items.map((item) => item.senderName).filter(Boolean))].map((name) => <option key={name} value={name} />)}</datalist>
+          </label>
           <input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} aria-label="From date" className="glass-input min-w-0 rounded border px-2 py-2 text-sm" />
           <div className="flex min-w-0 gap-2">
             <input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} aria-label="To date" className="glass-input min-w-0 flex-1 rounded border px-2 py-2 text-sm" />
@@ -199,7 +196,7 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
                       <div className="grid aspect-[16/10] place-items-center overflow-hidden bg-black/20">
                         {item.mediaType === 'image' && <img src={mediaUrl(item)} alt={item.name || 'Shared image'} loading="lazy" crossOrigin="use-credentials" className="h-full w-full object-contain" />}
                         {item.mediaType === 'video' && <video src={mediaUrl(item)} controls preload="metadata" crossOrigin="use-credentials" className="h-full w-full object-contain" aria-label={item.name || 'Shared video'} />}
-                        {item.mediaType === 'audio' && <div className="w-full px-4"><FaImage className="mx-auto mb-4 text-2xl opacity-50" /><audio src={mediaUrl(item)} controls preload="none" crossOrigin="use-credentials" className="w-full" aria-label={item.name || 'Shared audio'} /></div>}
+                        {item.mediaType === 'audio' && <div className="w-full px-4"><FaVolumeUp className="theme-muted mx-auto mb-4 text-2xl" /><audio src={mediaUrl(item)} controls preload="none" crossOrigin="use-credentials" className="w-full" aria-label={item.name || 'Shared audio'} /></div>}
                         {item.mediaType === 'link' && <a href={item.url} target="_blank" rel="noreferrer" className="flex max-h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-4 text-center text-accent-text"><FaLink className="shrink-0 text-2xl" /><span className="line-clamp-3 break-all text-sm">{item.url}</span></a>}
                         {!['image', 'video', 'audio', 'link'].includes(item.mediaType) && <div className="flex flex-col items-center gap-2 px-4 text-center"><FaFile className="text-3xl opacity-55" /><span className="line-clamp-2 break-all text-xs">{item.name || 'Shared file'}</span></div>}
                       </div>
