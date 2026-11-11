@@ -38,9 +38,15 @@ const executeBotCommand = async (groupId, channelId, content) => {
   let responseContent = String(command.responseContent);
   if (command.botType === "builtin" && parsed.commandKey === "help") {
     const [commands] = await pool.execute(
-      `SELECT command_key AS commandKey, description
-       FROM community_bot_commands WHERE group_id = ? AND enabled = TRUE ORDER BY command_key LIMIT 50`,
-      [groupId]
+      `SELECT command.command_key AS commandKey, command.description
+       FROM community_bot_commands command
+       JOIN community_bots bot ON bot.id = command.bot_id AND bot.enabled = TRUE
+       WHERE command.group_id = ? AND command.enabled = TRUE
+         AND (JSON_LENGTH(JSON_EXTRACT(bot.config, '$.allowedChannelIds')) IS NULL
+              OR JSON_LENGTH(JSON_EXTRACT(bot.config, '$.allowedChannelIds')) = 0
+              OR JSON_CONTAINS(JSON_EXTRACT(bot.config, '$.allowedChannelIds'), CAST(? AS JSON)))
+       ORDER BY command.command_key LIMIT 50`,
+      [groupId, JSON.stringify(channelId)]
     );
     responseContent = `Available commands: ${commands.map((item) => `/${item.commandKey}${item.description ? ` (${item.description})` : ""}`).join(", ")}`;
   }

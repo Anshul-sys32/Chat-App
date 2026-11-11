@@ -30,7 +30,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
     const [newChannelType, setNewChannelType] = useState('text');
   const [channelPostingMode, setChannelPostingMode] = useState('members');
   const [newRoleName, setNewRoleName] = useState('');
-  const [newRolePermissions, setNewRolePermissions] = useState({ manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, postMessages: true });
+  const [newRolePermissions, setNewRolePermissions] = useState({ manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, manageIntegrations: false, postMessages: true });
   const [permissionChannelId, setPermissionChannelId] = useState('');
   const [permissionRoleKey, setPermissionRoleKey] = useState('');
   const [channelRolePermissions, setChannelRolePermissions] = useState([]);
@@ -183,7 +183,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
       Socket.off('group-channel-updated', handleChannelUpdated);
       Socket.off('group-channel-archived', handleChannelArchived);
     };
-  }, [currentUser?._id, activeGroup?._id, groups, isAdmin]);
+  }, [currentUser?._id, activeGroup, groups, isAdmin]);
 
   const refreshMembers = async (group) => {
     setError('');
@@ -212,7 +212,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
         permissions: newRolePermissions,
       }, authConfig());
       setNewRoleName('');
-      setNewRolePermissions({ manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, postMessages: true });
+      setNewRolePermissions({ manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, manageIntegrations: false, postMessages: true });
       await refreshMembers(activeGroup);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not create group role.');
@@ -643,6 +643,37 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
         <div className="pointer-events-auto absolute inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => event.target === event.currentTarget && setIsManagementOpen(false)}>
           <section className="max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-5 text-white shadow-2xl">
             <div className="mb-5 flex items-start gap-3"><Avatar src={activeGroup.avatarUrl} name={activeGroup.name} group className="h-12 w-12 text-base" /><div className="min-w-0 flex-1"><h2 className="truncate text-lg font-semibold">{activeGroup.name}</h2><p className="text-xs text-white/55">Group management · {activeGroup.members} members {activeGroup.isActive === 0 && <span className="text-rose-300">· inactive</span>}</p></div><button type="button" onClick={() => setIsManagementOpen(false)} className="rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close group management"><FaTimes /></button></div>
+            {activeGroup.groupType === 'community' && hasPermission(activeGroup, 'manageRoles', isAdmin) && (
+              <section className="mb-4 rounded-xl border border-white/10 p-3">
+                <h3 className="text-sm font-semibold">Community roles</h3>
+                <form onSubmit={createRole} className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <input value={newRoleName} onChange={(event) => setNewRoleName(event.target.value)} maxLength={60} required placeholder="New role name" aria-label="New role name" className="min-w-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm sm:col-span-2" />
+                  <fieldset className="grid gap-2 sm:col-span-2 sm:grid-cols-2">
+                    <legend className="mb-1 text-xs text-white/55">Capabilities</legend>
+                    {[
+                      ['manageRoles', 'Manage roles'], ['manageMembers', 'Manage members'],
+                      ['manageChannels', 'Manage channels'], ['manageMessages', 'Moderate messages'],
+                      ['manageBots', 'Manage bots'], ['manageIntegrations', 'Manage integrations'],
+                      ['postMessages', 'Post messages'],
+                    ].map(([permission, label]) => <label key={permission} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={newRolePermissions[permission]} onChange={(event) => setNewRolePermissions((current) => ({ ...current, [permission]: event.target.checked }))} />{label}</label>)}
+                  </fieldset>
+                  <button type="submit" disabled={!newRoleName.trim()} className="w-fit rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">Create role</button>
+                </form>
+                <ul className="mt-3 divide-y divide-white/10">
+                  {groupRoles.map((role) => <li key={role.roleKey} className="flex min-w-0 items-center gap-2 py-2"><span className="min-w-0 flex-1 truncate text-xs">{role.name}</span><span className="theme-muted text-[10px]">{Object.entries(typeof role.permissions === 'string' ? JSON.parse(role.permissions || '{}') : role.permissions || {}).filter(([, enabled]) => enabled).length} permissions</span>{!role.isSystem && <button type="button" onClick={() => deleteRole(role)} aria-label={`Delete ${role.name} role`} className="rounded px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40">Delete</button>}</li>)}
+                </ul>
+              </section>
+            )}
+            {activeGroup.groupType === 'community' && hasPermission(activeGroup, 'manageChannels', isAdmin) && (
+              <section className="mb-4 rounded-xl border border-white/10 p-3">
+                <h3 className="text-sm font-semibold">Channel posting access</h3>
+                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <select value={permissionChannelId} onChange={(event) => loadChannelRolePermissions(event.target.value)} aria-label="Channel for posting permissions" className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-2 py-2 text-xs"><option value="">Choose channel</option>{channels.filter((channel) => channel.channelType === 'text').map((channel) => <option key={channel._id} value={channel._id}>#{channel.name}</option>)}</select>
+                  <select value={permissionRoleKey} onChange={(event) => setPermissionRoleKey(event.target.value)} aria-label="Role for channel posting permissions" disabled={!permissionChannelId} className="min-w-0 rounded-lg border border-white/10 bg-slate-900 px-2 py-2 text-xs"><option value="">Choose role</option>{groupRoles.filter((role) => role.roleKey !== 'admin').map((role) => <option key={role.roleKey} value={role.roleKey}>{role.name}</option>)}</select>
+                  <button type="button" disabled={!permissionChannelId || !permissionRoleKey} onClick={updateChannelRolePermission} className="rounded-lg border border-white/15 px-3 py-2 text-xs hover:bg-white/10 disabled:opacity-40">{(() => { const role = channelRolePermissions.find((item) => item.roleKey === permissionRoleKey); if (!role) return 'Toggle posting'; const defaultAllowed = channels.find((channel) => String(channel._id) === permissionChannelId)?.postingMode === 'members' && role.permissions?.postMessages !== false; return (role.canPost ?? defaultAllowed) ? 'Disable posting' : 'Enable posting'; })()}</button>
+                </div>
+              </section>
+            )}
             {activeGroup.role === 'admin' && <form onSubmit={updateGroupName} className="mb-4 flex gap-2"><input value={activeGroup.name} onChange={(event) => setActiveGroup((current) => ({ ...current, name: event.target.value }))} maxLength={100} aria-label="Group name" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm" /><button type="submit" className="rounded-lg border border-white/15 px-3 py-2 text-xs hover:bg-white/10">Save name</button></form>}
             {activeGroup.role === 'admin' && <div className="grid gap-2 sm:grid-cols-2"><label className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 p-3 text-sm hover:bg-white/10"><FaCamera className="text-accent-text" /> Change group photo<input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" className="sr-only" onChange={(event) => { uploadGroupAvatar(activeGroup, event.target.files?.[0]); event.target.value = ''; }} /></label><label className="flex items-center gap-2 rounded-xl border border-white/10 p-3 text-sm"><FaExchangeAlt className="text-accent-text" /> Type<select value={activeGroup.groupType} onChange={(event) => updateGroupType(event.target.value)} className="ml-auto max-w-[130px] rounded bg-slate-900 px-2 py-1 text-xs"><option value="standard">Standard</option><option value="community">Community</option></select></label></div>}
             {activeGroup.role === 'admin' && <form onSubmit={addMember} className="mt-5 rounded-xl border border-white/10 p-3"><div className="mb-2 flex items-center gap-2 text-sm font-semibold"><FaUserPlus className="text-accent-text" /> Invite a member</div><div className="flex gap-2"><input value={memberIdentifier} onChange={(event) => setMemberIdentifier(event.target.value)} placeholder="Username or email" aria-label="Username or email to invite" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-sm" /><button type="submit" disabled={!memberIdentifier.trim()} className="rounded-lg bg-accent px-3 text-accent-contrast disabled:opacity-40" aria-label="Send invitation"><FaPlus /></button></div><p className="mt-2 text-[11px] text-white/45">They must accept the invitation from Alerts.</p></form>}

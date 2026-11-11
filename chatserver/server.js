@@ -12,9 +12,10 @@ const { cleanupAbandonedVoiceUploads } = require("./utils/voiceCleanup");
 const { sendMeetingReminders } = require("./services/meetingReminders");
 const { publishScheduledCommunityPosts } = require("./services/scheduledCommunityPosts");
 const { publishScheduledMessages } = require("./services/scheduledMessages");
+const { processIntegrationEvents } = require("./services/integrations/eventQueue");
 const authRoutes = require("./routes/authRoutes");
 const protect = require("./middleware/authMiddleware");
-const { deliverUpload, uploadFilenamePattern } = require("./controllers/mediaGalleryController");
+const { deliverUpload } = require("./controllers/mediaGalleryController");
 const { corsOrigin } = require("./utils/cors");
 
 const app = express();
@@ -59,6 +60,12 @@ connectDB().then(async () => {
     });
   }, 15 * 1000);
   scheduledMessageTimer.unref();
+  const integrationEventTimer = setInterval(() => {
+    processIntegrationEvents(app.get("io")).catch((error) => {
+      console.error("Integration event processing failed:", error.message);
+    });
+  }, 2 * 1000);
+  integrationEventTimer.unref();
   publishScheduledMessages(app.get("io")).catch((error) => {
     console.error("Initial scheduled message delivery failed:", error.message);
   });
@@ -76,7 +83,11 @@ app.use(cors({
   credentials: true,
 }));
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, _res, buffer) => {
+    if (req.originalUrl?.startsWith("/api/integrations/")) req.rawBody = Buffer.from(buffer);
+  },
+}));
 fs.mkdirSync(uploadDirectory, { recursive: true });
 fs.mkdirSync(stickerDirectory, { recursive: true });
 fs.mkdirSync(voiceDirectory, { recursive: true });

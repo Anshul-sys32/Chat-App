@@ -4,7 +4,7 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaExternalLinkAlt, FaHashtag, FaImages, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaReply, FaRobot, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaExternalLinkAlt, FaHashtag, FaImages, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaPlug, FaReply, FaRobot, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -20,6 +20,7 @@ import useFloatingPanel from '../useFloatingPanel';
 import { normalizeNotificationTarget } from '../notificationDeliveryPolicy';
 import MediaGallery from './MediaGallery';
 import CommunityBotsPanel from './CommunityBotsPanel';
+import CommunityIntegrationsPanel from './CommunityIntegrationsPanel';
 
 const CommunityCodeRoom = lazy(() => import('./CommunityCodeRoom'));
 
@@ -120,6 +121,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [savedMessagesOpen, setSavedMessagesOpen] = useState(false);
   const [conversationGalleryOpen, setConversationGalleryOpen] = useState(false);
   const [communityBotsOpen, setCommunityBotsOpen] = useState(false);
+  const [communityIntegrationsOpen, setCommunityIntegrationsOpen] = useState(false);
   const [savedMessagesLoading, setSavedMessagesLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -200,11 +202,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }).then(({ data }) => {
       if (!active) return;
       setBotCommands((data.bots || []).filter((bot) => bot.enabled)
+        .filter((bot) => !bot.allowedChannelIds?.length || bot.allowedChannelIds.map(String).includes(String(selectedChat.channelId || '')))
         .flatMap((bot) => (bot.commands || []).filter((command) => command.enabled)
           .map((command) => ({ ...command, botName: bot.name }))));
     }).catch(() => { if (active) setBotCommands([]); });
     return () => { active = false; };
-  }, [selectedChat?._id, selectedChat?.type, selectedChat?.groupType]);
+  }, [selectedChat?._id, selectedChat?.type, selectedChat?.groupType, selectedChat?.channelId]);
 
   useEffect(() => () => {
     if (replyDrag.current?.timer) window.clearTimeout(replyDrag.current.timer);
@@ -1005,11 +1008,6 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }
   };
 
-  const commandPrefix = isCommunityChat && /^\/[a-z0-9_-]*$/i.test(msg.trim()) ? msg.trim().slice(1).toLowerCase() : null;
-  const matchingBotCommands = commandPrefix === null ? [] : botCommands
-    .filter((command) => command.key.startsWith(commandPrefix))
-    .slice(0, 6);
-
   const updateCommunityEngagement = async (message, action, payload) => {
     const chat = selectedChatRef.current;
     if (chat?.type !== 'group' || chat.groupType !== 'community') return;
@@ -1595,6 +1593,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const isCommunityChat = selectedChat?.type === 'group'
     && selectedChat.groupType === 'community'
     && !isCommunityCallChannel;
+  const commandPrefix = isCommunityChat && /^\/[a-z0-9_-]*$/i.test(msg.trim()) ? msg.trim().slice(1).toLowerCase() : null;
+  const matchingBotCommands = commandPrefix === null ? [] : botCommands
+    .filter((command) => command.key.startsWith(commandPrefix))
+    .slice(0, 6);
   const isAnnouncementChannel = isCommunityChat && selectedChat.channelName?.toLowerCase() === 'announcements';
   useEffect(() => {
     setAnnouncementError('');
@@ -1779,6 +1781,17 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {isCommunityChat && (
               <button
                 type="button"
+                onClick={() => setCommunityIntegrationsOpen(true)}
+                title="Manage community integrations"
+                aria-label="Manage community integrations"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
+              >
+                <FaPlug />
+              </button>
+            )}
+            {isCommunityChat && (
+              <button
+                type="button"
                 onClick={loadCommunityReputation}
                 title="Community contributions"
                 aria-label="Community contributions"
@@ -1883,6 +1896,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         />
         {communityBotsOpen && selectedChat?.type === 'group' && selectedChat.groupType === 'community' && (
           <CommunityBotsPanel groupId={selectedChat._id} groupName={selectedChat.name} onClose={() => setCommunityBotsOpen(false)} />
+        )}
+        {communityIntegrationsOpen && selectedChat?.type === 'group' && selectedChat.groupType === 'community' && (
+          <CommunityIntegrationsPanel groupId={selectedChat._id} groupName={selectedChat.name} onClose={() => setCommunityIntegrationsOpen(false)} />
         )}
 
         {globalSearchOpen && (

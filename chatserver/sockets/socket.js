@@ -327,7 +327,7 @@ const initSocket = (httpServer) => {
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.channel_id AS channelId,
                   channel.name AS channelName, gm.sender_id AS sender, gm.bot_id AS botId,
-                  COALESCE(bot.name, u.username) AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
+                  COALESCE(integration.name, bot.name, u.username) AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
                   gm.message_type AS messageType, gm.structured_data AS structuredData,
                   gm.accepted_answer_id AS acceptedAnswerId,
                   gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
@@ -337,6 +337,7 @@ const initSocket = (httpServer) => {
                   gm.created_at AS timestamp
            FROM group_messages gm JOIN users u ON u.id = gm.sender_id
            LEFT JOIN community_bots bot ON bot.id = gm.bot_id
+           LEFT JOIN community_integrations integration ON integration.id = gm.integration_id
            LEFT JOIN group_channels channel ON channel.id = gm.channel_id
            LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
            LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id

@@ -1,13 +1,13 @@
 const BUILT_IN_GROUP_ROLES = [
-  { key: "admin", name: "Admin", permissions: { manageRoles: true, manageMembers: true, manageChannels: true, manageMessages: true, manageBots: true, postMessages: true } },
-  { key: "member", name: "Member", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, postMessages: true } },
-  { key: "moderator", name: "Moderator", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: true, manageBots: false, postMessages: true } },
-  { key: "developer", name: "Developer", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, postMessages: true } },
-  { key: "mentor", name: "Mentor", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, postMessages: true } },
-  { key: "verified", name: "Verified", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, postMessages: true } },
+  { key: "admin", name: "Admin", permissions: { manageRoles: true, manageMembers: true, manageChannels: true, manageMessages: true, manageBots: true, manageIntegrations: true, postMessages: true } },
+  { key: "member", name: "Member", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, manageIntegrations: false, postMessages: true } },
+  { key: "moderator", name: "Moderator", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: true, manageBots: false, manageIntegrations: false, postMessages: true } },
+  { key: "developer", name: "Developer", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, manageIntegrations: false, postMessages: true } },
+  { key: "mentor", name: "Mentor", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, manageIntegrations: false, postMessages: true } },
+  { key: "verified", name: "Verified", permissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, manageBots: false, manageIntegrations: false, postMessages: true } },
 ];
 
-const GROUP_PERMISSION_KEYS = ["manageRoles", "manageMembers", "manageChannels", "manageMessages", "manageBots", "postMessages"];
+const GROUP_PERMISSION_KEYS = ["manageRoles", "manageMembers", "manageChannels", "manageMessages", "manageBots", "manageIntegrations", "postMessages"];
 
 const parsePermissions = (value) => {
   if (value && typeof value === "object" && !Array.isArray(value)) return value;

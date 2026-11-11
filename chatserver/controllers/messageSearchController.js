@@ -92,13 +92,14 @@ const searchMessages = async (req, res) => {
                 group_record.id AS groupId, group_record.name AS groupName,
                 group_record.group_type AS groupType, message.channel_id AS channelId,
                 channel.name AS channelName, message.sender_id AS sender, message.bot_id AS botId,
-                COALESCE(bot.name, sender.username) AS senderName, message.content, message.attachments,
+                COALESCE(integration.name, bot.name, sender.username) AS senderName, message.content, message.attachments,
                 message.message_type AS postType, message.created_at AS timestamp
          FROM group_messages message
          JOIN group_members membership ON membership.group_id = message.group_id AND membership.user_id = ?
          JOIN chat_groups group_record ON group_record.id = message.group_id AND group_record.is_active = TRUE
          JOIN users sender ON sender.id = message.sender_id
          LEFT JOIN community_bots bot ON bot.id = message.bot_id
+         LEFT JOIN community_integrations integration ON integration.id = message.integration_id
          LEFT JOIN group_channels channel ON channel.id = message.channel_id
          WHERE message.is_deleted = FALSE
            AND NOT EXISTS (SELECT 1 FROM group_message_hidden_for hidden

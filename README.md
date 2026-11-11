@@ -204,6 +204,7 @@ DB_NAME=chatapp
 
 JWT_SECRET=your_long_random_secret
 GOOGLE_CLIENT_ID=your_google_oauth_client_id
+INTEGRATION_ENCRYPTION_KEY=base64_key_from_openssl_rand_base64_32
 
 FRONTEND_ORIGIN=http://localhost:5174
 
@@ -216,6 +217,8 @@ MAIL_FROM=NFaNG <no-reply@example.com>
 ```
 
 Use the environment variable names expected by the checked-out backend version. Configure a strong, private JWT signing secret and valid credentials for your environment.
+
+Community webhook integrations require a separate 32-byte encryption key. Generate one with `openssl rand -base64 32` and set it as `INTEGRATION_ENCRYPTION_KEY`; keep it stable and backed up because stored integration secrets cannot be decrypted without the same key. RSS parsing is available, but scheduled feed polling is not enabled. Google Calendar remains unavailable until an OAuth authorization flow is configured.
 
 The server initializes the required database tables at startup.
 

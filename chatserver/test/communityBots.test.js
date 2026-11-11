@@ -46,7 +46,7 @@ test("command execution reloads the enabled installation and applies channel sco
 
 test("the built-in Help command lists enabled community commands", async () => {
   mock.method(pool, "execute", async (sql) => {
-    if (sql.includes("SELECT command_key AS commandKey")) {
+    if (sql.includes("SELECT command.command_key AS commandKey")) {
       return [[{ commandKey: "help", description: "Show commands" }, { commandKey: "welcome", description: "Welcome someone" }], []];
     }
     return [[{

@@ -56,6 +56,15 @@ const up = async (connection) => {
       CONSTRAINT community_integration_log_event_fk FOREIGN KEY (event_id) REFERENCES community_integration_events(id) ON DELETE SET NULL
     ) ENGINE=InnoDB
   `);
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS community_integration_webhook_limits (
+      integration_id BIGINT UNSIGNED NOT NULL,
+      window_start DATETIME NOT NULL,
+      request_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      PRIMARY KEY (integration_id, window_start),
+      CONSTRAINT community_integration_webhook_limit_fk FOREIGN KEY (integration_id) REFERENCES community_integrations(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB
+  `);
   const [columns] = await connection.execute(
     `SELECT column_name AS name FROM information_schema.columns
      WHERE table_schema = DATABASE() AND table_name = 'group_messages'`
@@ -82,6 +91,7 @@ const down = async (connection) => {
     await connection.query("ALTER TABLE group_messages DROP FOREIGN KEY group_messages_integration_fk, DROP INDEX group_messages_integration, DROP COLUMN integration_id");
   }
   await connection.query("DROP TABLE IF EXISTS community_integration_logs");
+  await connection.query("DROP TABLE IF EXISTS community_integration_webhook_limits");
   await connection.query("DROP TABLE IF EXISTS community_integration_events");
   await connection.query("DROP TABLE IF EXISTS community_integrations");
   await connection.execute("UPDATE group_roles SET permissions = JSON_REMOVE(permissions, '$.manageIntegrations') WHERE is_system = TRUE");

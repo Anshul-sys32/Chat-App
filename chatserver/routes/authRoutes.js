@@ -32,6 +32,14 @@ const {
 	uninstallCommunityBot,
 	updateCommunityBot,
 } = require("../controllers/communityBotsController");
+const {
+	createIntegration,
+	deleteIntegration,
+	listIntegrationLogs,
+	listIntegrations,
+	receiveWebhook,
+	updateIntegration,
+} = require("../controllers/communityIntegrationsController");
 const { getCommunityReputation } = require("../controllers/communityReputationController");
 const {
 	createCommunityTask,
@@ -208,6 +216,12 @@ router.put("/groups/:groupId/bots/built-in/:botKey", protect, installBuiltinBot)
 router.post("/groups/:groupId/bots", protect, createCustomBot);
 router.patch("/groups/:groupId/bots/:botId", protect, updateCommunityBot);
 router.delete("/groups/:groupId/bots/:botId", protect, uninstallCommunityBot);
+router.get("/groups/:groupId/integrations", protect, listIntegrations);
+router.post("/groups/:groupId/integrations", protect, createIntegration);
+router.patch("/groups/:groupId/integrations/:integrationId", protect, updateIntegration);
+router.delete("/groups/:groupId/integrations/:integrationId", protect, deleteIntegration);
+router.get("/groups/:groupId/integrations/:integrationId/logs", protect, listIntegrationLogs);
+router.post("/integrations/:integrationId/webhook", receiveWebhook);
 
 router.get("/stickers", protect, async (req, res) => {
 	try {
@@ -1969,7 +1983,7 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 		const [rows] = await pool.execute(
 			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender, gm.bot_id AS botId,
 					gm.channel_id AS channelId,
-					COALESCE(bot.name, u.username) AS senderName,
+					COALESCE(integration.name, bot.name, u.username) AS senderName,
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
@@ -1982,6 +1996,7 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
 			 LEFT JOIN community_bots bot ON bot.id = gm.bot_id
+			 LEFT JOIN community_integrations integration ON integration.id = gm.integration_id
 			 LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
 				 LEFT JOIN group_message_hidden_for reply_hidden ON reply_hidden.message_id = reply_message.id AND reply_hidden.user_id = ?

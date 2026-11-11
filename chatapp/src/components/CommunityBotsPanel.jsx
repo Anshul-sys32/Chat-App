@@ -25,7 +25,7 @@ export default function CommunityBotsPanel({ groupId, groupName, onClose }) {
         axios.get(`${API_URL}/api/groups/${groupId}/channels`, authConfig()),
       ]);
       setBots(botResponse.data.bots || []);
-      setChannels((channelResponse.data.channels || []).filter((channel) => channel.channelType === 'text' && !channel.isArchived));
+      setChannels((channelResponse.data.channels || []).filter((channel) => channel.channelType === 'text'));
     } catch (requestError) {
       setError(requestError.response?.status === 403
         ? 'Only community managers can change bot installations.'
@@ -102,7 +102,7 @@ export default function CommunityBotsPanel({ groupId, groupName, onClose }) {
                       </div>
                       {bot.commands?.length > 0 && <p className="theme-muted mt-2 text-xs">{bot.commands.map((command) => `/${command.key}`).join(' · ')}</p>}
                       {channels.length > 0 && bot.enabled && <fieldset className="mt-3"><legend className="theme-muted mb-1 text-[11px]">Allowed channels. Leave all unchecked for every text channel.</legend><div className="flex flex-wrap gap-x-4 gap-y-2">
-                        {channels.map((channel) => <label key={channel.id} className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={(bot.allowedChannelIds || []).map(Number).includes(Number(channel.id))} disabled={saving} onChange={(event) => updateChannelScope(bot, channel.id, event.target.checked)} />#{channel.name}</label>)}
+                        {channels.map((channel) => <label key={channel._id} className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={(bot.allowedChannelIds || []).map(Number).includes(Number(channel._id))} disabled={saving} onChange={(event) => updateChannelScope(bot, channel._id, event.target.checked)} />#{channel.name}</label>)}
                       </div></fieldset>}
                     </li>
                   ))}
