@@ -32,7 +32,7 @@ const applyVideoUplinkBudget = async (peers) => {
   }));
 };
 
-export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
+export default function VideoCall({ to, peerName, callType, isOpen, onClose, groupId, groupType, channelId, channelType }) {
   const localVideo = useRef();
   const peerConnections = useRef(new Map());
   const remoteMediaElements = useRef(new Map());
@@ -69,6 +69,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   const audioRoutesPanel = useFloatingPanel(showAudioRoutes, () => setShowAudioRoutes(false));
   const callHistoryId = useRef(null);
   const callRoomId = useRef(null);
+  const groupCallActiveRef = useRef(false);
   const [minimizedPosition, setMinimizedPosition] = useState(null);
 
   currentPeerName.current = peerName;
@@ -206,11 +207,37 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   };
 
   useEffect(() => {
+    const handleGroupCallInvite = (invite) => {
+      if (callRoomId.current || !invite?.roomId) return;
+      setIncomingOffer({ ...invite, groupCall: true, callType: invite.callType === "audio" ? "audio" : "video" });
+      setCallPeerName(invite.fromName || "Group call");
+      setActiveCallType(invite.callType === "audio" ? "audio" : "video");
+      setIsCallHost(false);
+      setVisible(true);
+      setMinimized(false);
+      setError("");
+    };
+
+    const handleGroupCallStarted = ({ roomId, callType: roomCallType }) => {
+      if (roomId !== callRoomId.current) return;
+      setActiveCallType(roomCallType === "audio" ? "audio" : "video");
+      setCallStatus("Calling group members");
+    };
+
+    const handleGroupCallJoined = ({ roomId, callType: roomCallType, participants = [] }) => {
+      callRoomId.current = roomId;
+      setActiveCallType(roomCallType === "audio" ? "audio" : "video");
+      setIsCallHost(false);
+      callParticipantIds.current = new Set(participants.map(String));
+      setCalling(false);
+      setCallStatus(participants.length ? "Connecting" : "In channel");
+    };
+
     const handleOffer = async ({ offer, from, fromName, roomId, callType: incomingCallType }) => {
       const peerId = String(from);
       if (peerConnections.current.has(peerId)) return;
       const requestedType = incomingCallType === "audio" ? "audio" : "video";
-      if (peerConnections.current.size > 0) {
+      if (peerConnections.current.size > 0 || groupCallActiveRef.current) {
         if (!localStream.current || callRoomId.current !== roomId) return;
         const peer = createPeerConnection(peerId);
         peerConnections.current.set(peerId, peer);
@@ -349,6 +376,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
       sfuRemoteStreams.current.delete(peerId);
       if (!peerConnections.current.size && !sfuRoomRef.current) {
         cleanupCall();
+        callRoomId.current = null;
         setIncomingOffer(null);
         setCalling(false);
         setCallStatus("Call ended");
@@ -357,8 +385,15 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
         onCloseRef.current?.();
       }
     };
-    const handleCallRoomError = ({ message }) => setError(message || "Could not add that participant to the call.");
+    const handleCallRoomError = ({ message }) => {
+      setCalling(false);
+      setCallStatus("Call unavailable");
+      setError(message || "Could not add that participant to the call.");
+    };
 
+    Socket.on("group-call-invite", handleGroupCallInvite);
+    Socket.on("group-call-started", handleGroupCallStarted);
+    Socket.on("group-call-joined", handleGroupCallJoined);
     Socket.on("offer", handleOffer);
     Socket.on("call-participant-joined", handleParticipantJoined);
     Socket.on("sfu-call-invite", handleSfuInvite);
@@ -370,6 +405,9 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     Socket.on("call-room-error", handleCallRoomError);
 
     return () => {
+      Socket.off("group-call-invite", handleGroupCallInvite);
+      Socket.off("group-call-started", handleGroupCallStarted);
+      Socket.off("group-call-joined", handleGroupCallJoined);
       Socket.off("offer", handleOffer);
       Socket.off("call-participant-joined", handleParticipantJoined);
       Socket.off("sfu-call-invite", handleSfuInvite);
@@ -384,6 +422,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   }, []);
 
   const cleanupCall = () => {
+    groupCallActiveRef.current = false;
     const sfuRoom = sfuRoomRef.current;
     sfuRoomRef.current = null;
     if (sfuRoom) sfuRoom.disconnect();
@@ -544,7 +583,8 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
   connectToSfuRef.current = connectToSfu;
 
   const callUser = async () => {
-    if (!to || calling || !Socket.connected) {
+    const isGroupCall = groupId != null;
+    if ((!to && !isGroupCall) || calling || !Socket.connected) {
       setError("Connect to the chat server before starting a call.");
       return;
     }
@@ -555,9 +595,24 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
     setIsCallHost(true);
     setMinimized(false);
     setCallStatus("Calling");
-    callRoomId.current = crypto.randomUUID();
     try {
       const stream = await ensureLocalMedia(callType);
+      if (isGroupCall) {
+        groupCallActiveRef.current = true;
+        if (groupType === "community") {
+          if (!channelId || channelType !== callType) throw new Error("Choose the matching audio or video channel.");
+          callRoomId.current = `community-call:${groupId}:${channelId}`;
+          setCallStatus("Joining channel");
+          Socket.emit("join-call-channel", { groupId, channelId });
+        } else {
+          callRoomId.current = crypto.randomUUID();
+          setCallStatus("Calling group members");
+          Socket.emit("start-group-call", { groupId, callType, roomId: callRoomId.current });
+        }
+        setCalling(true);
+        return;
+      }
+      callRoomId.current = crypto.randomUUID();
       try {
         const { data: callRecord } = await axios.post(`${API_URL}/api/call-history`, {
           receiverId: to,
@@ -580,6 +635,25 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   const acceptCall = async () => {
     if (!incomingOffer) return;
+    if (incomingOffer.groupCall) {
+      try {
+        groupCallActiveRef.current = true;
+        callRoomId.current = incomingOffer.roomId;
+        setCallPeerName(incomingOffer.fromName || callPeerName);
+        setActiveCallType(incomingOffer.callType);
+        setCalling(true);
+        setCallStatus("Joining group call");
+        await ensureLocalMedia(incomingOffer.callType);
+        Socket.emit("join-group-call", { roomId: incomingOffer.roomId });
+        setIncomingOffer(null);
+        setMinimized(false);
+        setError("");
+      } catch (callError) {
+        setCalling(false);
+        setError(callError.message || "Could not join this group call.");
+      }
+      return;
+    }
     if (incomingOffer.sfu) {
       try {
         callRoomId.current = incomingOffer.roomId;
@@ -670,7 +744,8 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
 
   const closeCall = () => {
     if (Socket.connected) {
-      for (const participantId of callParticipantIds.current) {
+      if (groupCallActiveRef.current && callRoomId.current) Socket.emit("leave-group-call", { roomId: callRoomId.current });
+      else for (const participantId of callParticipantIds.current) {
         Socket.emit("hangup", { to: participantId, roomId: callRoomId.current });
       }
     }
@@ -795,7 +870,7 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
             </p>
           </div>
           <div className="relative flex items-center gap-2">
-            {!incomingOffer && (
+            {!incomingOffer && groupId == null && !groupCallActiveRef.current && (
               <div className="relative">
                 <button type="button" onClick={() => setShowInviteParticipant((open) => !open)} disabled={!isCallHost || (!peerConnections.current.size && !usingSfu) || callParticipantIds.current.size >= 7} aria-label="Invite participant" aria-expanded={showInviteParticipant} title={callParticipantIds.current.size >= 7 ? "Calls are limited to eight people" : "Invite participant"} className="rounded-full border border-white/20 bg-black/30 px-3 py-2 text-sm text-white/90 backdrop-blur transition hover:bg-white/15 disabled:opacity-40"><FaUserPlus /></button>
                 {showInviteParticipant && <form onSubmit={inviteParticipant} className="absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-white/20 bg-[#071315]/95 p-3 shadow-2xl backdrop-blur"><p className="mb-2 text-xs text-white/70">Invite up to seven guests to this call.</p><div className="flex gap-2"><input value={inviteIdentifier} onChange={(event) => setInviteIdentifier(event.target.value)} placeholder="Username or email" aria-label="Participant username or email" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white" /><button type="submit" disabled={invitingParticipant || !inviteIdentifier.trim()} className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-50">{invitingParticipant ? "Inviting…" : "Invite"}</button></div>{remotePeers.length > 0 && <ul className="mt-2 space-y-1">{remotePeers.map((peer) => <li key={peer.userId} className="text-xs text-white/60">{peer.name} connected</li>)}</ul>}</form>}
@@ -901,14 +976,14 @@ export default function VideoCall({ to, peerName, callType, isOpen, onClose }) {
               </p>
             )}
             <div className="flex items-center gap-5 rounded-full border border-white/15 bg-black/45 px-5 py-4 shadow-2xl backdrop-blur-xl">
-              {!calling && !["Connected", "Connecting", "Calling"].includes(callStatus) && (
+              {!calling && !["Connected", "Connecting", "Calling", "In channel"].includes(callStatus) && (
                 <button
                   type="button"
                   onClick={callUser}
-                  disabled={!to}
+                  disabled={!to && groupId == null}
                   className="rounded-full bg-emerald-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Start call
+                  {groupId != null ? groupType === "community" ? "Join channel" : "Start group call" : "Start call"}
                 </button>
               )}
               {calling && <span className="px-2 text-sm text-white/80">Calling…</span>}

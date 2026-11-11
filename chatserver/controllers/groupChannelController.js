@@ -42,13 +42,14 @@ const listChannels = async (req, res) => {
     if (!group) return sendAccessError(res, error);
     const [channels] = await pool.execute(
       `SELECT id AS _id, group_id AS groupId, name, slug, description,
-              posting_mode AS postingMode, sort_order AS sortOrder
+              channel_type AS channelType, posting_mode AS postingMode, sort_order AS sortOrder
        FROM group_channels WHERE group_id = ? AND is_archived = FALSE
        ORDER BY sort_order, id`,
       [groupId]
     );
     const channelsWithAccess = await Promise.all(channels.map(async (channel) => ({
       ...channel,
+      channelType: channel.channelType || "text",
       canPost: await canPostInChannel(group, { ...channel, id: channel._id }, req.user.role),
     })));
     return res.json({ groupType: group.groupType, channels: channelsWithAccess });
@@ -62,10 +63,12 @@ const createChannel = async (req, res) => {
   const groupId = Number(req.params.groupId);
   const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
   const description = typeof req.body.description === "string" ? req.body.description.trim() : "";
+  const channelType = req.body.channelType || "text";
   const postingMode = req.body.postingMode || "members";
   if (!validId(groupId) || !name || name.length > 60 || description.length > 500
+    || !["text", "audio", "video"].includes(channelType)
     || !["members", "admins"].includes(postingMode) || !makeSlug(name)) {
-    return res.status(400).json({ message: "Provide a channel name, valid description, and posting mode." });
+    return res.status(400).json({ message: "Provide a channel name, type, description, and posting mode." });
   }
   try {
     const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
@@ -80,9 +83,9 @@ const createChannel = async (req, res) => {
       [groupId]
     );
     const [result] = await pool.execute(
-      `INSERT INTO group_channels (group_id, name, slug, description, posting_mode, sort_order, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [groupId, name, makeSlug(name), description, postingMode, nextOrder, req.user.id]
+      `INSERT INTO group_channels (group_id, name, slug, description, channel_type, posting_mode, sort_order, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [groupId, name, makeSlug(name), description, channelType, postingMode, nextOrder, req.user.id]
     );
     const channel = {
       _id: result.insertId,
@@ -90,6 +93,7 @@ const createChannel = async (req, res) => {
       name,
       slug: makeSlug(name),
       description,
+      channelType,
       postingMode,
       sortOrder: Number(nextOrder),
     };
@@ -107,18 +111,20 @@ const updateChannel = async (req, res) => {
   const channelId = Number(req.params.channelId);
   if (!validId(groupId) || !validId(channelId)) return res.status(400).json({ message: "Invalid group or channel id." });
   const updates = req.body || {};
-  if (Object.keys(updates).some((key) => !["name", "description", "postingMode", "sortOrder"].includes(key))) {
+  if (Object.keys(updates).some((key) => !["name", "description", "channelType", "postingMode", "sortOrder"].includes(key))) {
     return res.status(400).json({ message: "Unsupported channel fields were provided." });
   }
   const name = updates.name === undefined ? undefined : String(updates.name).trim();
   const description = updates.description === undefined ? undefined : String(updates.description).trim();
+  const channelType = updates.channelType;
   const postingMode = updates.postingMode;
   const sortOrder = updates.sortOrder;
   if (name !== undefined && (!name || name.length > 60 || !makeSlug(name))) return res.status(400).json({ message: "Channel names must be 1 to 60 characters." });
   if (description !== undefined && description.length > 500) return res.status(400).json({ message: "Channel descriptions must be 500 characters or shorter." });
+  if (channelType !== undefined && !["text", "audio", "video"].includes(channelType)) return res.status(400).json({ message: "Invalid channel type." });
   if (postingMode !== undefined && !["members", "admins"].includes(postingMode)) return res.status(400).json({ message: "Invalid channel posting mode." });
   if (sortOrder !== undefined && (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 10000)) return res.status(400).json({ message: "Invalid channel order." });
-  if (name === undefined && description === undefined && postingMode === undefined && sortOrder === undefined) {
+  if (name === undefined && description === undefined && channelType === undefined && postingMode === undefined && sortOrder === undefined) {
     return res.status(400).json({ message: "Provide at least one channel field to update." });
   }
   try {
@@ -133,14 +139,15 @@ const updateChannel = async (req, res) => {
     await pool.execute(
       `UPDATE group_channels SET
          name = COALESCE(?, name), slug = COALESCE(?, slug),
-         description = COALESCE(?, description), posting_mode = COALESCE(?, posting_mode),
+         description = COALESCE(?, description), channel_type = COALESCE(?, channel_type),
+         posting_mode = COALESCE(?, posting_mode),
          sort_order = COALESCE(?, sort_order)
        WHERE id = ? AND group_id = ? AND is_archived = FALSE`,
-      [nextName, name === undefined ? null : makeSlug(name), description ?? null, postingMode ?? null, sortOrder ?? null, channelId, groupId]
+      [nextName, name === undefined ? null : makeSlug(name), description ?? null, channelType ?? null, postingMode ?? null, sortOrder ?? null, channelId, groupId]
     );
     const [[updated]] = await pool.execute(
       `SELECT id AS _id, group_id AS groupId, name, slug, description,
-              posting_mode AS postingMode, sort_order AS sortOrder
+              channel_type AS channelType, posting_mode AS postingMode, sort_order AS sortOrder
        FROM group_channels WHERE id = ? LIMIT 1`,
       [channelId]
     );

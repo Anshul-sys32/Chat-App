@@ -22,7 +22,7 @@ const { pool } = require("../config/db");
 const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
 const { activeCallRooms } = require("../services/callRoomRegistry");
-const { canJoinSfuCallRoom } = require("../services/callRoomPolicy");
+const { canJoinSfuCallRoom, matchesCallRoomScope } = require("../services/callRoomPolicy");
 const { searchMessages } = require("../controllers/messageSearchController");
 const { getCommunityReputation } = require("../controllers/communityReputationController");
 const {
@@ -306,6 +306,21 @@ router.post("/call-rooms/:roomId/sfu-token", protect, async (req, res) => {
 	const room = activeCallRooms.get(roomId);
 	if (!canJoinSfuCallRoom(room, req.user.id)) {
 		return res.status(403).json({ message: "You are not invited to this SFU call." });
+	}
+	if (room.groupId) {
+		try {
+			const group = await getGroupAccess(room.groupId, Number(req.user.id));
+			if (!canAccessGroup(group, req.user.role)) {
+				return res.status(403).json({ message: "You no longer have access to this group call." });
+			}
+			const channel = group.groupType === "community" ? await getActiveChannel(room.groupId, room.channelId) : null;
+			if (!matchesCallRoomScope(room, group, channel)) {
+				return res.status(403).json({ message: "You no longer have access to this call channel." });
+			}
+		} catch (error) {
+			console.error("Group call access check failed:", error.message);
+			return res.status(500).json({ message: "Could not verify access to this group call." });
+		}
 	}
 	const apiKey = process.env.LIVEKIT_API_KEY;
 	const apiSecret = process.env.LIVEKIT_API_SECRET;

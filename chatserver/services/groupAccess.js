@@ -19,7 +19,7 @@ const getGroupAccess = async (groupId, userId) => {
 
 const getActiveChannel = async (groupId, channelId) => {
   const [rows] = await pool.execute(
-    `SELECT id, group_id AS groupId, name, slug, posting_mode AS postingMode
+    `SELECT id, group_id AS groupId, name, slug, channel_type AS channelType, posting_mode AS postingMode
      FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = FALSE LIMIT 1`,
     [channelId, groupId]
   );
@@ -31,7 +31,7 @@ const canAccessGroup = (group, userRole) => Boolean(group)
     && (Boolean(group?.groupRole) || userRole === "admin");
 
 const canPostInChannel = async (group, channel, userRole) => {
-  if (!group || !channel) return false;
+  if (!group || !channel || channel.channelType && channel.channelType !== "text") return false;
   if (group.groupRole === "admin" || userRole === "admin") return true;
   const [overrides] = await pool.execute(
     "SELECT can_post AS canPost FROM community_channel_role_permissions WHERE channel_id = ? AND role_key = ? LIMIT 1",

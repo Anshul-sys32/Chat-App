@@ -642,6 +642,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }
     let active = true;
     const isGroup = selectedChat.type === 'group';
+    const isCallChannel = isGroup && ['audio', 'video'].includes(selectedChat.channelType);
     const chatId = String(selectedChat._id);
     const currentUserId = String(user?._id);
     const requestId = ++messagesRequestId.current;
@@ -671,6 +672,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }
     const loadMessages = async () => {
       setMessagesError('');
+      if (isCallChannel) {
+        setMessages([]);
+        setMessagesLoading(false);
+        return;
+      }
       try {
         const historyUrl = isGroup
           ? `${API_URL}/api/groups/${selectedChat._id}/messages${selectedChat.channelId ? `?channelId=${encodeURIComponent(selectedChat.channelId)}` : ''}`
@@ -747,7 +753,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       window.removeEventListener('online', refreshWhenVisible);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [selectedChat?._id, selectedChat?.type, selectedChat?.channelId, messagesAttempt, user?._id]);
+  }, [selectedChat?._id, selectedChat?.type, selectedChat?.channelId, selectedChat?.channelType, messagesAttempt, user?._id]);
 
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
@@ -1522,7 +1528,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     cancelSelection();
   };
 
-  const isCommunityChat = selectedChat?.type === 'group' && selectedChat.groupType === 'community';
+  const isCommunityCallChannel = selectedChat?.type === 'group'
+    && selectedChat.groupType === 'community'
+    && ['audio', 'video'].includes(selectedChat.channelType);
+  const isCommunityChat = selectedChat?.type === 'group'
+    && selectedChat.groupType === 'community'
+    && !isCommunityCallChannel;
   const isAnnouncementChannel = isCommunityChat && selectedChat.channelName?.toLowerCase() === 'announcements';
   useEffect(() => {
     setAnnouncementError('');
@@ -1728,20 +1739,20 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             )}
             <NotificationCenter onNavigate={navigateToNotificationTarget} />
             <button
-              onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
-              title="Start Audio Call"
-              disabled={!selectedChat || selectedChat.type === 'group'}
+              onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'audio'); setIsVideoOpen(true); }}
+              title={isCommunityCallChannel ? 'Join audio channel' : 'Start Audio Call'}
+              disabled={!selectedChat || selectedChat.type === 'group' && selectedChat.groupType === 'community' && !(isCommunityCallChannel && selectedChat.channelType === 'audio')}
               aria-label="Start audio call"
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30"
+              className={`chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30 ${isCommunityCallChannel && selectedChat.channelType !== 'audio' ? 'hidden' : ''}`}
             >
               <FaPhone />
             </button>
             <button
-              onClick={() => { setCallType('video'); setIsVideoOpen(true); }}
-              title="Start Video Call"
-              disabled={!selectedChat || selectedChat.type === 'group'}
+              onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'video'); setIsVideoOpen(true); }}
+              title={isCommunityCallChannel ? 'Join video channel' : 'Start Video Call'}
+              disabled={!selectedChat || selectedChat.type === 'group' && selectedChat.groupType === 'community' && !(isCommunityCallChannel && selectedChat.channelType === 'video')}
               aria-label="Start video call"
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30"
+              className={`chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30 ${isCommunityCallChannel && selectedChat.channelType !== 'video' ? 'hidden' : ''}`}
             >
               <FaVideo />
             </button>
@@ -2005,6 +2016,23 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   Retry loading
                 </button>
               </div>
+            )}
+            {isCommunityCallChannel && (
+              <section className="mx-auto flex min-h-[50vh] w-full max-w-2xl flex-col items-center justify-center text-center" aria-label={`${selectedChat.channelType} call channel`}>
+                <div className="mb-4 grid h-16 w-16 place-items-center rounded-full border border-accent-border bg-accent-soft text-accent-text">
+                  {selectedChat.channelType === 'audio' ? <FaPhone size={24} /> : <FaVideo size={24} />}
+                </div>
+                <h2 className="text-xl font-semibold">{selectedChat.channelName}</h2>
+                <p className="theme-muted mt-2 max-w-md text-sm">Join the {selectedChat.channelType} room to talk with community members.</p>
+                <button
+                  type="button"
+                  onClick={() => { setCallType(selectedChat.channelType); setIsVideoOpen(true); }}
+                  className="mt-5 inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accent-contrast hover:brightness-110"
+                >
+                  {selectedChat.channelType === 'audio' ? <FaPhone /> : <FaVideo />}
+                  Join {selectedChat.channelType} channel
+                </button>
+              </section>
             )}
             {selectedChat && loadingOlder && (
               <p role="status" className="theme-muted py-2 text-center text-xs">Loading older messages…</p>
@@ -2341,6 +2369,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         <footer
           ref={footerRef}
           style={{ '--desktop-sidebar-offset': isDesktopPanelOpen ? '22rem' : '4rem' }}
+          hidden={isCommunityCallChannel}
           className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border pt-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:left-[var(--desktop-sidebar-offset)] sm:right-0 sm:w-[calc(100%-var(--desktop-sidebar-offset))] sm:py-4 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
           {selectedChat && !socketConnected && (
@@ -2775,6 +2804,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         )}
         <VideoCall
           to={selectedChat?.type === 'group' ? null : selectedChat?._id}
+          groupId={selectedChat?.type === 'group' ? selectedChat._id : null}
+          groupType={selectedChat?.type === 'group' ? selectedChat.groupType : null}
+          channelId={selectedChat?.type === 'group' ? selectedChat.channelId : null}
+          channelType={selectedChat?.type === 'group' ? selectedChat.channelType : null}
           peerName={selectedChat?.name || selectedChat?.username}
           callType={callType}
           isOpen={isVideoOpen}

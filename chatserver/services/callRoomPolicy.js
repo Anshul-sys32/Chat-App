@@ -24,11 +24,22 @@ const shouldUpgradeCallRoomToSfu = (room) =>
 const canJoinSfuCallRoom = (room, userId) =>
   Boolean(room?.mode === "sfu" && room.participants.has(String(userId)));
 
+const matchesCallRoomScope = (room, group, channel = null) => {
+  if (!room?.groupId || !group || Number(room.groupId) !== Number(group.id)
+    || room.groupType !== group.groupType) return false;
+  if (group.groupType === "standard") return room.channelId === null;
+  return group.groupType === "community"
+    && channel
+    && Number(channel.id) === Number(room.channelId)
+    && channel.channelType === room.callType;
+};
+
 module.exports = {
   MAX_CALL_PARTICIPANTS,
   MAX_MESH_PARTICIPANTS,
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
   canJoinSfuCallRoom,
+  matchesCallRoomScope,
   shouldUpgradeCallRoomToSfu,
 };

@@ -30,15 +30,17 @@ const communityTasksMigration = require("../migrations/202611010017_community_ta
 const communityWhiteboardMigration = require("../migrations/202611010018_community_whiteboard");
 const communityCodeRoomsMigration = require("../migrations/202611010019_community_code_rooms");
 const codeRoomSnapshotMigration = require("../migrations/202611010020_code_room_snapshot");
+const communityCallChannelsMigration = require("../migrations/202611010021_community_call_channels");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
   canJoinSfuCallRoom,
+  matchesCallRoomScope,
   shouldUpgradeCallRoomToSfu,
   MAX_CALL_PARTICIPANTS,
 } = require("../services/callRoomPolicy");
 const { sendMeetingReminders } = require("../services/meetingReminders");
-const { canAccessGroup, canManageGroup, validateGroupMessageTarget } = require("../services/groupAccess");
+const { canAccessGroup, canManageGroup, canPostInChannel, validateGroupMessageTarget } = require("../services/groupAccess");
 const { hasGroupPermission } = require("../services/groupRoles");
 const { isSupportedReaction, loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
 const { nextScheduledAt } = require("../services/scheduledCommunityPosts");
@@ -180,6 +182,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010018_community_whiteboard",
     "202611010019_community_code_rooms",
     "202611010020_code_room_snapshot",
+    "202611010021_community_call_channels",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -644,6 +647,15 @@ test("call room invitations are host-only and capped at eight participants", () 
   assert.deepEqual(canInviteToCallRoom(room, "10", "18"), { allowed: false, reason: "full" });
 });
 
+test("group call access must match the group and active call channel type", () => {
+  const room = { groupId: 8, groupType: "community", channelId: 14, callType: "audio" };
+  const group = { id: 8, groupType: "community" };
+  assert.equal(matchesCallRoomScope(room, group, { id: 14, channelType: "audio" }), true);
+  assert.equal(matchesCallRoomScope(room, group, { id: 14, channelType: "video" }), false);
+  assert.equal(matchesCallRoomScope(room, { ...group, id: 9 }, { id: 14, channelType: "audio" }), false);
+  assert.equal(matchesCallRoomScope({ ...room, groupType: "standard", channelId: null }, { id: 8, groupType: "standard" }), true);
+});
+
 test("direct message system notifications emit only to the recipient without persistence", async () => {
   const statements = [];
   mock.method(pool, "execute", async (sql) => {
@@ -823,6 +835,18 @@ test("community migration adds types, channels, nullable message scope, and roll
   assert.ok(statements.some((sql) => sql.includes("DROP TABLE IF EXISTS group_channels")));
 });
 
+test("community call channel migration defaults channels to text and supports rollback", async () => {
+  const statements = [];
+  const connection = {
+    execute: async () => [[{ count: 0 }], []],
+    query: async (sql) => statements.push(sql),
+  };
+  await communityCallChannelsMigration.up(connection);
+  assert.match(statements[0], /ALTER TABLE group_channels ADD COLUMN channel_type ENUM\('text', 'audio', 'video'\) NOT NULL DEFAULT 'text'/);
+  await communityCallChannelsMigration.down(connection);
+  assert.match(statements[1], /ALTER TABLE group_channels DROP COLUMN channel_type/);
+});
+
 test("community posts migration adds structured posts, engagement tables, and four channel defaults", async () => {
   const statements = [];
   const connection = {
@@ -924,6 +948,11 @@ test("channel posting mode is enforced by the shared group policy", async () => 
   assert.equal(allowed.channelId, 14);
 });
 
+test("audio and video channels reject text posting for every role", async () => {
+  assert.equal(await canPostInChannel({ groupRole: "admin" }, { channelType: "audio" }, "user"), false);
+  assert.equal(await canPostInChannel({ groupRole: "admin" }, { channelType: "video" }, "user"), false);
+});
+
 test("community members can list channels but cannot create them without leader role", async () => {
   mock.method(pool, "execute", async (sql) => {
     if (sql.includes("FROM chat_groups group_record")) {
@@ -946,4 +975,33 @@ test("community members can list channels but cannot create them without leader 
     body: { name: "help" },
   }, createResponseValue);
   assert.equal(createResponseValue.statusCode, 403);
+});
+
+test("community leaders can create typed call channels and invalid types are rejected", async () => {
+  const inserts = [];
+  mock.method(pool, "execute", async (sql, values) => {
+    if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
+    if (sql.includes("COUNT(*) AS channelCount")) return [[{ channelCount: 2 }], []];
+    if (sql.includes("MAX(sort_order)")) return [[{ nextOrder: 2 }], []];
+    if (sql.includes("INSERT INTO group_channels")) {
+      inserts.push({ sql, values });
+      return [{ insertId: 17 }, []];
+    }
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+  const request = {
+    user: { id: 5, role: "user" },
+    params: { groupId: "8" },
+    app: { get: () => null },
+  };
+  const invalidResponse = createResponse();
+  await createChannel({ ...request, body: { name: "Hangout", channelType: "call" } }, invalidResponse);
+  assert.equal(invalidResponse.statusCode, 400);
+  assert.equal(inserts.length, 0);
+
+  const response = createResponse();
+  await createChannel({ ...request, body: { name: "Hangout", channelType: "audio" } }, response);
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.channelType, "audio");
+  assert.equal(inserts[0].values[4], "audio");
 });
