@@ -79,7 +79,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
 
   const selectTab = (tab) => {
     setActiveTab(tab);
-    if (tab === 'calls') {
+    if (['messages', 'groups', 'calls', 'meetings'].includes(tab)) {
       if (isDesktop && !isDesktopPanelOpen) onToggleDesktopPanel();
       else if (!isDesktop && !isOpen) toggleSidebar();
       return;

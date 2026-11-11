@@ -61,5 +61,5 @@ graphify-out
 .gitignore
 chatserver/private/voice/
 FEATURE_EXPANSION.md
-pendingtask.md
+tasks.md
 Caddyfile

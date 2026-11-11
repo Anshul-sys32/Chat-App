@@ -23,6 +23,26 @@ const fs = require("node:fs/promises");
 const { randomUUID } = require("node:crypto");
 const { activeCallRooms } = require("../services/callRoomRegistry");
 const { canJoinSfuCallRoom } = require("../services/callRoomPolicy");
+const { searchMessages } = require("../controllers/messageSearchController");
+const { getCommunityReputation } = require("../controllers/communityReputationController");
+const {
+	createCommunityTask,
+	deleteCommunityTask,
+	listCommunityTasks,
+	updateCommunityTask,
+} = require("../controllers/communityTasksController");
+const {
+	createWhiteboardItem,
+	deleteWhiteboardItem,
+	listWhiteboardItems,
+	updateWhiteboardItem,
+} = require("../controllers/communityWhiteboardController");
+const {
+	cancelScheduledMessage,
+	createScheduledMessage,
+	listScheduledMessages,
+	updateScheduledMessage,
+} = require("../controllers/scheduledMessagesController");
 const { parseFile } = require("music-metadata");
 const {
 	getNotificationPreferences,
@@ -50,6 +70,9 @@ const { isGroupType } = require("../services/groupCapabilities");
 const { ensureDefaultCommunityChannels } = require("../services/communityDefaults");
 const { ensureBuiltInGroupRoles } = require("../services/groupRoles");
 const { isSupportedReaction, loadCommunityEngagement, parseStructuredData } = require("../services/communityPosts");
+const { loadDirectMessageReactions, toggleReactionState } = require("../services/messageReactions");
+const { notifyMessageReaction } = require("../services/messageReactionNotifications");
+const { recordReputationEvent } = require("../services/communityReputation");
 const {
 	getGroupAccess,
 	getActiveChannel,
@@ -1137,7 +1160,7 @@ router.get("/messages/:userId", protect, async (req, res) => {
 			[req.user.id, req.user.id, otherId, otherId, req.user.id, req.user.id, beforeId, beforeId, limit + 1]
 		);
 		const hasMore = rows.length > limit;
-		const messages = rows.slice(0, limit).reverse();
+		const messages = await loadDirectMessageReactions(rows.slice(0, limit).reverse(), req.user.id, pool.execute.bind(pool));
 		res.json({ messages, hasMore });
 	} catch (err) {
 		console.error("Fetch messages error:", err);
@@ -1327,6 +1350,21 @@ router.delete("/saved-messages/:messageType/:messageId", protect, async (req, re
 	}
 });
 
+router.get("/search", protect, searchMessages);
+router.get("/groups/:groupId/reputation", protect, getCommunityReputation);
+router.get("/groups/:groupId/tasks", protect, listCommunityTasks);
+router.post("/groups/:groupId/tasks", protect, createCommunityTask);
+router.patch("/groups/:groupId/tasks/:taskId", protect, updateCommunityTask);
+router.delete("/groups/:groupId/tasks/:taskId", protect, deleteCommunityTask);
+router.get("/groups/:groupId/whiteboard", protect, listWhiteboardItems);
+router.post("/groups/:groupId/whiteboard", protect, createWhiteboardItem);
+router.patch("/groups/:groupId/whiteboard/:itemId", protect, updateWhiteboardItem);
+router.delete("/groups/:groupId/whiteboard/:itemId", protect, deleteWhiteboardItem);
+router.get("/scheduled-messages", protect, listScheduledMessages);
+router.post("/scheduled-messages", protect, createScheduledMessage);
+router.put("/scheduled-messages/:messageId", protect, updateScheduledMessage);
+router.delete("/scheduled-messages/:messageId", protect, cancelScheduledMessage);
+
 router.get("/groups", protect, async (req, res) => {
 	try {
 		const [groups] = await pool.execute(
@@ -1462,6 +1500,7 @@ router.delete("/groups/:groupId", protect, async (req, res) => {
 		io?.to(`group:${groupId}`).emit("group-deactivated", { groupId });
 		for (const member of members) io?.in(`user:${member.userId}`).emit("group-deactivated", { groupId });
 		io?.in(`group:${groupId}`).socketsLeave(`group:${groupId}`);
+		io?.in(`code-room:${groupId}`).socketsLeave(`code-room:${groupId}`);
 		const [channels] = await pool.execute("SELECT id FROM group_channels WHERE group_id = ?", [groupId]);
 		for (const channel of channels) io?.in(`group:${groupId}:channel:${channel.id}`).socketsLeave(`group:${groupId}:channel:${channel.id}`);
 		return res.status(204).end();
@@ -1857,6 +1896,7 @@ router.delete("/groups/:groupId/members/:userId", protect, async (req, res) => {
 			);
 			io.in(`user:${userId}`).emit("group-member-removed", { groupId });
 			io.in(`user:${userId}`).socketsLeave(`group:${groupId}`);
+			io.in(`user:${userId}`).socketsLeave(`code-room:${groupId}`);
 			for (const channel of channels) {
 				io.in(`user:${userId}`).socketsLeave(`group:${groupId}:channel:${channel.id}`);
 			}
@@ -2029,7 +2069,8 @@ const authorizeCommunityMessageAction = async (groupId, messageId, user) => {
 	const [rows] = await pool.execute(
 		`SELECT id AS _id, group_id AS groupId, channel_id AS channelId,
 		        sender_id AS sender, message_type AS messageType, structured_data AS structuredData,
-		        reply_to_id AS replyToId, is_deleted AS isDeleted
+		        reply_to_id AS replyToId, accepted_answer_id AS acceptedAnswerId,
+		        is_deleted AS isDeleted
 		 FROM group_messages WHERE id = ? AND group_id = ? LIMIT 1`,
 		[messageId, groupId]
 	);
@@ -2063,7 +2104,7 @@ const authorizeGroupMessageReaction = async (groupId, messageId, user) => {
 	} else if (message.channelId !== null) {
 		return { status: 404, message: "Message not found." };
 	}
-	return { message };
+	return { message, group };
 };
 
 router.post("/groups/:groupId/messages/:messageId/reactions", protect, async (req, res) => {
@@ -2076,13 +2117,16 @@ router.post("/groups/:groupId/messages/:messageId/reactions", protect, async (re
 	try {
 		const authorized = await authorizeGroupMessageReaction(groupId, messageId, req.user);
 		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
-		const { message } = authorized;
-		await pool.execute(
-			`INSERT INTO group_message_reactions (message_id, user_id, emoji, is_active)
-			 VALUES (?, ?, ?, TRUE)
-			 ON DUPLICATE KEY UPDATE is_active = NOT is_active`,
-			[messageId, req.user.id, emoji]
-		);
+		const { message, group } = authorized;
+		const reacted = await toggleReactionState(pool, messageId, req.user.id, emoji, "group_message_reactions");
+		if (group.groupType === "community" && emoji === "👍") {
+			const [[{ helpfulCount }]] = await pool.execute(
+				`SELECT COUNT(*) AS helpfulCount FROM group_message_reactions
+				 WHERE message_id = ? AND emoji = '👍' AND is_active = TRUE AND user_id <> ?`,
+				[messageId, message.sender]
+			);
+			await recordReputationEvent(pool.execute.bind(pool), groupId, message.sender, "helpful_reaction", messageId, Number(helpfulCount) > 0 ? 1 : 0);
+		}
 		const [updated] = await loadCommunityEngagement([message], req.user.id, pool.execute.bind(pool));
 		const io = req.app.get("io");
 		const room = message.channelId
@@ -2094,9 +2138,73 @@ router.post("/groups/:groupId/messages/:messageId/reactions", protect, async (re
 			channelId: message.channelId,
 			reactions: updated.reactions,
 		});
+		if (reacted && Number(message.sender) !== Number(req.user.id)) {
+			const [[reactor]] = await pool.execute("SELECT username FROM users WHERE id = ? LIMIT 1", [req.user.id]);
+			await notifyMessageReaction(io, {
+				recipientId: message.sender,
+				reactorId: req.user.id,
+				reactorName: reactor?.username || "A community member",
+				messageId,
+				emoji,
+				targetType: "group",
+				targetId: groupId,
+				targetName: group.name,
+				channelId: message.channelId,
+				channelName: message.channelId ? (await getActiveChannel(groupId, message.channelId))?.name : null,
+			}).catch((error) => console.error("Group reaction notification error:", error.message));
+		}
 		return res.json({ reactions: updated.reactions });
 	} catch (error) {
 		console.error("Group message reaction error:", error);
+		return res.status(500).json({ message: "Could not update this reaction." });
+	}
+});
+
+router.post("/messages/:messageId/reactions", protect, async (req, res) => {
+	const messageId = Number(req.params.messageId);
+	const emoji = req.body?.emoji;
+	if (!validId(messageId) || !isSupportedReaction(emoji)) {
+		return res.status(400).json({ message: "Choose a supported reaction." });
+	}
+	try {
+		const [rows] = await pool.execute(
+			`SELECT message.id AS _id, message.sender_id AS sender, message.receiver_id AS receiver,
+			        message.is_deleted AS isDeleted
+			 FROM messages message
+			 WHERE message.id = ? AND message.is_deleted = FALSE
+			   AND (message.sender_id = ? OR message.receiver_id = ?)
+			   AND NOT EXISTS (SELECT 1 FROM direct_message_hidden_for hidden
+			                   WHERE hidden.message_id = message.id AND hidden.user_id = ?)
+			 LIMIT 1`,
+			[messageId, req.user.id, req.user.id, req.user.id]
+		);
+		const message = rows[0];
+		if (!message) return res.status(404).json({ message: "Message not found." });
+		const reacted = await toggleReactionState(pool, messageId, req.user.id, emoji, "direct_message_reactions");
+		const [updated] = await loadDirectMessageReactions([message], req.user.id, pool.execute.bind(pool));
+		const io = req.app.get("io");
+		io?.to(`user:${message.sender}`).to(`user:${message.receiver}`).emit("direct-message-engagement", {
+			_id: messageId,
+			sender: message.sender,
+			receiver: message.receiver,
+			reactions: updated.reactions,
+		});
+		if (reacted && Number(message.sender) !== Number(req.user.id)) {
+			const [[reactor]] = await pool.execute("SELECT username FROM users WHERE id = ? LIMIT 1", [req.user.id]);
+			await notifyMessageReaction(io, {
+				recipientId: message.sender,
+				reactorId: req.user.id,
+				reactorName: reactor?.username || "Someone",
+				messageId,
+				emoji,
+				targetType: "direct",
+				targetId: req.user.id,
+				targetName: reactor?.username || "Conversation",
+			}).catch((error) => console.error("Direct reaction notification error:", error.message));
+		}
+		return res.json({ reactions: updated.reactions });
+	} catch (error) {
+		console.error("Direct message reaction error:", error);
 		return res.status(500).json({ message: "Could not update this reaction." });
 	}
 });
@@ -2206,7 +2314,35 @@ router.patch("/groups/:groupId/messages/:messageId/accepted-answer", protect, as
 			);
 			if (!answers.length) return res.status(400).json({ message: "Choose an answer from this question's thread." });
 		}
-		await pool.execute("UPDATE group_messages SET accepted_answer_id = ? WHERE id = ?", [answerId, messageId]);
+		const previousAnswerId = message.acceptedAnswerId === null ? null : Number(message.acceptedAnswerId);
+		const connection = await pool.getConnection();
+		try {
+			await connection.beginTransaction();
+			await connection.execute("UPDATE group_messages SET accepted_answer_id = ? WHERE id = ?", [answerId, messageId]);
+			if (previousAnswerId !== null && previousAnswerId !== answerId) {
+				const [previousAwards] = await connection.execute(
+					`SELECT user_id AS userId FROM community_reputation_events
+					 WHERE group_id = ? AND event_type = 'accepted_answer' AND source_id = ? AND points > 0`,
+					[groupId, previousAnswerId]
+				);
+				for (const award of previousAwards) {
+					await recordReputationEvent(connection.execute.bind(connection), groupId, award.userId, "accepted_answer", previousAnswerId, 0);
+				}
+			}
+			if (answerId !== null && answerId !== previousAnswerId) {
+				const [[answer]] = await connection.execute(
+					"SELECT sender_id AS senderId FROM group_messages WHERE id = ? AND group_id = ?",
+					[answerId, groupId]
+				);
+				if (answer) await recordReputationEvent(connection.execute.bind(connection), groupId, answer.senderId, "accepted_answer", answerId, 15);
+			}
+			await connection.commit();
+		} catch (error) {
+			await connection.rollback();
+			throw error;
+		} finally {
+			connection.release();
+		}
 		const update = { _id: messageId, groupId, channelId: message.channelId, acceptedAnswerId: answerId };
 		req.app.get("io")?.to(`group:${groupId}:channel:${message.channelId}`).emit("group-message-updated", update);
 		return res.json({ acceptedAnswerId: answerId });

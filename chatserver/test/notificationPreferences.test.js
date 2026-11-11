@@ -23,6 +23,12 @@ const groupRolesMigration = require("../migrations/202611010010_group_roles");
 const groupMessageReactionsMigration = require("../migrations/202611010011_group_message_reactions");
 const scheduledCommunityPostsMigration = require("../migrations/202611010012_scheduled_community_posts");
 const savedMessagesMigration = require("../migrations/202611010013_saved_messages");
+const scheduledMessagesMigration = require("../migrations/202611010014_scheduled_messages");
+const directMessageReactionsMigration = require("../migrations/202611010015_direct_message_reactions");
+const communityReputationMigration = require("../migrations/202611010016_community_reputation");
+const communityTasksMigration = require("../migrations/202611010017_community_tasks");
+const communityWhiteboardMigration = require("../migrations/202611010018_community_whiteboard");
+const communityCodeRoomsMigration = require("../migrations/202611010019_community_code_rooms");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
@@ -36,6 +42,15 @@ const { hasGroupPermission } = require("../services/groupRoles");
 const { isSupportedReaction, loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
 const { nextScheduledAt } = require("../services/scheduledCommunityPosts");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
+const { normalizeSearchRequest, searchMessages } = require("../controllers/messageSearchController");
+const { parseScheduledMessage } = require("../controllers/scheduledMessagesController");
+const { loadDirectMessageReactions, toggleReactionState } = require("../services/messageReactions");
+const { notifyMessageReaction } = require("../services/messageReactionNotifications");
+const { badgesForPoints, recordReputationEvent } = require("../services/communityReputation");
+const { parseTaskInput } = require("../controllers/communityTasksController");
+const { validateWhiteboardItem } = require("../controllers/communityWhiteboardController");
+const { validateWhiteboardStroke } = require("../services/whiteboardStrokePolicy");
+const { validateAwarenessUpdate, validateCodeUpdate } = require("../services/codeRoomPolicy");
 const authRoutes = require("../routes/authRoutes");
 
 const createResponse = () => ({
@@ -157,6 +172,12 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010011_group_message_reactions",
     "202611010012_scheduled_community_posts",
     "202611010013_saved_messages",
+    "202611010014_scheduled_messages",
+    "202611010015_direct_message_reactions",
+    "202611010016_community_reputation",
+    "202611010017_community_tasks",
+    "202611010018_community_whiteboard",
+    "202611010019_community_code_rooms",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -210,9 +231,240 @@ test("saved-message and scheduled-announcement routes register during router ini
     "delete:/saved-messages/:messageType/:messageId",
     "get:/groups/:groupId/channels/:channelId/scheduled-posts",
     "post:/groups/:groupId/channels/:channelId/scheduled-posts",
+    "get:/search",
+    "get:/scheduled-messages",
+    "post:/scheduled-messages",
+    "put:/scheduled-messages/:messageId",
+    "delete:/scheduled-messages/:messageId",
+    "post:/messages/:messageId/reactions",
+    "get:/groups/:groupId/reputation",
+    "get:/groups/:groupId/tasks",
+    "post:/groups/:groupId/tasks",
+    "patch:/groups/:groupId/tasks/:taskId",
+    "delete:/groups/:groupId/tasks/:taskId",
+    "get:/groups/:groupId/whiteboard",
+    "post:/groups/:groupId/whiteboard",
+    "patch:/groups/:groupId/whiteboard/:itemId",
+    "delete:/groups/:groupId/whiteboard/:itemId",
+    "get:/groups/:groupId/reputation",
   ]) {
     assert.ok(registered.includes(route), `${route} should be registered`);
   }
+});
+
+test("community code-room migration stores a compact binary document snapshot", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await communityCodeRoomsMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS community_code_rooms/);
+  assert.match(statements[0], /document_state LONGBLOB NOT NULL/);
+  assert.match(statements[0], /group_id INT UNSIGNED NOT NULL PRIMARY KEY/);
+  await communityCodeRoomsMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS community_code_rooms/);
+});
+
+test("code-room Yjs and awareness update sizes are bounded and malformed updates rejected", () => {
+  const Y = require("yjs");
+  const doc = new Y.Doc();
+  doc.getText("code").insert(0, "const room = true;");
+  const update = Y.encodeStateAsUpdate(doc);
+  assert.ok(validateCodeUpdate(update));
+  assert.equal(validateCodeUpdate(new Uint8Array(128 * 1024 + 1)), null);
+  assert.equal(validateCodeUpdate(Uint8Array.from([255, 255, 255])), null);
+  assert.equal(validateAwarenessUpdate(new Uint8Array(16 * 1024 + 1)), null);
+  doc.destroy();
+});
+
+test("community whiteboard migration stores user-owned board items", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await communityWhiteboardMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS community_whiteboard_items/);
+  assert.match(statements[0], /item_type ENUM\('stroke', 'sticky', 'rectangle', 'ellipse', 'arrow'\)/);
+  assert.match(statements[0], /data JSON NOT NULL/);
+  await communityWhiteboardMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS community_whiteboard_items/);
+});
+
+test("whiteboard item validation bounds strokes, sticky notes, and shapes", () => {
+  assert.equal(validateWhiteboardItem("stroke", { points: [{ x: 1, y: 1 }, { x: 20, y: 30 }], color: "#112233", width: 3 }), null);
+  assert.equal(validateWhiteboardItem("sticky", { x: 10, y: 20, text: "Note", color: "mint" }), null);
+  assert.equal(validateWhiteboardItem("rectangle", { x: 10, y: 20, width: 100, height: 50, color: "#112233", strokeWidth: 2 }), null);
+  assert.ok(validateWhiteboardItem("stroke", { points: [{ x: -1, y: 1 }, { x: 20, y: 30 }], color: "#112233", width: 3 }));
+  assert.ok(validateWhiteboardItem("sticky", { x: 10, y: 20, text: "Note", color: "red" }));
+  assert.ok(validateWhiteboardItem("ellipse", { x: 10, y: 20, width: 0, height: 50, color: "#112233", strokeWidth: 2 }));
+});
+
+test("whiteboard transient stroke relay rejects oversized or out-of-bounds geometry", () => {
+  assert.equal(validateWhiteboardStroke({ groupId: 2, points: [{ x: 10, y: 20 }], color: "#112233", width: 3 }), true);
+  assert.equal(validateWhiteboardStroke({ groupId: 2, points: [], color: "#112233", width: 3, finished: true }), true);
+  assert.equal(validateWhiteboardStroke({ groupId: 2, points: [], color: "#112233", width: 3 }), false);
+  assert.equal(validateWhiteboardStroke({ groupId: 2, points: [{ x: 1001, y: 20 }], color: "#112233", width: 3 }), false);
+  assert.equal(validateWhiteboardStroke({ groupId: 2, points: Array.from({ length: 151 }, () => ({ x: 10, y: 20 })), color: "#112233", width: 3 }), false);
+});
+
+test("community task migration stores assignment, status, deadlines, and linked messages", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await communityTasksMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS community_tasks/);
+  assert.match(statements[0], /status ENUM\('todo', 'in_progress', 'done'\)/);
+  assert.match(statements[0], /linked_message_id BIGINT UNSIGNED NULL/);
+  assert.match(statements[0], /community_tasks_assignee_fk/);
+  await communityTasksMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS community_tasks/);
+});
+
+test("community task validation accepts optional assignments and rejects invalid state", () => {
+  const task = parseTaskInput({ title: "Ship search", description: "Finish indexing", status: "in_progress", assignedTo: "8", linkedMessageId: "91" });
+  assert.equal(task.title, "Ship search");
+  assert.equal(task.status, "in_progress");
+  assert.equal(task.assignedTo, 8);
+  assert.equal(task.linkedMessageId, 91);
+  assert.ok(parseTaskInput({ title: "" }).error);
+  assert.ok(parseTaskInput({ status: "blocked" }, { partial: true }).error);
+  assert.ok(parseTaskInput({ assignedTo: "x" }, { partial: true }).error);
+});
+
+test("community reputation migration creates an idempotent event ledger", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await communityReputationMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS community_reputation_events/);
+  assert.match(statements[0], /event_type ENUM\('post', 'helpful_reaction', 'accepted_answer'\)/);
+  assert.match(statements[0], /PRIMARY KEY \(group_id, user_id, event_type, source_id\)/);
+  await communityReputationMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS community_reputation_events/);
+});
+
+test("reputation awards are upserted and badges use score thresholds", async () => {
+  const calls = [];
+  await recordReputationEvent(async (sql, values) => calls.push({ sql, values }), 3, 5, "accepted_answer", 99, 15);
+  assert.match(calls[0].sql, /ON DUPLICATE KEY UPDATE points = VALUES\(points\)/);
+  assert.deepEqual(calls[0].values, [3, 5, "accepted_answer", 99, 15]);
+  assert.deepEqual(badgesForPoints(49), ["Contributor"]);
+  assert.deepEqual(badgesForPoints(50), ["Contributor", "Regular"]);
+  assert.deepEqual(badgesForPoints(100), ["Contributor", "Regular", "Expert"]);
+  await assert.rejects(recordReputationEvent(async () => {}, 3, 5, "unknown", 99, 1), /Invalid community reputation event/);
+});
+
+test("direct-message reactions migration cascades with messages and users", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await directMessageReactionsMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS direct_message_reactions/);
+  assert.match(statements[0], /PRIMARY KEY \(message_id, user_id, emoji\)/);
+  assert.match(statements[0], /REFERENCES messages\(id\) ON DELETE CASCADE/);
+  assert.match(statements[0], /REFERENCES users\(id\) ON DELETE CASCADE/);
+  await directMessageReactionsMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS direct_message_reactions/);
+});
+
+test("direct-message reaction loader annotates totals and ignores deleted messages", async () => {
+  const calls = [];
+  const execute = async (sql, values) => {
+    calls.push({ sql, values });
+    return [[{ messageId: 91, emoji: "🎉", reactionCount: 2, ownCount: 1 }], []];
+  };
+  const messages = await loadDirectMessageReactions([
+    { _id: 91, isDeleted: 0 },
+    { _id: 92, isDeleted: 1 },
+  ], 5, execute);
+  assert.deepEqual(messages[0].reactions, [{ emoji: "🎉", count: 2, reactedByMe: true }]);
+  assert.deepEqual(messages[1].reactions, []);
+  assert.deepEqual(calls[0].values, [5, 91]);
+});
+
+test("reaction toggles use the supported atomic upsert tables", async () => {
+  const calls = [];
+  const executor = {
+    execute: async (sql, values) => {
+      calls.push({ sql, values });
+      return sql.startsWith("SELECT") ? [[{ isActive: 1 }], []] : [{ affectedRows: 1 }, []];
+    },
+  };
+  assert.equal(await toggleReactionState(executor, 91, 5, "🎉", "direct_message_reactions"), true);
+  assert.match(calls[0].sql, /ON DUPLICATE KEY UPDATE is_active = NOT is_active/);
+  assert.equal(calls[0].values[0], 91);
+  await assert.rejects(toggleReactionState(executor, 91, 5, "🎉", "messages"), /Unsupported reaction table/);
+});
+
+test("new message reactions create a deduplicated notification and emit it to the author", async () => {
+  const calls = [];
+  mock.method(pool, "execute", async (sql, values) => {
+    calls.push({ sql, values });
+    return sql.includes("SELECT id AS _id")
+      ? [[{ _id: 71, userId: 9, category: "direct_reaction" }], []]
+      : [{ affectedRows: 1 }, []];
+  });
+  const emitted = [];
+  const io = { in: (room) => ({ emit: (event, payload) => emitted.push({ room, event, payload }) }) };
+  const notification = await notifyMessageReaction(io, {
+    recipientId: 9, reactorId: 5, reactorName: "Mina", messageId: 71,
+    emoji: "❤️", targetType: "direct", targetId: 5, targetName: "Mina",
+  });
+  assert.equal(notification._id, 71);
+  assert.match(calls[0].sql, /ON DUPLICATE KEY UPDATE/);
+  assert.deepEqual(emitted, [{ room: "user:9", event: "notification", payload: notification }]);
+});
+
+test("scheduled messages migration creates a sender-owned delivery queue", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await scheduledMessagesMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS scheduled_messages/);
+  assert.match(statements[0], /status ENUM\('scheduled', 'sent', 'cancelled'\)/);
+  assert.match(statements[0], /scheduled_messages_queue \(status, scheduled_at\)/);
+  assert.match(statements[0], /recipient_id INT UNSIGNED NULL/);
+  assert.match(statements[0], /group_id INT UNSIGNED NULL/);
+  await scheduledMessagesMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS scheduled_messages/);
+});
+
+test("scheduled message requests accept only bounded future text", () => {
+  const parsed = parseScheduledMessage({
+    content: "  Ship the update  ",
+    scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  assert.equal(parsed.content, "Ship the update");
+  assert.equal(Number.isFinite(Date.parse(parsed.scheduledAtIso)), true);
+  assert.ok(parseScheduledMessage({ content: " ", scheduledAt: new Date(Date.now() + 60_000).toISOString() }).error);
+  assert.ok(parseScheduledMessage({ content: "Too late", scheduledAt: new Date(Date.now() - 60_000).toISOString() }).error);
+});
+
+test("global search validates filters, dates, and query length", () => {
+  assert.deepEqual(normalizeSearchRequest({ q: "  launch  ", filter: "files", from: "2026-11-01", to: "2026-11-11" }), {
+    text: "launch", filter: "files", from: "2026-11-01", to: "2026-11-11",
+  });
+  for (const query of [
+    { q: "x" },
+    { q: "launch", filter: "unknown" },
+    { q: "launch", from: "2026-02-31" },
+    { q: "launch", from: "2026-11-12", to: "2026-11-11" },
+  ]) assert.ok(normalizeSearchRequest(query).error);
+});
+
+test("global file search applies membership, hidden-message, and date visibility filters", async () => {
+  const calls = [];
+  mock.method(pool, "execute", async (sql, values) => {
+    calls.push({ sql, values });
+    return [[], []];
+  });
+  const response = createResponse();
+  await searchMessages({
+    query: { q: "report", filter: "files", from: "2026-11-01", to: "2026-11-11" },
+    user: { id: 17 },
+  }, response);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, { results: [] });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].sql, /direct_message_hidden_for/);
+  assert.match(calls[0].sql, /CAST\(COALESCE\(message\.attachments/);
+  assert.match(calls[0].sql, /DATE\(message\.created_at\) >= \?/);
+  assert.deepEqual(calls[0].values, [17, 17, 17, 17, 17, "%report%", "2026-11-01", "2026-11-11"]);
+  assert.match(calls[1].sql, /group_members membership/);
+  assert.match(calls[1].sql, /group_message_hidden_for/);
+  assert.deepEqual(calls[1].values, [17, 17, "%report%", "2026-11-01", "2026-11-11"]);
 });
 
 test("scheduled community post recurrence advances past missed occurrences", () => {

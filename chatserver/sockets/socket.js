@@ -8,6 +8,10 @@ const { canNegotiateCallRoomOffer, canInviteToCallRoom, shouldUpgradeCallRoomToS
 const { activeCallRooms } = require("../services/callRoomRegistry");
 const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
 const { loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
+const { recordReputationEvent } = require("../services/communityReputation");
+const { validateWhiteboardStroke } = require("../services/whiteboardStrokePolicy");
+const Y = require("yjs");
+const { MAX_CODE_SYNC_BYTES, validateAwarenessUpdate, validateCodeUpdate } = require("../services/codeRoomPolicy");
 const { existsSync } = require("node:fs");
 const path = require("node:path");
 const {
@@ -297,6 +301,9 @@ const initSocket = (httpServer) => {
           [result.insertId]
         );
         const [createdMessage] = await loadCommunityEngagement(rows, socket.userId, pool.execute.bind(pool));
+        if (group.groupType === "community") {
+          await recordReputationEvent(pool.execute.bind(pool), id, Number(socket.userId), "post", createdMessage._id, 1);
+        }
         notifyGroupMessage(io, createdMessage).catch((error) => {
           console.error("Group message system notification error:", error.message);
         });
@@ -306,6 +313,123 @@ const initSocket = (httpServer) => {
       } catch (error) {
         console.error("Group message DB error:", error.message);
         socket.emit("message-error", { message: "Group message could not be saved." });
+      }
+    });
+
+    socket.on("whiteboard-stroke", async (payload = {}) => {
+      const groupId = Number(payload.groupId);
+      const points = payload.points;
+      if (!validateWhiteboardStroke(payload)) return;
+      try {
+        const group = await getGroupAccess(groupId, Number(socket.userId));
+        if (group?.groupType !== "community" || !canAccessGroup(group, socket.userRole)) return;
+        socket.to(`group:${groupId}`).emit("whiteboard-stroke", {
+          groupId,
+          userId: Number(socket.userId),
+          socketId: socket.id,
+          points,
+          color: payload.color,
+          width: payload.width,
+          finished: payload.finished === true,
+        });
+      } catch (error) {
+        console.error("Whiteboard stroke relay error:", error.message);
+      }
+    });
+
+    socket.on("code-room-join", async (payload = {}) => {
+      const groupId = Number(payload.groupId);
+      if (!Number.isSafeInteger(groupId) || groupId < 1) return;
+      try {
+        const group = await getGroupAccess(groupId, Number(socket.userId));
+        if (group?.groupType !== "community" || !canAccessGroup(group, socket.userRole)) {
+          return socket.emit("code-room-error", { groupId, message: "You cannot access this community code room." });
+        }
+        const room = `code-room:${groupId}`;
+        socket.join(room);
+        socket.to(room).emit("code-room-awareness-request", { groupId });
+        const [rows] = await pool.execute(
+          "SELECT document_state AS documentState FROM community_code_rooms WHERE group_id = ? LIMIT 1",
+          [groupId]
+        );
+        const update = rows[0]?.documentState || new Uint8Array();
+        if (update.byteLength > MAX_CODE_SYNC_BYTES) {
+          socket.emit("code-room-error", { groupId, message: "This code room has exceeded its sync limit." });
+          socket.leave(room);
+          return;
+        }
+        socket.emit("code-room-sync", { groupId, update });
+        socket.emit("code-room-joined", { groupId });
+      } catch (error) {
+        console.error("Code room join error:", error.message);
+        socket.emit("code-room-error", { groupId, message: "Could not join this code room." });
+      }
+    });
+
+    socket.on("code-room-leave", (payload = {}) => {
+      const groupId = Number(payload.groupId);
+      if (Number.isSafeInteger(groupId) && groupId > 0) socket.leave(`code-room:${groupId}`);
+    });
+
+    socket.on("code-room-update", async (payload = {}) => {
+      const groupId = Number(payload.groupId);
+      const update = validateCodeUpdate(payload.update);
+      const room = `code-room:${groupId}`;
+      if (!Number.isSafeInteger(groupId) || groupId < 1 || !update || !socket.rooms.has(room)) return;
+      try {
+        const group = await getGroupAccess(groupId, Number(socket.userId));
+        if (group?.groupType !== "community" || !canAccessGroup(group, socket.userRole)) {
+          socket.leave(room);
+          return;
+        }
+        const connection = await pool.getConnection();
+        try {
+          await connection.beginTransaction();
+          await connection.execute(
+            "INSERT IGNORE INTO community_code_rooms (group_id, updated_by, document_state) VALUES (?, ?, ?)",
+            [groupId, socket.userId, update]
+          );
+          const [rows] = await connection.execute(
+            "SELECT document_state AS documentState FROM community_code_rooms WHERE group_id = ? FOR UPDATE",
+            [groupId]
+          );
+          const merged = Y.mergeUpdates([rows[0].documentState, update]);
+          if (merged.byteLength > MAX_CODE_SYNC_BYTES) {
+            await connection.rollback();
+            return socket.emit("code-room-error", { groupId, message: "This code room has exceeded its sync limit." });
+          }
+          await connection.execute(
+            "UPDATE community_code_rooms SET updated_by = ?, document_state = ? WHERE group_id = ?",
+            [socket.userId, merged, groupId]
+          );
+          await connection.commit();
+        } catch (error) {
+          await connection.rollback().catch(() => {});
+          throw error;
+        } finally {
+          connection.release();
+        }
+        socket.to(room).emit("code-room-update", { groupId, update });
+      } catch (error) {
+        console.error("Code room update error:", error.message);
+        socket.emit("code-room-error", { groupId, message: "Could not save this code-room update." });
+      }
+    });
+
+    socket.on("code-room-awareness", async (payload = {}) => {
+      const groupId = Number(payload.groupId);
+      const update = validateAwarenessUpdate(payload.update);
+      const room = `code-room:${groupId}`;
+      if (!Number.isSafeInteger(groupId) || groupId < 1 || !update || !socket.rooms.has(room)) return;
+      try {
+        const group = await getGroupAccess(groupId, Number(socket.userId));
+        if (group?.groupType !== "community" || !canAccessGroup(group, socket.userRole)) {
+          socket.leave(room);
+          return;
+        }
+        socket.to(room).emit("code-room-awareness", { groupId, update });
+      } catch (error) {
+        console.error("Code room awareness relay error:", error.message);
       }
     });
 

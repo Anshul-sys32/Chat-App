@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCalendarAlt, FaCopy, FaEllipsisV, FaHashtag, FaMicrophone, FaPaperclip, FaPhone, FaReply, FaSmile, FaStar, FaTimes, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaHashtag, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaReply, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -12,11 +12,14 @@ import VoiceRecorder from './VoiceRecorder';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
 import Avatar from './Avatar';
 import CommunityPostCard from './CommunityPostCard';
+import CommunityWhiteboard from './CommunityWhiteboard';
 import MarkdownMessage from './MarkdownMessage';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 import FloatingPanel from './FloatingPanel';
 import useFloatingPanel from '../useFloatingPanel';
 import { normalizeNotificationTarget } from '../notificationDeliveryPolicy';
+
+const CommunityCodeRoom = lazy(() => import('./CommunityCodeRoom'));
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const MAX_FILES_PER_MESSAGE = 5;
@@ -75,6 +78,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [messagesError, setMessagesError] = useState('');
   const [messagesAttempt, setMessagesAttempt] = useState(0);
   const messagesRequestId = React.useRef(0);
+  const pendingSearchTargetRef = React.useRef(null);
   const messagesContainerRef = React.useRef(null);
   const scrollToLatestOnLoad = React.useRef(false);
   const pendingScrollAdjustment = React.useRef(null);
@@ -101,6 +105,32 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [savedMessages, setSavedMessages] = useState([]);
   const [savedMessagesOpen, setSavedMessagesOpen] = useState(false);
   const [savedMessagesLoading, setSavedMessagesLoading] = useState(false);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalSearchFilter, setGlobalSearchFilter] = useState('all');
+  const [globalSearchFrom, setGlobalSearchFrom] = useState('');
+  const [globalSearchTo, setGlobalSearchTo] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const [globalSearchError, setGlobalSearchError] = useState('');
+  const [scheduledMessages, setScheduledMessages] = useState([]);
+  const [scheduledMessagesOpen, setScheduledMessagesOpen] = useState(false);
+  const [scheduledMessageAt, setScheduledMessageAt] = useState('');
+  const [editingScheduledMessageId, setEditingScheduledMessageId] = useState(null);
+  const [scheduledMessageSaving, setScheduledMessageSaving] = useState(false);
+  const [scheduledMessageError, setScheduledMessageError] = useState('');
+  const [reputationOpen, setReputationOpen] = useState(false);
+  const [reputationData, setReputationData] = useState(null);
+  const [reputationLoading, setReputationLoading] = useState(false);
+  const [reputationError, setReputationError] = useState('');
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [communityTasks, setCommunityTasks] = useState([]);
+  const [taskMembers, setTaskMembers] = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState('');
+  const [taskDraft, setTaskDraft] = useState({ title: '', description: '', assignedTo: '', dueAt: '', linkedMessageId: '' });
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+  const [codeRoomOpen, setCodeRoomOpen] = useState(false);
   const [openMessageMenu, setOpenMessageMenu] = useState(null);
   const [openReactionPicker, setOpenReactionPicker] = useState(null);
   const messageMenuRef = React.useRef(null);
@@ -367,6 +397,19 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       if (isTransientGroupJoinError) return;
       window.alert(message);
     };
+    const handleScheduledMessageUpdated = ({ id }) => {
+      setScheduledMessages((previous) => previous.filter((message) => String(message.id) !== String(id)));
+    };
+    const handleCommunityTaskUpdated = ({ groupId, task }) => {
+      if (selectedChatRef.current?.type !== 'group' || String(groupId) !== String(selectedChatRef.current?._id)) return;
+      setCommunityTasks((previous) => previous.some((item) => String(item.id) === String(task.id))
+        ? previous.map((item) => String(item.id) === String(task.id) ? task : item)
+        : [task, ...previous]);
+    };
+    const handleCommunityTaskDeleted = ({ groupId, taskId }) => {
+      if (selectedChatRef.current?.type !== 'group' || String(groupId) !== String(selectedChatRef.current?._id)) return;
+      setCommunityTasks((previous) => previous.filter((task) => String(task.id) !== String(taskId)));
+    };
     const handleGroupMessage = (data) => {
       if (selectedChatRef.current?.type !== 'group') return;
       if (String(data.groupId) !== String(selectedChatRef.current?._id)) return;
@@ -386,6 +429,20 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           ...(data.eventResults ? { eventResults: data.eventResults } : {}),
           ...(data.reactions ? { reactions: data.reactions } : {}),
         }
+        : message));
+    };
+    const handleDirectMessageEngagement = (data) => {
+      if (selectedChatRef.current?.type === 'group') return;
+      const selectedId = String(selectedChatRef.current?._id);
+      const currentUserId = String(user?._id);
+      const matchesConversation = (
+        String(data.sender) === currentUserId && String(data.receiver) === selectedId
+      ) || (
+        String(data.sender) === selectedId && String(data.receiver) === currentUserId
+      );
+      if (!matchesConversation) return;
+      setMessages((previous) => previous.map((message) => String(message._id) === String(data._id)
+        ? { ...message, reactions: data.reactions }
         : message));
     };
     const handleMessageUpdated = (data) => {
@@ -445,8 +502,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('receive-message', handleReceive);
     Socket.on('message-sent', handleSent);
     Socket.on('message-error', handleMessageError);
+    Socket.on('scheduled-message-updated', handleScheduledMessageUpdated);
+    Socket.on('community-task-updated', handleCommunityTaskUpdated);
+    Socket.on('community-task-deleted', handleCommunityTaskDeleted);
     Socket.on('group-message', handleGroupMessage);
     Socket.on('group-message-engagement', handleGroupEngagement);
+    Socket.on('direct-message-engagement', handleDirectMessageEngagement);
     Socket.on('message-updated', handleMessageUpdated);
     Socket.on('group-message-updated', handleMessageUpdated);
     Socket.on('message-hidden-for-user', handleMessageHiddenForUser);
@@ -460,8 +521,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('receive-message', handleReceive);
       Socket.off('message-sent', handleSent);
       Socket.off('message-error', handleMessageError);
+      Socket.off('scheduled-message-updated', handleScheduledMessageUpdated);
+      Socket.off('community-task-updated', handleCommunityTaskUpdated);
+      Socket.off('community-task-deleted', handleCommunityTaskDeleted);
       Socket.off('group-message', handleGroupMessage);
       Socket.off('group-message-engagement', handleGroupEngagement);
+      Socket.off('direct-message-engagement', handleDirectMessageEngagement);
       Socket.off('message-updated', handleMessageUpdated);
       Socket.off('group-message-updated', handleMessageUpdated);
       Socket.off('message-hidden-for-user', handleMessageHiddenForUser);
@@ -482,6 +547,30 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const selectedChatRef = React.useRef(selectedChat);
   selectedChatRef.current = selectedChat;
   const conversationMuteRequestRef = React.useRef(0);
+
+  useEffect(() => {
+    setScheduledMessages([]);
+    setScheduledMessageError('');
+    setScheduledMessageAt('');
+    setEditingScheduledMessageId(null);
+    if (!selectedChat?._id) return undefined;
+    let active = true;
+    const type = selectedChat.type === 'group' ? 'group' : 'direct';
+    axios.get(`${API_URL}/api/scheduled-messages`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      params: {
+        type,
+        conversationId: selectedChat._id,
+        ...(type === 'group' && selectedChat.channelId ? { channelId: selectedChat.channelId } : {}),
+      },
+      withCredentials: true,
+    }).then(({ data }) => {
+      if (active) setScheduledMessages(data.messages || []);
+    }).catch((error) => {
+      if (active) setScheduledMessageError(error.response?.data?.message || 'Could not load scheduled messages.');
+    });
+    return () => { active = false; };
+  }, [selectedChat?._id, selectedChat?.type, selectedChat?.channelId]);
 
   useEffect(() => {
     conversationMuteRequestRef.current += 1;
@@ -556,11 +645,17 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     const chatId = String(selectedChat._id);
     const currentUserId = String(user?._id);
     const requestId = ++messagesRequestId.current;
+    const pendingTarget = pendingSearchTargetRef.current;
+    const targetMatchesChat = pendingTarget && (isGroup
+      ? pendingTarget.messageType === 'group'
+        && String(pendingTarget.groupId) === chatId
+        && String(pendingTarget.channelId || '') === String(selectedChat.channelId || '')
+      : pendingTarget.messageType === 'direct' && String(pendingTarget.conversationId) === chatId);
     setMessages([]);
     setMessagesHasMore(false);
     setMessagesError('');
     setMessagesLoading(true);
-    scrollToLatestOnLoad.current = true;
+    scrollToLatestOnLoad.current = !targetMatchesChat;
     const joinGroup = () => {
       const nextJoinKey = `${selectedChat._id}:${selectedChat.type}:${selectedChat.channelId ?? 'default'}`;
       if (!Socket.connected || joinGroupKeyRef.current === nextJoinKey) return;
@@ -580,14 +675,25 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         const historyUrl = isGroup
           ? `${API_URL}/api/groups/${selectedChat._id}/messages${selectedChat.channelId ? `?channelId=${encodeURIComponent(selectedChat.channelId)}` : ''}`
           : `${API_URL}/api/messages/${selectedChat._id}`;
+        const historyParams = targetMatchesChat ? {
+          before: (BigInt(pendingTarget._id) + 1n).toString(),
+          limit: 50,
+        } : undefined;
         const { data } = await axios.get(
           historyUrl,
-          { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }
+          {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+            ...(historyParams ? { params: historyParams } : {}),
+          }
         );
         if (!Array.isArray(data.messages) || typeof data.hasMore !== 'boolean') {
           throw new Error('The server returned an invalid message history.');
         }
         if (requestId !== messagesRequestId.current) return;
+        if (targetMatchesChat && !data.messages.some((message) => String(message._id) === String(pendingTarget._id))) {
+          pendingSearchTargetRef.current = null;
+          scrollToLatestOnLoad.current = true;
+        }
         setMessagesHasMore(data.hasMore);
         if (active) {
           setMessages((current) => {
@@ -646,6 +752,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
+    const searchTarget = pendingSearchTargetRef.current;
+    const targetMatchesChat = searchTarget && selectedChat && (searchTarget.messageType === 'group'
+      ? selectedChat.type === 'group'
+        && String(searchTarget.groupId) === String(selectedChat._id)
+        && String(searchTarget.channelId || '') === String(selectedChat.channelId || '')
+      : selectedChat.type !== 'group' && String(searchTarget.conversationId) === String(selectedChat._id));
+    if (targetMatchesChat && !messagesLoading) {
+      pendingSearchTargetRef.current = null;
+      scrollToLatestOnLoad.current = false;
+      const targetId = String(searchTarget._id);
+      const targetElement = container.querySelector(`[data-message-id="${targetId}"]`);
+      if (targetElement) {
+        setHighlightedMessageId(targetId);
+        targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.setTimeout(() => setHighlightedMessageId((current) => current === targetId ? null : current), 3200);
+      }
+      return;
+    }
     if (pendingScrollAdjustment.current) {
       const { height, top } = pendingScrollAdjustment.current;
       container.scrollTop = container.scrollHeight - height + top;
@@ -879,13 +1003,86 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }
   };
 
-  const toggleGroupReaction = async (message, emoji) => {
+  const submitScheduledMessage = async (event) => {
+    event.preventDefault();
     const chat = selectedChatRef.current;
-    if (chat?.type !== 'group') return;
+    if (!chat || !msg.trim() || !scheduledMessageAt || scheduledMessageSaving) return;
+    if (selectedFiles.length || voiceFile || chat.groupType === 'community' && communityComposerType !== 'message') {
+      setScheduledMessageError('Scheduled messages currently support text only.');
+      return;
+    }
+    setScheduledMessageSaving(true);
+    setScheduledMessageError('');
+    try {
+      const request = editingScheduledMessageId ? axios.put : axios.post;
+      const url = editingScheduledMessageId
+        ? `${API_URL}/api/scheduled-messages/${editingScheduledMessageId}`
+        : `${API_URL}/api/scheduled-messages`;
+      const payload = editingScheduledMessageId
+        ? { content: msg.trim(), scheduledAt: new Date(scheduledMessageAt).toISOString() }
+        : {
+          conversationType: chat.type === 'group' ? 'group' : 'direct',
+          conversationId: chat._id,
+          ...(chat.type === 'group' && chat.channelId ? { channelId: chat.channelId } : {}),
+          content: msg.trim(),
+          scheduledAt: new Date(scheduledMessageAt).toISOString(),
+        };
+      const { data } = await request(url, payload, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      const scheduled = data.message;
+      setScheduledMessages((previous) => {
+        const next = editingScheduledMessageId
+          ? previous.map((item) => String(item.id) === String(editingScheduledMessageId) ? scheduled : item)
+          : [...previous, scheduled];
+        return next.sort((left, right) => new Date(left.scheduledAt) - new Date(right.scheduledAt));
+      });
+      setMsg('');
+      setScheduledMessageAt('');
+      setEditingScheduledMessageId(null);
+    } catch (error) {
+      setScheduledMessageError(error.response?.data?.message || 'Could not schedule this message.');
+    } finally {
+      setScheduledMessageSaving(false);
+    }
+  };
+
+  const editScheduledMessage = (message) => {
+    const localDate = new Date(message.scheduledAt);
+    localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+    setMsg(message.content);
+    setScheduledMessageAt(localDate.toISOString().slice(0, 16));
+    setEditingScheduledMessageId(message.id);
+    setScheduledMessagesOpen(true);
+    setScheduledMessageError('');
+  };
+
+  const cancelScheduledMessage = async (messageId) => {
+    try {
+      await axios.delete(`${API_URL}/api/scheduled-messages/${messageId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      setScheduledMessages((previous) => previous.filter((message) => String(message.id) !== String(messageId)));
+      if (String(editingScheduledMessageId) === String(messageId)) {
+        setEditingScheduledMessageId(null);
+        setScheduledMessageAt('');
+      }
+    } catch (error) {
+      setScheduledMessageError(error.response?.data?.message || 'Could not cancel this scheduled message.');
+    }
+  };
+
+  const toggleMessageReaction = async (message, emoji) => {
+    const chat = selectedChatRef.current;
+    if (!chat?._id) return;
     setOpenReactionPicker(null);
     try {
       const { data } = await axios.post(
-        `${API_URL}/api/groups/${chat._id}/messages/${message._id}/reactions`,
+        chat.type === 'group'
+          ? `${API_URL}/api/groups/${chat._id}/messages/${message._id}/reactions`
+          : `${API_URL}/api/messages/${message._id}/reactions`,
         { emoji },
         { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, withCredentials: true }
       );
@@ -932,6 +1129,121 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     }
   };
 
+  const loadCommunityReputation = async () => {
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group' || chat.groupType !== 'community') return;
+    setReputationOpen(true);
+    setReputationLoading(true);
+    setReputationError('');
+    try {
+      const { data } = await axios.get(`${API_URL}/api/groups/${chat._id}/reputation`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      setReputationData(data);
+    } catch (error) {
+      setReputationError(error.response?.data?.message || 'Could not load community contributions.');
+    } finally {
+      setReputationLoading(false);
+    }
+  };
+
+  const loadCommunityTasks = async () => {
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group' || chat.groupType !== 'community') return;
+    setTasksOpen(true);
+    setTasksLoading(true);
+    setTasksError('');
+    try {
+      const { data } = await axios.get(`${API_URL}/api/groups/${chat._id}/tasks`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      if (String(selectedChatRef.current?._id) === String(chat._id)) {
+        setCommunityTasks(data.tasks || []);
+        setTaskMembers(data.members || []);
+      }
+    } catch (error) {
+      setTasksError(error.response?.data?.message || 'Could not load community tasks.');
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+
+  const createCommunityTask = async (event) => {
+    event.preventDefault();
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group' || !taskDraft.title.trim()) return;
+    setTasksError('');
+    try {
+      const { data } = await axios.post(`${API_URL}/api/groups/${chat._id}/tasks`, {
+        channelId: chat.channelId || null,
+        title: taskDraft.title.trim(),
+        description: taskDraft.description.trim(),
+        assignedTo: taskDraft.assignedTo || null,
+        dueAt: taskDraft.dueAt ? new Date(taskDraft.dueAt).toISOString() : null,
+        linkedMessageId: taskDraft.linkedMessageId || null,
+      }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      setCommunityTasks((previous) => [data.task, ...previous]);
+      setTaskDraft({ title: '', description: '', assignedTo: '', dueAt: '', linkedMessageId: '' });
+    } catch (error) {
+      setTasksError(error.response?.data?.message || 'Could not create this task.');
+    }
+  };
+
+  const updateCommunityTask = async (task, changes) => {
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group') return;
+    const payload = { ...changes };
+    if (Object.hasOwn(payload, 'assignedTo')) payload.assignedTo = payload.assignedTo || null;
+    if (Object.hasOwn(payload, 'dueAt')) payload.dueAt = payload.dueAt ? new Date(payload.dueAt).toISOString() : null;
+    if (Object.hasOwn(payload, 'linkedMessageId')) payload.linkedMessageId = payload.linkedMessageId || null;
+    try {
+      const { data } = await axios.patch(`${API_URL}/api/groups/${chat._id}/tasks/${task.id}`, payload, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      setCommunityTasks((previous) => previous.map((item) => String(item.id) === String(task.id) ? data.task : item));
+    } catch (error) {
+      setTasksError(error.response?.data?.message || 'Could not update this task.');
+    }
+  };
+
+  const deleteCommunityTask = async (taskId) => {
+    const chat = selectedChatRef.current;
+    if (chat?.type !== 'group') return;
+    try {
+      await axios.delete(`${API_URL}/api/groups/${chat._id}/tasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        withCredentials: true,
+      });
+      setCommunityTasks((previous) => previous.filter((task) => String(task.id) !== String(taskId)));
+    } catch (error) {
+      setTasksError(error.response?.data?.message || 'Could not delete this task.');
+    }
+  };
+
+  const openTaskDiscussion = (task) => {
+    if (!task.linkedMessageId || !task.channelId) return;
+    const chat = selectedChatRef.current;
+    const target = {
+      _id: task.linkedMessageId,
+      messageType: 'group',
+      groupId: chat._id,
+      channelId: task.channelId,
+    };
+    pendingSearchTargetRef.current = target;
+    if (String(chat.channelId || '') !== String(task.channelId)) {
+      onSelectChat({ ...chat, channelId: task.channelId, channelName: task.channelName });
+    } else {
+      setMessagesAttempt((attempt) => attempt + 1);
+    }
+    setTasksOpen(false);
+  };
+
   const toggleSavedMessage = async (message, savedType = selectedChatRef.current?.type === 'group' ? 'group' : 'direct') => {
     const messageType = savedType;
     const key = `${messageType}:${message._id}`;
@@ -970,6 +1282,55 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       onSelectChat({ _id: message.conversationId, username: message.conversationName, type: 'direct' });
     }
     setSavedMessagesOpen(false);
+  };
+
+  const submitGlobalSearch = async (event) => {
+    event.preventDefault();
+    if (globalSearchQuery.trim().length < 2 || globalSearchLoading) return;
+    setGlobalSearchLoading(true);
+    setGlobalSearchError('');
+    try {
+      const { data } = await axios.get(`${API_URL}/api/search`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+        params: {
+          q: globalSearchQuery.trim(),
+          filter: globalSearchFilter,
+          ...(globalSearchFrom ? { from: globalSearchFrom } : {}),
+          ...(globalSearchTo ? { to: globalSearchTo } : {}),
+        },
+        withCredentials: true,
+      });
+      setGlobalSearchResults(data.results || []);
+    } catch (error) {
+      setGlobalSearchError(error.response?.data?.message || 'Could not search conversations.');
+      setGlobalSearchResults([]);
+    } finally {
+      setGlobalSearchLoading(false);
+    }
+  };
+
+  const openGlobalSearchResult = (result) => {
+    setGlobalSearchOpen(false);
+    if (result.resultType === 'person') {
+      pendingSearchTargetRef.current = null;
+      onSelectChat({ _id: result._id, username: result.username, profilePicture: result.profilePicture, googlePicture: result.googlePicture, type: 'direct' });
+      return;
+    }
+    pendingSearchTargetRef.current = result;
+    const target = result.messageType === 'group'
+      ? {
+        _id: result.groupId,
+        name: result.groupName,
+        type: 'group',
+        groupType: result.groupType,
+        ...(result.channelId ? { channelId: result.channelId, channelName: result.channelName } : {}),
+      }
+      : { _id: result.conversationId, username: result.conversationName, type: 'direct' };
+    const sameChat = String(selectedChatRef.current?._id) === String(target._id)
+      && selectedChatRef.current?.type === target.type
+      && String(selectedChatRef.current?.channelId || '') === String(target.channelId || '');
+    onSelectChat(target);
+    if (sameChat) setMessagesAttempt((attempt) => attempt + 1);
   };
 
   const sendSticker = (sticker) => {
@@ -1305,6 +1666,15 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <>
             <button
               type="button"
+              onClick={() => { setGlobalSearchOpen(true); setGlobalSearchError(''); }}
+              title="Search conversations"
+              aria-label="Search conversations"
+              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
+            >
+              <FaSearch />
+            </button>
+            <button
+              type="button"
               onClick={() => { setSavedMessagesOpen(true); loadSavedMessages(); }}
               title="Saved messages"
               aria-label="Saved messages"
@@ -1312,6 +1682,50 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             >
               <FaStar />
             </button>
+            {isCommunityChat && (
+              <button
+                type="button"
+                onClick={loadCommunityReputation}
+                title="Community contributions"
+                aria-label="Community contributions"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-amber-300"
+              >
+                <FaTrophy />
+              </button>
+            )}
+            {isCommunityChat && (
+              <button
+                type="button"
+                onClick={loadCommunityTasks}
+                title="Community task board"
+                aria-label="Community task board"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-emerald-300"
+              >
+                <FaTasks />
+              </button>
+            )}
+            {isCommunityChat && (
+              <button
+                type="button"
+                onClick={() => setWhiteboardOpen(true)}
+                title="Community whiteboard"
+                aria-label="Community whiteboard"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-sky-300"
+              >
+                <FaPencilAlt />
+              </button>
+            )}
+            {isCommunityChat && (
+              <button
+                type="button"
+                onClick={() => setCodeRoomOpen(true)}
+                title="Community code room"
+                aria-label="Community code room"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-emerald-300"
+              >
+                <FaCode />
+              </button>
+            )}
             <NotificationCenter onNavigate={navigateToNotificationTarget} />
             <button
               onClick={() => { setCallType('audio'); setIsVideoOpen(true); }}
@@ -1365,6 +1779,200 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               </div>
             </section>
           </div>
+        )}
+
+        {globalSearchOpen && (
+          <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setGlobalSearchOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="global-search-title" className="glass-panel flex max-h-[min(84dvh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                <h2 id="global-search-title" className="text-sm font-semibold">Search conversations</h2>
+                <button type="button" onClick={() => setGlobalSearchOpen(false)} aria-label="Close search" title="Close search" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
+              </header>
+              <form onSubmit={submitGlobalSearch} className="grid gap-2 border-b border-white/10 p-3 sm:grid-cols-[minmax(12rem,1fr)_auto_auto_auto_auto]">
+                <input
+                  autoFocus
+                  type="search"
+                  minLength={2}
+                  maxLength={120}
+                  value={globalSearchQuery}
+                  onChange={(event) => setGlobalSearchQuery(event.target.value)}
+                  placeholder="Search messages, files, people, links"
+                  aria-label="Search query"
+                  className="min-w-0 rounded border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none focus:border-accent-border"
+                />
+                <select value={globalSearchFilter} onChange={(event) => setGlobalSearchFilter(event.target.value)} aria-label="Search filter" className="rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs">
+                  <option value="all">All</option>
+                  <option value="messages">Messages</option>
+                  <option value="files">Files</option>
+                  <option value="links">Links</option>
+                  <option value="people">People</option>
+                  <option value="direct">Direct</option>
+                  <option value="group">Groups</option>
+                </select>
+                <input type="date" value={globalSearchFrom} onChange={(event) => setGlobalSearchFrom(event.target.value)} aria-label="From date" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs" />
+                <input type="date" value={globalSearchTo} onChange={(event) => setGlobalSearchTo(event.target.value)} aria-label="To date" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs" />
+                <button type="submit" disabled={globalSearchQuery.trim().length < 2 || globalSearchLoading} className="inline-flex items-center justify-center gap-2 rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">
+                  <FaSearch /> Search
+                </button>
+              </form>
+              {globalSearchError && <p role="alert" className="px-4 pt-3 text-xs text-rose-200">{globalSearchError}</p>}
+              <div className="min-h-0 flex-1 overflow-y-auto px-4">
+                {globalSearchLoading ? <p role="status" className="theme-muted py-8 text-center text-sm">Searching…</p>
+                  : globalSearchResults.length === 0 ? <p className="theme-muted py-8 text-center text-sm">{globalSearchQuery.trim().length < 2 ? 'Enter at least 2 characters to search.' : 'No results found.'}</p>
+                    : <ul className="divide-y divide-white/10">
+                      {globalSearchResults.map((result) => {
+                        const attachments = typeof result.attachments === 'string'
+                          ? (() => { try { return JSON.parse(result.attachments); } catch { return []; } })()
+                          : result.attachments;
+                        const attachmentNames = Array.isArray(attachments) ? attachments.map((attachment) => attachment?.name).filter(Boolean).join(', ') : '';
+                        const title = result.resultType === 'person'
+                          ? result.username
+                          : result.content || attachmentNames || 'Attachment or media message';
+                        const conversation = result.resultType === 'person'
+                          ? 'Person'
+                          : result.messageType === 'group'
+                            ? `${result.groupName}${result.channelName ? ` · #${result.channelName}` : ''}`
+                            : result.conversationName;
+                        return (
+                          <li key={`${result.resultType}:${result.messageType || 'person'}:${result._id}`}>
+                            <button type="button" onClick={() => openGlobalSearchResult(result)} className="block w-full min-w-0 py-3 text-left hover:text-accent-text">
+                              <span className="flex min-w-0 items-center gap-2 text-[11px] text-white/55">
+                                <span className="truncate">{conversation}</span>
+                                {result.senderName && <span className="shrink-0">{result.senderName}</span>}
+                                {result.timestamp && <time className="ml-auto shrink-0">{new Date(result.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</time>}
+                              </span>
+                              <span className="mt-1 block line-clamp-2 break-words text-sm">{title}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {reputationOpen && (
+          <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setReputationOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="community-reputation-title" className="glass-panel flex max-h-[min(84dvh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                <div>
+                  <h2 id="community-reputation-title" className="text-sm font-semibold">Community contributions</h2>
+                  {reputationData?.me && <p className="theme-muted mt-0.5 text-xs">Your score · {reputationData.me.points} points{reputationData.me.rank ? ` · rank ${reputationData.me.rank}` : ''}</p>}
+                </div>
+                <button type="button" onClick={() => setReputationOpen(false)} aria-label="Close contributions" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
+              </header>
+              {reputationError && <p role="alert" className="px-4 pt-3 text-xs text-rose-200">{reputationError}</p>}
+              {reputationLoading ? <p role="status" className="theme-muted py-10 text-center text-sm">Loading contributions…</p>
+                : <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 md:grid-cols-[minmax(0,1.3fr)_minmax(14rem,0.7fr)]">
+                  <section aria-label="Community leaderboard">
+                    <h3 className="mb-2 text-xs font-semibold uppercase text-white/55">Leaderboard</h3>
+                    <ol className="divide-y divide-white/10">
+                      {(reputationData?.leaderboard || []).map((member) => (
+                        <li key={member.userId} className="flex min-w-0 items-center gap-3 py-2">
+                          <span className="w-7 shrink-0 text-right text-xs tabular-nums text-white/45">{member.rank}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm">{member.username}{String(member.userId) === String(user?._id) ? ' · you' : ''}</span>
+                          <span className="shrink-0 text-xs tabular-nums text-accent-text">{member.points} pts</span>
+                          <span className="hidden min-w-20 text-right text-[10px] text-amber-200/75 sm:inline">{member.badges.join(' · ')}</span>
+                        </li>
+                      ))}
+                    </ol>
+                    {!reputationLoading && !reputationData?.leaderboard?.length && <p className="theme-muted py-6 text-center text-xs">No contributions yet.</p>}
+                  </section>
+                  <section aria-label="Your contribution history">
+                    <h3 className="mb-2 text-xs font-semibold uppercase text-white/55">Your recent history</h3>
+                    <ul className="divide-y divide-white/10">
+                      {(reputationData?.history || []).map((item) => (
+                        <li key={`${item.eventType}:${item.sourceId}`} className="flex items-center justify-between gap-2 py-2 text-xs">
+                          <span className="min-w-0 truncate text-white/75">{{
+                            post: 'Community post',
+                            helpful_reaction: 'Helpful post',
+                            accepted_answer: 'Accepted answer',
+                          }[item.eventType] || 'Contribution'}</span>
+                          <span className="shrink-0 text-accent-text">+{item.points}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {!reputationData?.history?.length && <p className="theme-muted py-6 text-xs">Your activity will appear here.</p>}
+                  </section>
+                </div>}
+            </section>
+          </div>
+        )}
+
+        {tasksOpen && (
+          <div className="fixed inset-0 z-[97] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setTasksOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="community-tasks-title" className="glass-panel flex max-h-[min(88dvh,52rem)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+                <div>
+                  <h2 id="community-tasks-title" className="text-sm font-semibold">{selectedChat?.name || 'Community'} tasks</h2>
+                  <p className="theme-muted mt-0.5 text-xs">{communityTasks.length} tasks</p>
+                </div>
+                <button type="button" onClick={() => setTasksOpen(false)} aria-label="Close task board" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
+              </header>
+              {tasksError && <p role="alert" className="px-4 pt-3 text-xs text-rose-200">{tasksError}</p>}
+              <form onSubmit={createCommunityTask} className="grid gap-2 border-b border-white/10 p-3 sm:grid-cols-2">
+                <input value={taskDraft.title} onChange={(event) => setTaskDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={160} placeholder="Task title" aria-label="Task title" className="min-w-0 rounded border border-white/10 bg-black/20 px-3 py-2 text-sm" />
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={taskDraft.assignedTo} onChange={(event) => setTaskDraft((draft) => ({ ...draft, assignedTo: event.target.value }))} aria-label="Assign task to" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs">
+                    <option value="">Unassigned</option>
+                    {taskMembers.map((member) => <option key={member.id} value={member.id}>{member.username}</option>)}
+                  </select>
+                  <input type="datetime-local" value={taskDraft.dueAt} onChange={(event) => setTaskDraft((draft) => ({ ...draft, dueAt: event.target.value }))} aria-label="Task deadline" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs" />
+                </div>
+                <textarea value={taskDraft.description} onChange={(event) => setTaskDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} rows={2} placeholder="Description" aria-label="Task description" className="min-w-0 resize-y rounded border border-white/10 bg-black/20 px-3 py-2 text-xs sm:col-span-2" />
+                <div className="flex min-w-0 gap-2 sm:col-span-2">
+                  <select value={taskDraft.linkedMessageId} onChange={(event) => setTaskDraft((draft) => ({ ...draft, linkedMessageId: event.target.value }))} aria-label="Link a discussion message" className="min-w-0 flex-1 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs">
+                    <option value="">No linked discussion</option>
+                    {messages.filter((message) => !message.isDeleted).map((message) => <option key={message._id} value={message._id}>{String(message.content || 'Attachment').slice(0, 100)}</option>)}
+                  </select>
+                  <button type="submit" disabled={!taskDraft.title.trim()} className="shrink-0 rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">Create task</button>
+                </div>
+              </form>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4">
+                {tasksLoading ? <p role="status" className="theme-muted py-8 text-center text-sm">Loading tasks…</p>
+                  : communityTasks.length === 0 ? <p className="theme-muted py-8 text-center text-sm">No tasks yet.</p>
+                    : <ul className="divide-y divide-white/10">
+                      {communityTasks.map((task) => {
+                        const localDue = task.dueAt ? new Date(task.dueAt) : null;
+                        if (localDue) localDue.setMinutes(localDue.getMinutes() - localDue.getTimezoneOffset());
+                        return (
+                          <li key={task.id} className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                            <div className="min-w-0">
+                              <p className="break-words text-sm font-medium">{task.title}</p>
+                              {task.description && <p className="mt-1 whitespace-pre-wrap break-words text-xs text-white/65">{task.description}</p>}
+                              <p className="mt-1 text-[10px] text-white/40">Created by {task.creatorName}</p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+                              <select value={task.status} onChange={(event) => updateCommunityTask(task, { status: event.target.value })} aria-label={`Status for ${task.title}`} className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-[11px]">
+                                <option value="todo">To do</option>
+                                <option value="in_progress">In progress</option>
+                                <option value="done">Done</option>
+                              </select>
+                              <select value={task.assignedTo || ''} onChange={(event) => updateCommunityTask(task, { assignedTo: event.target.value })} aria-label={`Assignee for ${task.title}`} className="max-w-32 rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-[11px]">
+                                <option value="">Unassigned</option>
+                                {taskMembers.map((member) => <option key={member.id} value={member.id}>{member.username}</option>)}
+                              </select>
+                              <input type="datetime-local" value={localDue ? localDue.toISOString().slice(0, 16) : ''} onChange={(event) => updateCommunityTask(task, { dueAt: event.target.value })} aria-label={`Deadline for ${task.title}`} className="max-w-40 rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-[10px]" />
+                              {task.linkedMessageId && <button type="button" onClick={() => openTaskDiscussion(task)} className="rounded px-2 py-1.5 text-[11px] text-accent-text hover:bg-white/10">Open discussion</button>}
+                              <button type="button" onClick={() => deleteCommunityTask(task.id)} aria-label={`Delete ${task.title}`} title="Delete task" className="grid h-7 w-7 place-items-center rounded text-white/45 hover:bg-white/10 hover:text-rose-200"><FaTimes size={10} /></button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {whiteboardOpen && selectedChat?.type === 'group' && (
+          <CommunityWhiteboard groupId={selectedChat._id} onClose={() => setWhiteboardOpen(false)} />
+        )}
+        {codeRoomOpen && selectedChat?.type === 'group' && (
+          <Suspense fallback={<div role="status" className="fixed inset-0 z-[99] grid place-items-center bg-black/70 text-sm text-white">Loading code room…</div>}>
+            <CommunityCodeRoom groupId={selectedChat._id} groupName={selectedChat.name} userName={user?.username} onClose={() => setCodeRoomOpen(false)} />
+          </Suspense>
         )}
 
         <div id="chat-area-overlay" className="pointer-events-none absolute inset-0 z-[65]" />
@@ -1674,13 +2282,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   )}
                     </div>
                   )}
-                  {selectedChat.type === 'group' && !m.isDeleted && (
+                  {!m.isDeleted && (
                     <div className="mt-2 flex flex-wrap items-center gap-1" aria-label="Message reactions">
                       {(m.reactions || []).map((reaction) => (
                         <button
                           key={reaction.emoji}
                           type="button"
-                          onClick={() => toggleGroupReaction(m, reaction.emoji)}
+                          onClick={() => toggleMessageReaction(m, reaction.emoji)}
                           aria-label={`${reaction.emoji} reaction, ${reaction.count}`}
                           aria-pressed={reaction.reactedByMe}
                           title={`${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
@@ -1705,7 +2313,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                             <button
                               key={emoji}
                               type="button"
-                              onClick={() => toggleGroupReaction(m, emoji)}
+                              onClick={() => toggleMessageReaction(m, emoji)}
                               aria-label={`React with ${emoji}`}
                               title={`React with ${emoji}`}
                               className="grid h-7 w-7 place-items-center rounded-full text-sm hover:bg-white/10"
@@ -1798,6 +2406,61 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     </li>
                   ))}
                 </ul>
+              )}
+            </section>
+          )}
+          {selectedChat && (
+            <section className="mx-auto mb-2 max-w-4xl border-b border-white/10 pb-2" aria-label="Scheduled messages">
+              <button
+                type="button"
+                onClick={() => setScheduledMessagesOpen((open) => !open)}
+                aria-expanded={scheduledMessagesOpen}
+                className="inline-flex items-center gap-2 rounded px-2 py-1 text-xs text-white/65 hover:bg-white/10 hover:text-white"
+              >
+                <FaCalendarAlt /> Scheduled messages{scheduledMessages.length ? ` · ${scheduledMessages.length}` : ''}
+              </button>
+              {scheduledMessagesOpen && (
+                <div className="mt-2 space-y-2">
+                  <form onSubmit={submitScheduledMessage} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                    <p className="theme-muted flex min-w-0 items-center px-2 text-xs">
+                      {editingScheduledMessageId ? 'Edit the draft in the composer, then choose a new delivery time.' : 'Enter a message in the composer and choose its delivery time.'}
+                    </p>
+                    <input
+                      type="datetime-local"
+                      value={scheduledMessageAt}
+                      onChange={(event) => setScheduledMessageAt(event.target.value)}
+                      aria-label="Scheduled message delivery time"
+                      className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs text-white"
+                    />
+                    <div className="flex gap-1">
+                      <button
+                        type="submit"
+                        disabled={!msg.trim() || !scheduledMessageAt || scheduledMessageSaving || !canPostToCommunityChannel || selectedFiles.length > 0 || Boolean(voiceFile) || isCommunityChat && communityComposerType !== 'message'}
+                        className="inline-flex items-center justify-center gap-2 rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40"
+                      >
+                        <FaCalendarAlt /> {scheduledMessageSaving ? 'Saving…' : editingScheduledMessageId ? 'Update' : 'Schedule'}
+                      </button>
+                      {editingScheduledMessageId && (
+                        <button type="button" onClick={() => { setEditingScheduledMessageId(null); setScheduledMessageAt(''); setMsg(''); }} className="rounded border border-white/10 px-2 text-xs text-white/65 hover:bg-white/10">Cancel edit</button>
+                      )}
+                    </div>
+                  </form>
+                  {scheduledMessageError && <p role="alert" className="text-xs text-rose-200">{scheduledMessageError}</p>}
+                  {scheduledMessages.length > 0 && (
+                    <ul className="max-h-28 space-y-1 overflow-y-auto" aria-label="Pending scheduled messages">
+                      {scheduledMessages.map((message) => (
+                        <li key={message.id} className="flex min-w-0 items-center gap-2 text-xs">
+                          <time className="shrink-0 text-white/50" dateTime={message.scheduledAt}>
+                            {new Date(message.scheduledAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                          </time>
+                          <span className="min-w-0 flex-1 truncate text-white/80">{message.content}</span>
+                          <button type="button" onClick={() => editScheduledMessage(message)} aria-label="Edit scheduled message" title="Edit" className="rounded px-2 py-1 text-accent-text hover:bg-white/10">Edit</button>
+                          <button type="button" onClick={() => cancelScheduledMessage(message.id)} aria-label="Cancel scheduled message" title="Cancel" className="grid h-7 w-7 shrink-0 place-items-center rounded text-white/50 hover:bg-white/10 hover:text-rose-200"><FaTimes size={11} /></button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </section>
           )}

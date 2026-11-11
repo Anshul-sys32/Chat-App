@@ -11,6 +11,7 @@ const { runMigrations } = require("./utils/migrations");
 const { cleanupAbandonedVoiceUploads } = require("./utils/voiceCleanup");
 const { sendMeetingReminders } = require("./services/meetingReminders");
 const { publishScheduledCommunityPosts } = require("./services/scheduledCommunityPosts");
+const { publishScheduledMessages } = require("./services/scheduledMessages");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
 
@@ -49,6 +50,15 @@ connectDB().then(async () => {
   scheduledCommunityPostTimer.unref();
   publishScheduledCommunityPosts(app.get("io")).catch((error) => {
     console.error("Initial scheduled community post delivery failed:", error.message);
+  });
+  const scheduledMessageTimer = setInterval(() => {
+    publishScheduledMessages(app.get("io")).catch((error) => {
+      console.error("Scheduled message delivery failed:", error.message);
+    });
+  }, 15 * 1000);
+  scheduledMessageTimer.unref();
+  publishScheduledMessages(app.get("io")).catch((error) => {
+    console.error("Initial scheduled message delivery failed:", error.message);
   });
   server.listen(PORT, HOST, () =>
     console.log(`✅ Server running on http://${HOST.includes(":") ? `[${HOST}]` : HOST}:${PORT}`)
