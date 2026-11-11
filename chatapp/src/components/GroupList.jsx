@@ -9,16 +9,30 @@ const apiUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL |
 const authConfig = () => ({
   headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
 });
+const hasPermission = (group, permission, platformAdmin) => {
+  if (platformAdmin || group?.role === 'admin') return true;
+  let permissions = group?.rolePermissions;
+  if (typeof permissions === 'string') {
+    try { permissions = JSON.parse(permissions); } catch { permissions = {}; }
+  }
+  return permissions?.[permission] === true;
+};
 
 export default function GroupList({ search = '', onSelectGroup, isAdmin = false }) {
   const [groups, setGroups] = useState([]);
   const [activeGroup, setActiveGroup] = useState(null);
   const [members, setMembers] = useState([]);
+  const [groupRoles, setGroupRoles] = useState([]);
   const [name, setName] = useState('');
   const [groupType, setGroupType] = useState('standard');
   const [channels, setChannels] = useState([]);
   const [newChannelName, setNewChannelName] = useState('');
   const [channelPostingMode, setChannelPostingMode] = useState('members');
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRolePermissions, setNewRolePermissions] = useState({ manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, postMessages: true });
+  const [permissionChannelId, setPermissionChannelId] = useState('');
+  const [permissionRoleKey, setPermissionRoleKey] = useState('');
+  const [channelRolePermissions, setChannelRolePermissions] = useState([]);
   const [memberIdentifier, setMemberIdentifier] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -75,12 +89,15 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
       setGroups((previous) => previous.map((item) => String(item._id) === String(group._id) ? { ...item, ...group } : item));
       setActiveGroup((previous) => previous && String(previous._id) === String(group._id) ? { ...previous, ...group } : previous);
     };
-    const handleRoleChange = ({ groupId, userId, role }) => {
+    const handleRoleChange = ({ groupId, userId, role, roleName }) => {
       if (String(userId) === String(currentUser?._id)) {
-        setGroups((previous) => previous.map((group) => String(group._id) === String(groupId) ? { ...group, role } : group));
-        setActiveGroup((previous) => previous && String(previous._id) === String(groupId) ? { ...previous, role } : previous);
+        setGroups((previous) => previous.map((group) => String(group._id) === String(groupId) ? { ...group, role, roleName } : group));
+        setActiveGroup((previous) => previous && String(previous._id) === String(groupId) ? { ...previous, role, roleName } : previous);
       }
-      setMembers((previous) => previous.map((member) => String(member._id) === String(userId) ? { ...member, role } : member));
+      setMembers((previous) => previous.map((member) => String(member._id) === String(userId) ? { ...member, role, roleName } : member));
+    };
+    const handleRolesUpdated = ({ groupId }) => {
+      if (String(activeGroup?._id) === String(groupId) && activeGroup) refreshMembers(activeGroup);
     };
     const handleMemberAdded = (event) => {
       const { groupId, member, groupName, members: memberCount } = event;
@@ -142,6 +159,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
     Socket.on('group-reactivated', handleReactivated);
     Socket.on('group-updated', handleGroupUpdated);
     Socket.on('group-role-updated', handleRoleChange);
+    Socket.on('group-roles-updated', handleRolesUpdated);
     Socket.on('group-member-added', handleMemberAdded);
     Socket.on('group-member-changed', handleMemberChanged);
     Socket.on('group-picture-updated', handleGroupPicture);
@@ -155,6 +173,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
       Socket.off('group-reactivated', handleReactivated);
       Socket.off('group-updated', handleGroupUpdated);
       Socket.off('group-role-updated', handleRoleChange);
+      Socket.off('group-roles-updated', handleRolesUpdated);
       Socket.off('group-member-added', handleMemberAdded);
       Socket.off('group-member-changed', handleMemberChanged);
       Socket.off('group-picture-updated', handleGroupPicture);
@@ -168,16 +187,75 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
   const refreshMembers = async (group) => {
     setError('');
     try {
-      const [memberResponse, channelResponse] = await Promise.all([
+      const [memberResponse, channelResponse, roleResponse] = await Promise.all([
         axios.get(`${apiUrl}/api/groups/${group._id}/members`, authConfig()),
         group.groupType === 'community' && group.isActive !== 0
           ? axios.get(`${apiUrl}/api/groups/${group._id}/channels`, authConfig())
           : Promise.resolve({ data: { channels: [] } }),
+        axios.get(`${apiUrl}/api/groups/${group._id}/roles`, authConfig()),
       ]);
       setMembers(memberResponse.data);
       setChannels(channelResponse.data.channels || []);
+      setGroupRoles(roleResponse.data.roles || []);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not load group members.');
+    }
+  };
+
+  const createRole = async (event) => {
+    event.preventDefault();
+    if (!activeGroup || !newRoleName.trim()) return;
+    try {
+      await axios.post(`${apiUrl}/api/groups/${activeGroup._id}/roles`, {
+        name: newRoleName.trim(),
+        permissions: newRolePermissions,
+      }, authConfig());
+      setNewRoleName('');
+      setNewRolePermissions({ manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, postMessages: true });
+      await refreshMembers(activeGroup);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not create group role.');
+    }
+  };
+
+  const deleteRole = async (role) => {
+    if (!activeGroup || role.isSystem || !window.confirm(`Delete the ${role.name} role?`)) return;
+    try {
+      await axios.delete(`${apiUrl}/api/groups/${activeGroup._id}/roles/${encodeURIComponent(role.roleKey)}`, authConfig());
+      await refreshMembers(activeGroup);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not delete group role.');
+    }
+  };
+
+  const loadChannelRolePermissions = async (channelId) => {
+    if (!activeGroup || !channelId) return;
+    setPermissionChannelId(String(channelId));
+    try {
+      const { data } = await axios.get(`${apiUrl}/api/groups/${activeGroup._id}/channels/${channelId}/role-permissions`, authConfig());
+      setChannelRolePermissions(data.roles || []);
+      setPermissionRoleKey((current) => current && data.roles.some((role) => role.roleKey === current)
+        ? current
+        : data.roles.find((role) => role.roleKey !== 'admin')?.roleKey || '');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not load channel permissions.');
+    }
+  };
+
+  const updateChannelRolePermission = async () => {
+    const role = channelRolePermissions.find((item) => item.roleKey === permissionRoleKey);
+    if (!activeGroup || !permissionChannelId || !role) return;
+    const canPost = role.canPost === null || role.canPost === undefined
+      ? role.roleKey === 'admin' || channels.find((channel) => String(channel._id) === permissionChannelId)?.postingMode === 'members' && role.permissions?.postMessages !== false
+      : Boolean(role.canPost);
+    try {
+      await axios.put(`${apiUrl}/api/groups/${activeGroup._id}/channels/${permissionChannelId}/role-permissions`, {
+        roleKey: permissionRoleKey,
+        canPost: !canPost,
+      }, authConfig());
+      await loadChannelRolePermissions(permissionChannelId);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not update channel permissions.');
     }
   };
 
@@ -400,7 +478,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
               <div className="border-t border-white/10 px-2.5 py-2.5">
                 <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{channels.length}</span></div>
                 {channels.length > 0
-                  ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" title={channel.postingMode === 'admins' ? `${channel.name}: leaders can post` : channel.name} onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name, channelPostingMode: channel.postingMode })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-accent-soft hover:text-accent-text"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span>{channel.postingMode === 'admins' && <FaLock className="ml-auto shrink-0 text-[9px] text-amber-200/70" aria-label="Leaders only" />}</button></li>)}</ul>
+                  ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" title={channel.postingMode === 'admins' && !channel.canPost ? `${channel.name}: leaders can post` : channel.name} onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name, channelPostingMode: channel.postingMode, channelCanPost: channel.canPost })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-accent-soft hover:text-accent-text"><FaHashtag className="text-[10px] text-white/40" /><span className="truncate">{channel.name}</span>{channel.postingMode === 'admins' && !channel.canPost && <FaLock className="ml-auto shrink-0 text-[9px] text-amber-200/70" aria-label="Leaders only" />}</button></li>)}</ul>
                   : <p className="text-xs text-white/45">No channels yet.</p>}
               </div>
             )}

@@ -251,7 +251,7 @@ const initSocket = (httpServer) => {
           }
           channel = await getActiveChannel(id, requestedChannelId);
           if (!channel) return socket.emit("message-error", { message: "Channel not found." });
-          if (!canPostInChannel(group, channel, socket.userRole)) {
+          if (!await canPostInChannel(group, channel, socket.userRole)) {
             return socket.emit("message-error", { message: "Only community leaders can post in this channel." });
           }
           channelId = channel.id;

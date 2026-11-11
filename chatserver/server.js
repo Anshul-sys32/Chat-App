@@ -10,6 +10,7 @@ const { connectDB } = require("./config/db");
 const { runMigrations } = require("./utils/migrations");
 const { cleanupAbandonedVoiceUploads } = require("./utils/voiceCleanup");
 const { sendMeetingReminders } = require("./services/meetingReminders");
+const { publishScheduledCommunityPosts } = require("./services/scheduledCommunityPosts");
 const authRoutes = require("./routes/authRoutes");
 const { corsOrigin } = require("./utils/cors");
 
@@ -39,6 +40,15 @@ connectDB().then(async () => {
   meetingReminderTimer.unref();
   sendMeetingReminders(app.get("io")).catch((error) => {
     console.error("Initial meeting reminder delivery failed:", error.message);
+  });
+  const scheduledCommunityPostTimer = setInterval(() => {
+    publishScheduledCommunityPosts(app.get("io")).catch((error) => {
+      console.error("Scheduled community post delivery failed:", error.message);
+    });
+  }, 15 * 1000);
+  scheduledCommunityPostTimer.unref();
+  publishScheduledCommunityPosts(app.get("io")).catch((error) => {
+    console.error("Initial scheduled community post delivery failed:", error.message);
   });
   server.listen(PORT, HOST, () =>
     console.log(`✅ Server running on http://${HOST.includes(":") ? `[${HOST}]` : HOST}:${PORT}`)

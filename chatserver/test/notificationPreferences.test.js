@@ -19,6 +19,10 @@ const groupInvitationsMigration = require("../migrations/202611010006_group_invi
 const groupInvitationKeyMigration = require("../migrations/202611010007_group_invitation_pending_key");
 const scheduledMeetingsMigration = require("../migrations/202611010008_scheduled_meetings");
 const communityPostsMigration = require("../migrations/202611010009_community_posts");
+const groupRolesMigration = require("../migrations/202611010010_group_roles");
+const groupMessageReactionsMigration = require("../migrations/202611010011_group_message_reactions");
+const scheduledCommunityPostsMigration = require("../migrations/202611010012_scheduled_community_posts");
+const savedMessagesMigration = require("../migrations/202611010013_saved_messages");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
@@ -27,9 +31,12 @@ const {
   MAX_CALL_PARTICIPANTS,
 } = require("../services/callRoomPolicy");
 const { sendMeetingReminders } = require("../services/meetingReminders");
-const { canAccessGroup, validateGroupMessageTarget } = require("../services/groupAccess");
-const { validateCommunityPost } = require("../services/communityPosts");
+const { canAccessGroup, canManageGroup, validateGroupMessageTarget } = require("../services/groupAccess");
+const { hasGroupPermission } = require("../services/groupRoles");
+const { isSupportedReaction, loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
+const { nextScheduledAt } = require("../services/scheduledCommunityPosts");
 const { listChannels, createChannel } = require("../controllers/groupChannelController");
+const authRoutes = require("../routes/authRoutes");
 
 const createResponse = () => ({
   statusCode: 200,
@@ -146,11 +153,94 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010007_group_invitation_pending_key",
     "202611010008_scheduled_meetings",
     "202611010009_community_posts",
+    "202611010010_group_roles",
+    "202611010011_group_message_reactions",
+    "202611010012_scheduled_community_posts",
+    "202611010013_saved_messages",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
   assert.equal(statements.filter((sql) => sql.includes("RELEASE_LOCK")).length, 2);
   assert.equal(releaseCount, 2);
+});
+
+test("group message reactions migration cascades with messages and users and rolls back", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await groupMessageReactionsMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS group_message_reactions/);
+  assert.match(statements[0], /PRIMARY KEY \(message_id, user_id, emoji\)/);
+  assert.match(statements[0], /REFERENCES group_messages\(id\) ON DELETE CASCADE/);
+  assert.match(statements[0], /REFERENCES users\(id\) ON DELETE CASCADE/);
+  await groupMessageReactionsMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS group_message_reactions/);
+});
+
+test("scheduled community posts migration creates an indexed queue with rollback", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await scheduledCommunityPostsMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS scheduled_community_posts/);
+  assert.match(statements[0], /recurrence ENUM\('once', 'daily', 'weekly'\)/);
+  assert.match(statements[0], /scheduled_community_posts_queue \(status, scheduled_at\)/);
+  await scheduledCommunityPostsMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS scheduled_community_posts/);
+});
+
+test("saved messages migration scopes bookmarks by user, type, and message", async () => {
+  const statements = [];
+  const connection = { query: async (sql) => statements.push(sql) };
+  await savedMessagesMigration.up(connection);
+  assert.match(statements[0], /CREATE TABLE IF NOT EXISTS user_saved_messages/);
+  assert.match(statements[0], /PRIMARY KEY \(user_id, message_type, message_id\)/);
+  assert.match(statements[0], /REFERENCES users\(id\) ON DELETE CASCADE/);
+  await savedMessagesMigration.down(connection);
+  assert.match(statements[1], /DROP TABLE IF EXISTS user_saved_messages/);
+});
+
+test("saved-message and scheduled-announcement routes register during router initialization", () => {
+  const registered = authRoutes.stack
+    .filter((layer) => layer.route)
+    .map((layer) => Object.entries(layer.route.methods).map(([method, enabled]) => enabled ? `${method}:${layer.route.path}` : null))
+    .flat()
+    .filter(Boolean);
+  for (const route of [
+    "get:/saved-messages",
+    "put:/saved-messages/:messageType/:messageId",
+    "delete:/saved-messages/:messageType/:messageId",
+    "get:/groups/:groupId/channels/:channelId/scheduled-posts",
+    "post:/groups/:groupId/channels/:channelId/scheduled-posts",
+  ]) {
+    assert.ok(registered.includes(route), `${route} should be registered`);
+  }
+});
+
+test("scheduled community post recurrence advances past missed occurrences", () => {
+  const now = new Date("2026-11-11T12:00:00.000Z");
+  assert.equal(nextScheduledAt("2026-11-11T10:00:00.000Z", "once", now), null);
+  assert.equal(nextScheduledAt("2026-11-11T10:00:00.000Z", "daily", now).toISOString(), "2026-11-12T10:00:00.000Z");
+  assert.equal(nextScheduledAt("2026-11-04T10:00:00.000Z", "weekly", now).toISOString(), "2026-11-18T10:00:00.000Z");
+});
+
+test("community engagement loads reaction totals and the current user's selection", async () => {
+  assert.equal(isSupportedReaction("👍"), true);
+  assert.equal(isSupportedReaction("<script>"), false);
+  const calls = [];
+  const execute = async (sql, values) => {
+    calls.push({ sql, values });
+    if (sql.includes("group_message_reactions")) {
+      return [[{ messageId: 31, emoji: "👍", reactionCount: 3, ownCount: 1 }], []];
+    }
+    return [[], []];
+  };
+  const messages = await loadCommunityEngagement([
+    { _id: 31, messageType: "message", isDeleted: 0 },
+    { _id: 32, messageType: "message", isDeleted: 1 },
+  ], 7, execute);
+  assert.deepEqual(messages[0].reactions, [{ emoji: "👍", count: 3, reactedByMe: true }]);
+  assert.deepEqual(messages[1].reactions, []);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].values, [7, 31]);
 });
 
 test("migration runner reports the version that failed without recording it", async () => {
@@ -452,6 +542,55 @@ test("community post validation accepts bounded polls and rejects malformed opti
   }, true).error, /distinct options/);
   assert.match(validateCommunityPost({ messageType: "event", structuredData: {} }, true).error, /valid start date/);
   assert.match(validateCommunityPost({ messageType: "question", content: "Help" }, false).error, /only available in communities/);
+  const question = validateCommunityPost({
+    messageType: "question",
+    content: "Why does this query time out?",
+    structuredData: { category: "Development", tags: ["MySQL", "performance", "mysql"] },
+  }, true);
+  assert.deepEqual(question.structuredData, { category: "Development", tags: ["mysql", "performance"] });
+  assert.match(validateCommunityPost({
+    messageType: "question",
+    content: "Help",
+    structuredData: { category: "General", tags: Array.from({ length: 6 }, (_, index) => `tag${index}`) },
+  }, true).error, /up to 5 tags/);
+  assert.match(validateCommunityPost({
+    messageType: "question",
+    content: "Help",
+    structuredData: { category: "x".repeat(41), tags: [] },
+  }, true).error, /category and up to 5 tags/);
+});
+
+test("group roles migration expands membership roles and seeds built-in capabilities", async () => {
+  const statements = [];
+  const connection = {
+    query: async (sql) => statements.push(sql),
+    execute: async (sql, values) => {
+      statements.push({ sql, values });
+      if (sql.includes("information_schema.columns")) return [[{ type: "enum('admin','member')" }], []];
+      if (sql.includes("SELECT id FROM chat_groups")) return [[{ id: 12 }], []];
+      return [{ affectedRows: 1 }, []];
+    },
+  };
+  await groupRolesMigration.up(connection);
+  assert.ok(statements.some((sql) => typeof sql === "string" && sql.includes("MODIFY role VARCHAR(40)")));
+  assert.ok(statements.some((sql) => typeof sql === "string" && sql.includes("community_channel_role_permissions")));
+  const seededRoles = statements.filter((entry) => entry && typeof entry === "object" && entry.sql.includes("INSERT IGNORE INTO group_roles"));
+  assert.ok(seededRoles.some(({ values }) => values[1] === "moderator"));
+  assert.ok(seededRoles.some(({ values }) => values[1] === "developer"));
+  await groupRolesMigration.down(connection);
+  assert.ok(statements.some((sql) => typeof sql === "string" && sql.includes("role NOT IN ('admin', 'member')")));
+});
+
+test("custom group capabilities gate group and channel actions", () => {
+  const group = {
+    groupRole: "mentor",
+    rolePermissions: { manageRoles: false, manageMembers: false, manageChannels: false, manageMessages: false, postMessages: true },
+  };
+  assert.equal(canAccessGroup({ isActive: 1, ...group }, "user"), true);
+  assert.equal(hasGroupPermission(group, "postMessages", "user"), true);
+  assert.equal(canManageGroup(group, "manageChannels", "user"), false);
+  assert.equal(canManageGroup(group, "postMessages", "user"), true);
+  assert.equal(canManageGroup(group, "manageRoles", "admin"), true);
 });
 
 test("admins cannot access a missing group record", () => {
@@ -478,13 +617,15 @@ test("community members can list channels but cannot create them without leader 
     if (sql.includes("FROM chat_groups group_record")) {
       return [[{ id: 8, groupType: "community", groupRole: "member" }], []];
     }
-    if (sql.includes("FROM group_channels")) return [[{ _id: 14, name: "general", slug: "general" }], []];
+    if (sql.includes("FROM group_channels")) return [[{ _id: 14, id: 14, name: "announcements", slug: "announcements", postingMode: "admins" }], []];
+    if (sql.includes("community_channel_role_permissions")) return [[{ canPost: 1 }], []];
     return [{ affectedRows: 1 }, []];
   });
   const listResponse = createResponse();
   await listChannels({ user: { id: 5, role: "user" }, params: { groupId: "8" } }, listResponse);
   assert.equal(listResponse.statusCode, 200);
-  assert.equal(listResponse.body.channels[0].slug, "general");
+  assert.equal(listResponse.body.channels[0].slug, "announcements");
+  assert.equal(listResponse.body.channels[0].canPost, true);
 
   const createResponseValue = createResponse();
   await createChannel({

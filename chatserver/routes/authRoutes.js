@@ -37,14 +37,25 @@ const {
 	createChannel,
 	updateChannel,
 	archiveChannel,
+	listChannelRolePermissions,
+	updateChannelRolePermission,
 } = require("../controllers/groupChannelController");
+const {
+	createGroupRole,
+	deleteGroupRole,
+	listGroupRoles,
+	updateGroupRole,
+} = require("../controllers/groupRoleController");
 const { isGroupType } = require("../services/groupCapabilities");
 const { ensureDefaultCommunityChannels } = require("../services/communityDefaults");
-const { loadCommunityEngagement, parseStructuredData } = require("../services/communityPosts");
+const { ensureBuiltInGroupRoles } = require("../services/groupRoles");
+const { isSupportedReaction, loadCommunityEngagement, parseStructuredData } = require("../services/communityPosts");
 const {
 	getGroupAccess,
 	getActiveChannel,
 	canAccessGroup,
+	canPostInChannel,
+	canManageGroup: hasGroupPermission,
 	validateGroupMessageTarget,
 } = require("../services/groupAccess");
 const {
@@ -227,13 +238,15 @@ async function deleteSticker(req, res, admin) {
 		return res.status(500).json({ message: "Failed to remove sticker." });
 	}
 }
-const canManageGroup = async (groupId, user) =>
-	user.role === "admin" || await getGroupRole(groupId, user.id) === "admin";
+const canManageGroup = async (groupId, user, permission = "manageMembers") => {
+	const group = await getGroupAccess(groupId, user.id);
+	return canAccessGroup(group, user.role) && hasGroupPermission(group, permission, user.role);
+};
 const requireGroupAvatarAdmin = async (req, res, next) => {
 	const groupId = Number(req.params.groupId);
 	if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id." });
 	try {
-		if (!await canManageGroup(groupId, req.user)) {
+		if (!await canManageGroup(groupId, req.user, "manageChannels")) {
 			return res.status(403).json({ message: "Only group admins can change the group image." });
 		}
 		return next();
@@ -1194,14 +1207,135 @@ router.delete("/messages/:messageId", protect, async (req, res) => {
 		res.status(500).json({ message: "Failed to delete message" });
 	}
 });
+
+router.get("/saved-messages", protect, async (req, res) => {
+	try {
+		const [directMessages] = await pool.execute(
+			`SELECT saved.message_id AS _id, 'direct' AS messageType,
+			        CASE WHEN message.sender_id = ? THEN message.receiver_id ELSE message.sender_id END AS conversationId,
+			        conversation_user.username AS conversationName,
+			        message.sender_id AS sender, sender.username AS senderName,
+			        message.content, message.created_at AS timestamp, saved.saved_at AS savedAt
+			 FROM user_saved_messages saved
+			 JOIN messages message ON message.id = saved.message_id
+			 JOIN users sender ON sender.id = message.sender_id
+			 JOIN users conversation_user ON conversation_user.id = CASE
+			   WHEN message.sender_id = ? THEN message.receiver_id ELSE message.sender_id END
+			 WHERE saved.user_id = ? AND saved.message_type = 'direct'
+			   AND message.is_deleted = FALSE
+			   AND (message.sender_id = ? OR message.receiver_id = ?)
+			   AND NOT EXISTS (SELECT 1 FROM direct_message_hidden_for hidden
+			                   WHERE hidden.message_id = message.id AND hidden.user_id = ?)
+			 ORDER BY saved.saved_at DESC LIMIT 100`,
+			[req.user.id, req.user.id, req.user.id, req.user.id, req.user.id, req.user.id]
+		);
+		const [groupMessages] = await pool.execute(
+			`SELECT saved.message_id AS _id, 'group' AS messageType,
+			        group_record.id AS groupId, group_record.name AS groupName,
+			        group_record.group_type AS groupType, message.channel_id AS channelId,
+			        channel.name AS channelName, message.sender_id AS sender, sender.username AS senderName,
+			        message.content, message.created_at AS timestamp, saved.saved_at AS savedAt
+			 FROM user_saved_messages saved
+			 JOIN group_messages message ON message.id = saved.message_id
+			 JOIN group_members membership ON membership.group_id = message.group_id AND membership.user_id = saved.user_id
+			 JOIN chat_groups group_record ON group_record.id = message.group_id AND group_record.is_active = TRUE
+			 JOIN users sender ON sender.id = message.sender_id
+			 LEFT JOIN group_channels channel ON channel.id = message.channel_id
+			 WHERE saved.user_id = ? AND saved.message_type = 'group' AND message.is_deleted = FALSE
+			   AND NOT EXISTS (SELECT 1 FROM group_message_hidden_for hidden
+			                   WHERE hidden.message_id = message.id AND hidden.user_id = saved.user_id)
+			   AND (group_record.group_type <> 'community'
+			        OR channel.id IS NOT NULL AND channel.is_archived = FALSE)
+			 ORDER BY saved.saved_at DESC LIMIT 100`,
+			[req.user.id]
+		);
+		const messages = [...directMessages, ...groupMessages]
+			.sort((left, right) => new Date(right.savedAt) - new Date(left.savedAt))
+			.slice(0, 100);
+		return res.json({ messages });
+	} catch (error) {
+		console.error("List saved messages error:", error);
+		return res.status(500).json({ message: "Could not load saved messages." });
+	}
+});
+
+router.put("/saved-messages/:messageType/:messageId", protect, async (req, res) => {
+	const { messageType } = req.params;
+	const messageId = Number(req.params.messageId);
+	if (!validId(messageId) || !["direct", "group"].includes(messageType)) {
+		return res.status(400).json({ message: "Choose a valid message to save." });
+	}
+	try {
+		if (messageType === "direct") {
+			const [messages] = await pool.execute(
+				`SELECT id FROM messages
+				 WHERE id = ? AND is_deleted = FALSE AND (sender_id = ? OR receiver_id = ?)
+				   AND NOT EXISTS (SELECT 1 FROM direct_message_hidden_for hidden
+				                   WHERE hidden.message_id = messages.id AND hidden.user_id = ?)
+				 LIMIT 1`,
+				[messageId, req.user.id, req.user.id, req.user.id]
+			);
+			if (!messages.length) return res.status(404).json({ message: "Message not found." });
+		} else {
+			const [messages] = await pool.execute(
+				`SELECT id, group_id AS groupId, channel_id AS channelId
+				 FROM group_messages
+				 WHERE id = ? AND is_deleted = FALSE
+				   AND NOT EXISTS (SELECT 1 FROM group_message_hidden_for hidden
+				                   WHERE hidden.message_id = group_messages.id AND hidden.user_id = ?)
+				 LIMIT 1`,
+				[messageId, req.user.id]
+			);
+			const message = messages[0];
+			if (!message) return res.status(404).json({ message: "Message not found." });
+			const group = await getGroupAccess(message.groupId, req.user.id);
+			if (!canAccessGroup(group, req.user.role)) return res.status(404).json({ message: "Message not found." });
+			if (group.groupType === "community") {
+				if (!message.channelId || !await getActiveChannel(message.groupId, Number(message.channelId))) {
+					return res.status(404).json({ message: "Message not found." });
+				}
+			} else if (message.channelId !== null) {
+				return res.status(404).json({ message: "Message not found." });
+			}
+		}
+		await pool.execute(
+			"INSERT IGNORE INTO user_saved_messages (user_id, message_type, message_id) VALUES (?, ?, ?)",
+			[req.user.id, messageType, messageId]
+		);
+		return res.status(204).end();
+	} catch (error) {
+		console.error("Save message error:", error);
+		return res.status(500).json({ message: "Could not save this message." });
+	}
+});
+
+router.delete("/saved-messages/:messageType/:messageId", protect, async (req, res) => {
+	const { messageType } = req.params;
+	const messageId = Number(req.params.messageId);
+	if (!validId(messageId) || !["direct", "group"].includes(messageType)) {
+		return res.status(400).json({ message: "Choose a valid saved message." });
+	}
+	try {
+		await pool.execute(
+			"DELETE FROM user_saved_messages WHERE user_id = ? AND message_type = ? AND message_id = ?",
+			[req.user.id, messageType, messageId]
+		);
+		return res.status(204).end();
+	} catch (error) {
+		console.error("Remove saved message error:", error);
+		return res.status(500).json({ message: "Could not remove this saved message." });
+	}
+});
+
 router.get("/groups", protect, async (req, res) => {
 	try {
 		const [groups] = await pool.execute(
 			`SELECT g.id AS _id, g.name, g.avatar_url AS avatarUrl,
 			        g.group_type AS groupType, g.is_active AS isActive,
-			        mine.role, COUNT(m.user_id) AS members
+			        mine.role, mine_role.permissions AS rolePermissions, COUNT(m.user_id) AS members
 			 FROM chat_groups g
 			 JOIN group_members mine ON mine.group_id = g.id AND mine.user_id = ?
+			 LEFT JOIN group_roles mine_role ON mine_role.group_id = g.id AND mine_role.role_key = mine.role
 			 JOIN group_members m ON m.group_id = g.id
 			 WHERE g.is_active = TRUE
 			 GROUP BY g.id, g.name, g.avatar_url, g.group_type, g.is_active, mine.role
@@ -1251,6 +1385,7 @@ router.post("/groups", protect, async (req, res) => {
 			"INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'admin')",
 			[result.insertId, req.user.id]
 		);
+		await ensureBuiltInGroupRoles(connection, result.insertId);
 		if (groupType === "community") {
 			await ensureDefaultCommunityChannels(connection, result.insertId, req.user.id);
 		}
@@ -1276,7 +1411,7 @@ router.patch("/groups/:groupId", protect, async (req, res) => {
 		return res.status(400).json({ message: "Invalid group update." });
 	}
 	try {
-		if (!await canManageGroup(groupId, req.user)) {
+		if (!await canManageGroup(groupId, req.user, "manageChannels")) {
 			return res.status(403).json({ message: "Only group admins can edit this group." });
 		}
 		const [groups] = await pool.execute(
@@ -1316,7 +1451,7 @@ router.delete("/groups/:groupId", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
 	if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id." });
 	try {
-		if (!await canManageGroup(groupId, req.user)) {
+		if (!await canManageGroup(groupId, req.user, "manageChannels")) {
 			return res.status(403).json({ message: "Only group leaders can deactivate this group." });
 		}
 		const [groups] = await pool.execute("SELECT id AS _id, name FROM chat_groups WHERE id = ? LIMIT 1", [groupId]);
@@ -1340,6 +1475,12 @@ router.get("/groups/:groupId/channels", protect, listChannels);
 router.post("/groups/:groupId/channels", protect, createChannel);
 router.patch("/groups/:groupId/channels/:channelId", protect, updateChannel);
 router.delete("/groups/:groupId/channels/:channelId", protect, archiveChannel);
+router.get("/groups/:groupId/channels/:channelId/role-permissions", protect, listChannelRolePermissions);
+router.put("/groups/:groupId/channels/:channelId/role-permissions", protect, updateChannelRolePermission);
+router.get("/groups/:groupId/roles", protect, listGroupRoles);
+router.post("/groups/:groupId/roles", protect, createGroupRole);
+router.patch("/groups/:groupId/roles/:roleKey", protect, updateGroupRole);
+router.delete("/groups/:groupId/roles/:roleKey", protect, deleteGroupRole);
 
 router.get("/groups/:groupId/members", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
@@ -1350,8 +1491,10 @@ router.get("/groups/:groupId/members", protect, async (req, res) => {
 		}
 		const [members] = await pool.execute(
 			`SELECT u.id AS _id, u.username, u.email,
-			        u.profile_picture AS profilePicture, u.google_picture AS googlePicture, gm.role
+			        u.profile_picture AS profilePicture, u.google_picture AS googlePicture, gm.role,
+			        COALESCE(group_role.name, gm.role) AS roleName
 			 FROM group_members gm JOIN users u ON u.id = gm.user_id
+			 LEFT JOIN group_roles group_role ON group_role.group_id = gm.group_id AND group_role.role_key = gm.role
 			 WHERE gm.group_id = ? ORDER BY gm.role, u.username`,
 			[groupId]
 		);
@@ -1643,20 +1786,28 @@ router.post("/groups/:groupId/members", protect, async (req, res) => {
 router.patch("/groups/:groupId/members/:userId", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);
 	const userId = Number(req.params.userId);
-	const { role } = req.body;
-	if (!validId(groupId) || !validId(userId) || !["admin", "member"].includes(role)) {
+	const role = typeof req.body?.role === "string" ? req.body.role.trim() : "";
+	if (!validId(groupId) || !validId(userId) || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(role)) {
 		return res.status(400).json({ message: "Invalid group member role update." });
 	}
 	try {
 		if (!await canManageGroup(groupId, req.user)) {
-			return res.status(403).json({ message: "Only group admins can edit roles." });
+			return res.status(403).json({ message: "You do not have permission to edit group roles." });
+		}
+		const [roleDefinitions] = await pool.execute(
+			"SELECT name FROM group_roles WHERE group_id = ? AND role_key = ? LIMIT 1",
+			[groupId, role]
+		);
+		if (!roleDefinitions.length) return res.status(400).json({ message: "Choose a role defined for this group." });
+		if (role === "admin" && !await canManageGroup(groupId, req.user, "manageRoles")) {
+			return res.status(403).json({ message: "Only a group role manager can assign Admin." });
 		}
 		const [target] = await pool.execute(
 			"SELECT role FROM group_members WHERE group_id = ? AND user_id = ?",
 			[groupId, userId]
 		);
 		if (!target.length) return res.status(404).json({ message: "Group member not found." });
-		if (target[0].role === "admin" && role === "member") {
+		if (target[0].role === "admin" && role !== "admin") {
 			const [[{ admins }]] = await pool.execute(
 				"SELECT COUNT(*) AS admins FROM group_members WHERE group_id = ? AND role = 'admin'",
 				[groupId]
@@ -1665,9 +1816,10 @@ router.patch("/groups/:groupId/members/:userId", protect, async (req, res) => {
 		}
 		await pool.execute("UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?", [role, groupId, userId]);
 		const io = req.app.get("io");
-		io?.in(`user:${userId}`).emit("group-role-updated", { groupId, userId, role });
-		io?.to(`group:${groupId}`).emit("group-role-updated", { groupId, userId, role });
-		res.json({ userId, role });
+		const roleName = roleDefinitions[0].name;
+		io?.in(`user:${userId}`).emit("group-role-updated", { groupId, userId, role, roleName });
+		io?.to(`group:${groupId}`).emit("group-role-updated", { groupId, userId, role, roleName });
+		res.json({ userId, role, roleName });
 	} catch (err) {
 		console.error("Update group role error:", err);
 		res.status(500).json({ message: "Failed to update member role" });
@@ -1778,6 +1930,97 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 	}
 });
 
+const authorizeScheduledAnnouncementChannel = async (groupId, channelId, user) => {
+	const group = await getGroupAccess(groupId, user.id);
+	if (!group) return { status: 404, message: "Community not found." };
+	if (!canAccessGroup(group, user.role)) return { status: 403, message: "You are not a member of this community." };
+	if (group.groupType !== "community") return { status: 400, message: "Scheduled announcements are only available in communities." };
+	const channel = await getActiveChannel(groupId, channelId);
+	if (!channel || channel.slug !== "announcements") return { status: 404, message: "Announcements channel not found." };
+	return { group, channel };
+};
+
+router.get("/groups/:groupId/channels/:channelId/scheduled-posts", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const channelId = Number(req.params.channelId);
+	if (!validId(groupId) || !validId(channelId)) return res.status(400).json({ message: "Invalid community channel." });
+	try {
+		const authorized = await authorizeScheduledAnnouncementChannel(groupId, channelId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		const [posts] = await pool.execute(
+			`SELECT id, content, recurrence,
+			        DATE_FORMAT(scheduled_at, '%Y-%m-%dT%H:%i:%s.000Z') AS scheduledAt
+			 FROM scheduled_community_posts
+			 WHERE group_id = ? AND channel_id = ? AND status = 'scheduled'
+			 ORDER BY scheduled_at, id LIMIT 100`,
+			[groupId, channelId]
+		);
+		return res.json({ posts });
+	} catch (error) {
+		console.error("List scheduled community posts error:", error);
+		return res.status(500).json({ message: "Could not load scheduled announcements." });
+	}
+});
+
+router.post("/groups/:groupId/channels/:channelId/scheduled-posts", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const channelId = Number(req.params.channelId);
+	const content = typeof req.body?.content === "string" ? req.body.content.trim() : "";
+	const recurrence = req.body?.recurrence || "once";
+	const scheduledTime = Date.parse(req.body?.scheduledAt);
+	if (!validId(groupId) || !validId(channelId) || !content || content.length > 10000
+		|| !["once", "daily", "weekly"].includes(recurrence)
+		|| !Number.isFinite(scheduledTime) || scheduledTime <= Date.now()
+		|| scheduledTime > Date.now() + 366 * 24 * 60 * 60 * 1000) {
+		return res.status(400).json({ message: "Provide announcement text, a future time within one year, and a valid recurrence." });
+	}
+	try {
+		const authorized = await authorizeScheduledAnnouncementChannel(groupId, channelId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		if (!await canPostInChannel(authorized.group, authorized.channel, req.user.role)) {
+			return res.status(403).json({ message: "You do not have permission to schedule announcements." });
+		}
+		const scheduledAt = new Date(scheduledTime).toISOString().slice(0, 19).replace("T", " ");
+		const [result] = await pool.execute(
+			`INSERT INTO scheduled_community_posts
+			 (group_id, channel_id, sender_id, content, recurrence, scheduled_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			[groupId, channelId, req.user.id, content, recurrence, scheduledAt]
+		);
+		return res.status(201).json({
+			post: { id: result.insertId, content, recurrence, scheduledAt: new Date(scheduledTime).toISOString() },
+		});
+	} catch (error) {
+		console.error("Schedule community post error:", error);
+		return res.status(500).json({ message: "Could not schedule this announcement." });
+	}
+});
+
+router.delete("/groups/:groupId/channels/:channelId/scheduled-posts/:postId", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const channelId = Number(req.params.channelId);
+	const postId = Number(req.params.postId);
+	if (!validId(groupId) || !validId(channelId) || !validId(postId)) {
+		return res.status(400).json({ message: "Invalid scheduled announcement." });
+	}
+	try {
+		const authorized = await authorizeScheduledAnnouncementChannel(groupId, channelId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		const canManage = hasGroupPermission(authorized.group, "manageChannels", req.user.role);
+		const [result] = await pool.execute(
+			`UPDATE scheduled_community_posts SET status = 'cancelled'
+			 WHERE id = ? AND group_id = ? AND channel_id = ? AND status = 'scheduled'
+			   AND (sender_id = ? OR ? = TRUE)`,
+			[postId, groupId, channelId, req.user.id, canManage]
+		);
+		if (!result.affectedRows) return res.status(404).json({ message: "Scheduled announcement not found or no longer cancellable." });
+		return res.status(204).end();
+	} catch (error) {
+		console.error("Cancel scheduled community post error:", error);
+		return res.status(500).json({ message: "Could not cancel this announcement." });
+	}
+});
+
 const authorizeCommunityMessageAction = async (groupId, messageId, user) => {
 	const group = await getGroupAccess(groupId, user.id);
 	if (!group) return { status: 404, message: "Community not found." };
@@ -1796,6 +2039,67 @@ const authorizeCommunityMessageAction = async (groupId, messageId, user) => {
 	}
 	return { message };
 };
+
+const authorizeGroupMessageReaction = async (groupId, messageId, user) => {
+	const group = await getGroupAccess(groupId, user.id);
+	if (!group) return { status: 404, message: "Group not found." };
+	if (!canAccessGroup(group, user.role)) return { status: 403, message: "You are not a member of this group." };
+	const [rows] = await pool.execute(
+		`SELECT id AS _id, group_id AS groupId, channel_id AS channelId,
+		        sender_id AS sender, message_type AS messageType, structured_data AS structuredData,
+		        reply_to_id AS replyToId, is_deleted AS isDeleted
+		 FROM group_messages
+		 WHERE id = ? AND group_id = ? AND is_deleted = FALSE
+		   AND NOT EXISTS (SELECT 1 FROM group_message_hidden_for hidden WHERE hidden.message_id = group_messages.id AND hidden.user_id = ?)
+		 LIMIT 1`,
+		[messageId, groupId, user.id]
+	);
+	const message = rows[0];
+	if (!message) return { status: 404, message: "Message not found." };
+	if (group.groupType === "community") {
+		if (!message.channelId || !await getActiveChannel(groupId, Number(message.channelId))) {
+			return { status: 404, message: "Message not found." };
+		}
+	} else if (message.channelId !== null) {
+		return { status: 404, message: "Message not found." };
+	}
+	return { message };
+};
+
+router.post("/groups/:groupId/messages/:messageId/reactions", protect, async (req, res) => {
+	const groupId = Number(req.params.groupId);
+	const messageId = Number(req.params.messageId);
+	const emoji = req.body?.emoji;
+	if (!validId(groupId) || !validId(messageId) || !isSupportedReaction(emoji)) {
+		return res.status(400).json({ message: "Choose a supported reaction." });
+	}
+	try {
+		const authorized = await authorizeGroupMessageReaction(groupId, messageId, req.user);
+		if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
+		const { message } = authorized;
+		await pool.execute(
+			`INSERT INTO group_message_reactions (message_id, user_id, emoji, is_active)
+			 VALUES (?, ?, ?, TRUE)
+			 ON DUPLICATE KEY UPDATE is_active = NOT is_active`,
+			[messageId, req.user.id, emoji]
+		);
+		const [updated] = await loadCommunityEngagement([message], req.user.id, pool.execute.bind(pool));
+		const io = req.app.get("io");
+		const room = message.channelId
+			? `group:${groupId}:channel:${message.channelId}`
+			: `group:${groupId}`;
+		io?.to(room).emit("group-message-engagement", {
+			_id: messageId,
+			groupId,
+			channelId: message.channelId,
+			reactions: updated.reactions,
+		});
+		return res.json({ reactions: updated.reactions });
+	} catch (error) {
+		console.error("Group message reaction error:", error);
+		return res.status(500).json({ message: "Could not update this reaction." });
+	}
+});
 
 router.post("/groups/:groupId/messages/:messageId/poll-votes", protect, async (req, res) => {
 	const groupId = Number(req.params.groupId);

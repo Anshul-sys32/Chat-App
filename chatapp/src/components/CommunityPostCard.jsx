@@ -99,7 +99,14 @@ export default function CommunityPostCard({ message, threadCount, onVote, onRsvp
   return (
     <div className="min-w-0">
       {message.messageType === 'question' && (
-        <span className="mb-1 inline-flex rounded border border-amber-300/25 bg-amber-300/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-100">Question</span>
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          <span className="rounded border border-amber-300/25 bg-amber-300/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-100">Question</span>
+          <span className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] text-white/55">{data.category || 'General'}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${message.acceptedAnswerId ? 'bg-emerald-300/10 text-emerald-200' : 'bg-amber-300/10 text-amber-100'}`}>
+            {message.acceptedAnswerId ? 'Solved' : 'Unsolved'}
+          </span>
+          {(data.tags || []).map((tag) => <span key={tag} className="rounded bg-sky-300/10 px-1.5 py-0.5 text-[9px] text-sky-200">#{tag}</span>)}
+        </div>
       )}
       <MarkdownMessage>{message.content}</MarkdownMessage>
       {message.messageType === 'question' && (

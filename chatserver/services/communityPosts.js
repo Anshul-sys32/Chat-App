@@ -1,4 +1,7 @@
 const MESSAGE_TYPES = new Set(["message", "question", "poll", "event"]);
+const SUPPORTED_REACTIONS = new Set(["👍", "❤️", "😂", "😮", "😢", "🎉"]);
+
+const isSupportedReaction = (emoji) => SUPPORTED_REACTIONS.has(emoji);
 
 const parseStructuredData = (value) => {
   if (!value) return null;
@@ -18,7 +21,19 @@ const validateCommunityPost = (payload, isCommunity) => {
   if (content.length > 10000) return { error: "Messages must be 10,000 characters or shorter." };
   if (messageType === "message") return { messageType, content, structuredData: null };
   if (messageType === "question") {
-    return content ? { messageType, content, structuredData: null } : { error: "Write a question before posting." };
+    if (!content) return { error: "Write a question before posting." };
+    if (!isCommunity) return { error: "Questions are only available in communities." };
+    const data = payload.structuredData && typeof payload.structuredData === "object" && !Array.isArray(payload.structuredData)
+      ? payload.structuredData
+      : {};
+    const category = typeof data.category === "string" ? data.category.trim() : "General";
+    const tags = Array.isArray(data.tags)
+      ? [...new Set(data.tags.map((tag) => typeof tag === "string" ? tag.trim().toLowerCase().replace(/^#/, "") : "").filter(Boolean))]
+      : [];
+    if (!category || category.length > 40 || tags.length > 5 || tags.some((tag) => tag.length > 24 || !/^[a-z0-9][a-z0-9-]*$/.test(tag))) {
+      return { error: "Choose a valid category and up to 5 tags." };
+    }
+    return { messageType, content, structuredData: { category, tags } };
   }
 
   const data = payload.structuredData;
@@ -60,8 +75,10 @@ const validateCommunityPost = (payload, isCommunity) => {
 const loadCommunityEngagement = async (messages, userId, execute) => {
   const polls = messages.filter((message) => message.messageType === "poll");
   const events = messages.filter((message) => message.messageType === "event");
+  const reactableMessages = messages.filter((message) => !message.isDeleted);
   const pollData = new Map();
   const eventData = new Map();
+  const reactionData = new Map();
   if (polls.length) {
     const ids = polls.map((message) => message._id);
     const placeholders = ids.map(() => "?").join(", ");
@@ -97,22 +114,40 @@ const loadCommunityEngagement = async (messages, userId, execute) => {
       eventData.set(String(row.messageId), current);
     }
   }
+  if (reactableMessages.length) {
+    const ids = reactableMessages.map((message) => message._id);
+    const placeholders = ids.map(() => "?").join(", ");
+    const [rows] = await execute(
+      `SELECT message_id AS messageId, emoji, COUNT(*) AS reactionCount,
+              SUM(user_id = ?) AS ownCount
+       FROM group_message_reactions WHERE is_active = TRUE AND message_id IN (${placeholders})
+       GROUP BY message_id, emoji`,
+      [userId, ...ids]
+    );
+    for (const row of rows) {
+      const current = reactionData.get(String(row.messageId)) || [];
+      current.push({ emoji: row.emoji, count: Number(row.reactionCount), reactedByMe: Number(row.ownCount) > 0 });
+      reactionData.set(String(row.messageId), current);
+    }
+  }
   return messages.map((message) => {
     const structuredData = parseStructuredData(message.structuredData);
+    const reactions = reactionData.get(String(message._id)) || [];
     if (message.messageType === "poll") {
       const results = pollData.get(String(message._id)) || { counts: [], selected: [] };
       results.counts = (structuredData?.options || []).map((_, index) => results.counts[index] || 0);
-      return { ...message, structuredData, pollResults: results };
+      return { ...message, structuredData, pollResults: results, reactions };
     }
     if (message.messageType === "event") {
       return {
         ...message,
         structuredData,
         eventResults: eventData.get(String(message._id)) || { going: 0, maybe: 0, notGoing: 0, myResponse: null },
+        reactions,
       };
     }
-    return { ...message, structuredData };
+    return { ...message, structuredData, reactions };
   });
 };
 
-module.exports = { loadCommunityEngagement, parseStructuredData, validateCommunityPost };
+module.exports = { isSupportedReaction, loadCommunityEngagement, parseStructuredData, validateCommunityPost };

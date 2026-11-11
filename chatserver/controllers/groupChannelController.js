@@ -1,5 +1,6 @@
 const { pool } = require("../config/db");
 const { getGroupCapabilities } = require("../services/groupCapabilities");
+const { canManageGroup, canPostInChannel } = require("../services/groupAccess");
 
 const validId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 const makeSlug = (value) => value.normalize("NFKD")
@@ -9,20 +10,22 @@ const makeSlug = (value) => value.normalize("NFKD")
   .replace(/^-|-$/g, "")
   .slice(0, 80);
 
-const resolveCommunityGroup = async (groupId, user, requireLeader = false) => {
+const resolveCommunityGroup = async (groupId, user, requiredPermission = null) => {
   const [rows] = await pool.execute(
     `SELECT group_record.id, group_record.name, group_record.group_type AS groupType,
-            membership.role AS groupRole
+            membership.role AS groupRole, role_definition.permissions AS rolePermissions
      FROM chat_groups group_record
      LEFT JOIN group_members membership
        ON membership.group_id = group_record.id AND membership.user_id = ?
+     LEFT JOIN group_roles role_definition
+       ON role_definition.group_id = group_record.id AND role_definition.role_key = membership.role
      WHERE group_record.id = ? LIMIT 1`,
     [user.id, groupId]
   );
   const group = rows[0];
   if (!group || !getGroupCapabilities(group.groupType).channels) return { error: "not-found" };
   if (!group.groupRole && user.role !== "admin") return { error: "forbidden" };
-  if (requireLeader && group.groupRole !== "admin" && user.role !== "admin") return { error: "forbidden" };
+  if (requiredPermission && !canManageGroup(group, requiredPermission, user.role)) return { error: "forbidden" };
   return { group };
 };
 
@@ -44,7 +47,11 @@ const listChannels = async (req, res) => {
        ORDER BY sort_order, id`,
       [groupId]
     );
-    return res.json({ groupType: group.groupType, channels });
+    const channelsWithAccess = await Promise.all(channels.map(async (channel) => ({
+      ...channel,
+      canPost: await canPostInChannel(group, { ...channel, id: channel._id }, req.user.role),
+    })));
+    return res.json({ groupType: group.groupType, channels: channelsWithAccess });
   } catch (error) {
     console.error("List community channels error:", error);
     return res.status(500).json({ message: "Could not load community channels." });
@@ -61,7 +68,7 @@ const createChannel = async (req, res) => {
     return res.status(400).json({ message: "Provide a channel name, valid description, and posting mode." });
   }
   try {
-    const { error } = await resolveCommunityGroup(groupId, req.user, true);
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
     if (error) return sendAccessError(res, error);
     const [[{ channelCount }]] = await pool.execute(
       "SELECT COUNT(*) AS channelCount FROM group_channels WHERE group_id = ? AND is_archived = FALSE",
@@ -115,7 +122,7 @@ const updateChannel = async (req, res) => {
     return res.status(400).json({ message: "Provide at least one channel field to update." });
   }
   try {
-    const { error } = await resolveCommunityGroup(groupId, req.user, true);
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
     if (error) return sendAccessError(res, error);
     const [channels] = await pool.execute(
       "SELECT id, slug FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = FALSE LIMIT 1",
@@ -151,7 +158,7 @@ const archiveChannel = async (req, res) => {
   const channelId = Number(req.params.channelId);
   if (!validId(groupId) || !validId(channelId)) return res.status(400).json({ message: "Invalid group or channel id." });
   try {
-    const { error } = await resolveCommunityGroup(groupId, req.user, true);
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
     if (error) return sendAccessError(res, error);
     const [channels] = await pool.execute(
       "SELECT id, slug FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = FALSE LIMIT 1",
@@ -180,4 +187,75 @@ const archiveChannel = async (req, res) => {
   }
 };
 
-module.exports = { listChannels, createChannel, updateChannel, archiveChannel };
+const listChannelRolePermissions = async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const channelId = Number(req.params.channelId);
+  if (!validId(groupId) || !validId(channelId)) return res.status(400).json({ message: "Invalid group or channel id." });
+  try {
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
+    if (error) return sendAccessError(res, error);
+    const [channels] = await pool.execute(
+      "SELECT id, posting_mode AS postingMode FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = FALSE LIMIT 1",
+      [channelId, groupId]
+    );
+    if (!channels.length) return res.status(404).json({ message: "Channel not found." });
+    const [roles] = await pool.execute(
+      `SELECT role.role_key AS roleKey, role.name, role.permissions,
+              permission.can_post AS canPost
+       FROM group_roles role
+       LEFT JOIN community_channel_role_permissions permission
+         ON permission.channel_id = ? AND permission.role_key = role.role_key
+       WHERE role.group_id = ? ORDER BY role.is_system DESC, role.name`,
+      [channelId, groupId]
+    );
+    return res.json({ postingMode: channels[0].postingMode, roles });
+  } catch (error) {
+    console.error("List channel role permissions error:", error);
+    return res.status(500).json({ message: "Could not load channel permissions." });
+  }
+};
+
+const updateChannelRolePermission = async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const channelId = Number(req.params.channelId);
+  const roleKey = typeof req.body?.roleKey === "string" ? req.body.roleKey : "";
+  const canPost = req.body?.canPost;
+  if (!validId(groupId) || !validId(channelId) || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(roleKey) || typeof canPost !== "boolean") {
+    return res.status(400).json({ message: "Provide a role and boolean posting permission." });
+  }
+  if (roleKey === "admin") return res.status(400).json({ message: "Admin posting permission is always enabled." });
+  try {
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
+    if (error) return sendAccessError(res, error);
+    const [[channel]] = await pool.execute(
+      "SELECT id FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = FALSE LIMIT 1",
+      [channelId, groupId]
+    );
+    if (!channel) return res.status(404).json({ message: "Channel not found." });
+    const [[role]] = await pool.execute(
+      "SELECT role_key AS roleKey, name FROM group_roles WHERE group_id = ? AND role_key = ? LIMIT 1",
+      [groupId, roleKey]
+    );
+    if (!role) return res.status(404).json({ message: "Group role not found." });
+    await pool.execute(
+      `INSERT INTO community_channel_role_permissions (channel_id, role_key, can_post) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE can_post = VALUES(can_post)`,
+      [channelId, roleKey, canPost]
+    );
+    const permission = { groupId, channelId, roleKey, roleName: role.name, canPost };
+    req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-permission-updated", permission);
+    return res.json(permission);
+  } catch (error) {
+    console.error("Update channel role permission error:", error);
+    return res.status(500).json({ message: "Could not update channel permissions." });
+  }
+};
+
+module.exports = {
+  listChannels,
+  createChannel,
+  updateChannel,
+  archiveChannel,
+  listChannelRolePermissions,
+  updateChannelRolePermission,
+};
