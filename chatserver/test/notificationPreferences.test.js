@@ -31,6 +31,7 @@ const communityWhiteboardMigration = require("../migrations/202611010018_communi
 const communityCodeRoomsMigration = require("../migrations/202611010019_community_code_rooms");
 const codeRoomSnapshotMigration = require("../migrations/202611010020_code_room_snapshot");
 const communityCallChannelsMigration = require("../migrations/202611010021_community_call_channels");
+const communityBotsMigration = require("../migrations/202611010022_community_bots");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
@@ -183,6 +184,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010019_community_code_rooms",
     "202611010020_code_room_snapshot",
     "202611010021_community_call_channels",
+    "202611010022_community_bots",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);

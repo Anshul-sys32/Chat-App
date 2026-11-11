@@ -24,6 +24,14 @@ const { randomUUID } = require("node:crypto");
 const { activeCallRooms } = require("../services/callRoomRegistry");
 const { canJoinSfuCallRoom, matchesCallRoomScope } = require("../services/callRoomPolicy");
 const { searchMessages } = require("../controllers/messageSearchController");
+const { listMediaGallery } = require("../controllers/mediaGalleryController");
+const {
+	createCustomBot,
+	installBuiltinBot,
+	listCommunityBots,
+	uninstallCommunityBot,
+	updateCommunityBot,
+} = require("../controllers/communityBotsController");
 const { getCommunityReputation } = require("../controllers/communityReputationController");
 const {
 	createCommunityTask,
@@ -193,6 +201,13 @@ const stickerUploadHandler = (req, res, next) => {
 		return next();
 	});
 };
+
+router.get("/media-gallery", protect, listMediaGallery);
+router.get("/groups/:groupId/bots", protect, listCommunityBots);
+router.put("/groups/:groupId/bots/built-in/:botKey", protect, installBuiltinBot);
+router.post("/groups/:groupId/bots", protect, createCustomBot);
+router.patch("/groups/:groupId/bots/:botId", protect, updateCommunityBot);
+router.delete("/groups/:groupId/bots/:botId", protect, uninstallCommunityBot);
 
 router.get("/stickers", protect, async (req, res) => {
 	try {
@@ -1952,9 +1967,9 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 			return res.status(400).json({ message: "Standard groups do not have channels." });
 		}
 		const [rows] = await pool.execute(
-			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender,
+			`SELECT gm.id AS _id, gm.group_id AS groupId, gm.sender_id AS sender, gm.bot_id AS botId,
 					gm.channel_id AS channelId,
-					u.username AS senderName,
+					COALESCE(bot.name, u.username) AS senderName,
 					CASE WHEN gm.is_deleted THEN 'This message was deleted' ELSE gm.content END AS content,
 					CASE WHEN gm.is_deleted THEN NULL ELSE gm.attachments END AS attachments,
 					gm.is_deleted AS isDeleted, gm.reply_to_id AS replyToId,
@@ -1966,6 +1981,7 @@ router.get("/groups/:groupId/messages", protect, async (req, res) => {
 					     WHEN reply_message.is_deleted THEN 'This message was deleted' ELSE reply_message.content END AS replyContent,
 					gm.created_at AS timestamp
 			 FROM group_messages gm JOIN users u ON u.id = gm.sender_id
+			 LEFT JOIN community_bots bot ON bot.id = gm.bot_id
 			 LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
 			 LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
 				 LEFT JOIN group_message_hidden_for reply_hidden ON reply_hidden.message_id = reply_message.id AND reply_hidden.user_id = ?

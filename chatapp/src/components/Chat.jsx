@@ -4,7 +4,7 @@ import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaHashtag, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaReply, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaExternalLinkAlt, FaHashtag, FaImages, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaReply, FaRobot, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -18,6 +18,8 @@ import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 import FloatingPanel from './FloatingPanel';
 import useFloatingPanel from '../useFloatingPanel';
 import { normalizeNotificationTarget } from '../notificationDeliveryPolicy';
+import MediaGallery from './MediaGallery';
+import CommunityBotsPanel from './CommunityBotsPanel';
 
 const CommunityCodeRoom = lazy(() => import('./CommunityCodeRoom'));
 
@@ -55,8 +57,20 @@ const formatFileSize = (size) => {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+const parseStructuredData = (value) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
 export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, theme, onToggleTheme, accent, onChangeAccent }) {
   const [msg, setMsg] = useState('');
+  const [botCommands, setBotCommands] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [voiceFile, setVoiceFile] = useState(null);
   const [voicePreviewUrl, setVoicePreviewUrl] = useState('');
@@ -104,6 +118,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [announcementError, setAnnouncementError] = useState('');
   const [savedMessages, setSavedMessages] = useState([]);
   const [savedMessagesOpen, setSavedMessagesOpen] = useState(false);
+  const [conversationGalleryOpen, setConversationGalleryOpen] = useState(false);
+  const [communityBotsOpen, setCommunityBotsOpen] = useState(false);
   const [savedMessagesLoading, setSavedMessagesLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
@@ -171,6 +187,24 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setVoicePreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [voiceFile]);
+
+  useEffect(() => {
+    if (selectedChat?.type !== 'group' || selectedChat.groupType !== 'community') {
+      setBotCommands([]);
+      return undefined;
+    }
+    let active = true;
+    axios.get(`${API_URL}/api/groups/${selectedChat._id}/bots`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      withCredentials: true,
+    }).then(({ data }) => {
+      if (!active) return;
+      setBotCommands((data.bots || []).filter((bot) => bot.enabled)
+        .flatMap((bot) => (bot.commands || []).filter((command) => command.enabled)
+          .map((command) => ({ ...command, botName: bot.name }))));
+    }).catch(() => { if (active) setBotCommands([]); });
+    return () => { active = false; };
+  }, [selectedChat?._id, selectedChat?.type, selectedChat?.groupType]);
 
   useEffect(() => () => {
     if (replyDrag.current?.timer) window.clearTimeout(replyDrag.current.timer);
@@ -630,6 +664,28 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     if (target) onSelectChat(target);
   };
 
+  const jumpToGalleryMessage = (item) => {
+    const target = item.messageType === 'group'
+      ? { _id: item._id, messageType: 'group', groupId: item.groupId, channelId: item.channelId }
+      : { _id: item._id, messageType: 'direct', conversationId: item.conversationId };
+    pendingSearchTargetRef.current = target;
+    const targetChat = item.messageType === 'group'
+      ? {
+        _id: item.groupId,
+        name: item.groupName,
+        type: 'group',
+        groupType: item.groupType,
+        ...(item.channelId ? { channelId: item.channelId, channelName: item.channelName } : {}),
+      }
+      : { _id: item.conversationId, username: item.conversationName, type: 'direct' };
+    const currentChat = selectedChatRef.current;
+    const sameChat = currentChat?.type === targetChat.type
+      && String(currentChat?._id) === String(targetChat._id)
+      && String(currentChat?.channelId || '') === String(targetChat.channelId || '');
+    if (sameChat) setMessagesAttempt((attempt) => attempt + 1);
+    else onSelectChat(targetChat);
+  };
+
   useEffect(() => {
     if (!selectedChat?._id) {
       messagesRequestId.current += 1;
@@ -948,6 +1004,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       setIsSending(false);
     }
   };
+
+  const commandPrefix = isCommunityChat && /^\/[a-z0-9_-]*$/i.test(msg.trim()) ? msg.trim().slice(1).toLowerCase() : null;
+  const matchingBotCommands = commandPrefix === null ? [] : botCommands
+    .filter((command) => command.key.startsWith(commandPrefix))
+    .slice(0, 6);
 
   const updateCommunityEngagement = async (message, action, payload) => {
     const chat = selectedChatRef.current;
@@ -1610,6 +1671,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         conversationMuteSaving={conversationMuteSaving}
         conversationMuteError={conversationMuteError}
         onToggleConversationMute={toggleConversationMute}
+        onJumpToGalleryMessage={jumpToGalleryMessage}
       />
 
 
@@ -1693,6 +1755,27 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             >
               <FaStar />
             </button>
+            <button
+              type="button"
+              onClick={() => setConversationGalleryOpen(true)}
+              title="Conversation media"
+              aria-label="Conversation media"
+              disabled={!selectedChat}
+              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text disabled:opacity-30"
+            >
+              <FaImages />
+            </button>
+            {isCommunityChat && (
+              <button
+                type="button"
+                onClick={() => setCommunityBotsOpen(true)}
+                title="Manage community bots"
+                aria-label="Manage community bots"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
+              >
+                <FaRobot />
+              </button>
+            )}
             {isCommunityChat && (
               <button
                 type="button"
@@ -1790,6 +1873,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               </div>
             </section>
           </div>
+        )}
+
+        <MediaGallery
+          open={conversationGalleryOpen}
+          onClose={() => setConversationGalleryOpen(false)}
+          conversation={selectedChat}
+          onJumpToMessage={jumpToGalleryMessage}
+        />
+        {communityBotsOpen && selectedChat?.type === 'group' && selectedChat.groupType === 'community' && (
+          <CommunityBotsPanel groupId={selectedChat._id} groupName={selectedChat.name} onClose={() => setCommunityBotsOpen(false)} />
         )}
 
         {globalSearchOpen && (
@@ -2199,8 +2292,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   {selectedMessageIds.includes(String(m._id)) && (
                     <span className="absolute -left-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-accent text-[10px] font-bold text-accent-contrast">✓</span>
                   )}
-                  {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id)) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) ? 'text-accent-text' : 'text-accent-deep'}`}>
-                    {String(m.sender) === String(user?._id) ? 'You' : m.senderName || selectedChat.username}
+                  {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id) || m.botId) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) && !m.botId ? 'text-accent-text' : 'text-accent-deep'}`}>
+                    {String(m.sender) === String(user?._id) && !m.botId ? 'You' : m.senderName || selectedChat.username}
                   </p>}
                   {selectedChat.type === 'group' && selectedChat.groupType === 'community' && !m.isDeleted
                     && ['question', 'poll', 'event'].includes(m.messageType) ? (
@@ -2216,6 +2309,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                         ? <MarkdownMessage>{m.content}</MarkdownMessage>
                         : <p className={`whitespace-pre-wrap break-words ${m.isDeleted ? 'italic opacity-75' : ''}`}>{m.content}</p>
                     )}
+                  {m.botId && !m.isDeleted && parseStructuredData(m.structuredData).buttons?.filter((button) => {
+                    if (typeof button?.label !== 'string' || typeof button?.url !== 'string') return false;
+                    try { return ['http:', 'https:'].includes(new URL(button.url).protocol); } catch { return false; }
+                  }).map((button) => (
+                    <a key={`${button.label}:${button.url}`} href={button.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-2 rounded border border-accent-border px-2.5 py-1.5 text-xs text-accent-text hover:bg-white/10">
+                      {button.label}<FaExternalLinkAlt size={10} />
+                    </a>
+                  ))}
                   {selectedChat.type === 'group' && selectedChat.groupType === 'community'
                     && !['question', 'poll', 'event'].includes(m.messageType) && (
                       <button type="button" onClick={() => setActiveThread(m)} className="mt-1 block text-[10px] text-sky-200/75 hover:text-white">
@@ -2641,7 +2742,23 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {isStructuredComposer ? (
               <span className="theme-muted min-w-0 flex-1 px-3 text-xs">{communityComposerType === 'poll' ? 'Poll details above' : 'Event details above'}</span>
             ) : isCommunityChat ? (
-              <textarea
+              <div className="relative min-w-0 flex-1">
+                {matchingBotCommands.length > 0 && (
+                  <ul role="listbox" aria-label="Slash commands" className="glass-panel absolute bottom-full left-0 z-[70] mb-2 max-h-56 w-full max-w-sm overflow-y-auto rounded-lg border p-1 shadow-xl">
+                    {matchingBotCommands.map((command) => (
+                      <li key={`${command.botName}:${command.key}`}>
+                        <button type="button" role="option" aria-selected="false" onClick={() => setMsg(`/${command.key} `)} className="flex w-full items-start gap-3 rounded px-3 py-2 text-left hover:bg-white/10">
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium">/{command.key}</span>
+                            <span className="theme-muted block truncate text-xs">{command.description || command.botName}</span>
+                          </span>
+                          <span className="theme-muted shrink-0 text-[10px]">{command.botName}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <textarea
                 data-community-composer
                 value={msg}
                 onChange={(event) => setMsg(event.target.value)}
@@ -2650,7 +2767,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 className="theme-composer-input min-h-11 min-w-0 flex-1 resize-y bg-transparent px-3 py-2 text-sm leading-5 outline-none placeholder:opacity-60"
                 placeholder={communityComposerType === 'question' ? 'Describe the issue, expected behavior, and relevant context…' : `Message #${selectedChat.channelName || selectedChat.name}…`}
                 disabled={!selectedChat || isSending || !canPostToCommunityChannel}
-              />
+                />
+              </div>
             ) : (
               <input
                 value={msg}

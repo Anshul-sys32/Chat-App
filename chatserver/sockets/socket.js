@@ -8,6 +8,7 @@ const { MAX_CALL_PARTICIPANTS, canNegotiateCallRoomOffer, canInviteToCallRoom, s
 const { activeCallRooms } = require("../services/callRoomRegistry");
 const { getGroupAccess, getActiveChannel, canAccessGroup, canPostInChannel } = require("../services/groupAccess");
 const { loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
+const { executeBotCommand } = require("../services/communityBots");
 const { recordReputationEvent } = require("../services/communityReputation");
 const { validateWhiteboardStroke } = require("../services/whiteboardStrokePolicy");
 const Y = require("yjs");
@@ -274,7 +275,7 @@ const initSocket = (httpServer) => {
         if (!canAccessGroup(group, socket.userRole)) {
           return socket.emit("message-error", { message: "You are no longer a member of this group." });
         }
-        const post = validateCommunityPost(messagePayload, group.groupType === "community");
+        let post = validateCommunityPost(messagePayload, group.groupType === "community");
         if (post.error) return socket.emit("message-error", { message: post.error });
         let channelId = null;
         let channel = null;
@@ -292,6 +293,18 @@ const initSocket = (httpServer) => {
         } else if (requestedChannelId !== null) {
           return socket.emit("message-error", { message: "Standard groups do not have channels." });
         }
+        let botId = null;
+        if (group.groupType === "community" && typeof content === "string" && content.startsWith("/")) {
+          if (attachments.length || messagePayload.replyToId !== undefined || messagePayload.stickerId !== undefined) {
+            return socket.emit("message-error", { message: "Bot commands cannot include attachments, replies, or stickers." });
+          }
+          const botReply = await executeBotCommand(id, channelId, content);
+          if (!botReply || botReply.error) {
+            return socket.emit("message-error", { message: botReply?.error || "This command is not available." });
+          }
+          botId = botReply.botId;
+          post = botReply;
+        }
         const [replied] = Number.isSafeInteger(replyToId) && replyToId > 0
           ? await pool.execute(
             "SELECT id FROM group_messages WHERE id = ? AND group_id = ? AND channel_id <=> ?",
@@ -308,13 +321,13 @@ const initSocket = (httpServer) => {
           return socket.emit("message-error", { message: "That sticker is not available." });
         }
         const [result] = await pool.execute(
-          "INSERT INTO group_messages (group_id, channel_id, sender_id, content, attachments, reply_to_id, sticker_id, sticker_url, message_type, structured_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          [id, channelId, Number(socket.userId), post.content, JSON.stringify(attachments), replyToId || null, stickerId || null, sticker[0]?.imageUrl || null, post.messageType, post.structuredData ? JSON.stringify(post.structuredData) : null]
+          "INSERT INTO group_messages (group_id, channel_id, sender_id, bot_id, content, attachments, reply_to_id, sticker_id, sticker_url, message_type, structured_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [id, channelId, Number(socket.userId), botId, post.content, JSON.stringify(attachments), replyToId || null, stickerId || null, botId ? null : sticker[0]?.imageUrl || null, post.messageType, post.structuredData ? JSON.stringify(post.structuredData) : null]
         );
         const [rows] = await pool.execute(
           `SELECT gm.id AS _id, gm.group_id AS groupId, gm.channel_id AS channelId,
-                  channel.name AS channelName, gm.sender_id AS sender,
-                  u.username AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
+                  channel.name AS channelName, gm.sender_id AS sender, gm.bot_id AS botId,
+                  COALESCE(bot.name, u.username) AS senderName, gm.content, gm.attachments, gm.reply_to_id AS replyToId,
                   gm.message_type AS messageType, gm.structured_data AS structuredData,
                   gm.accepted_answer_id AS acceptedAnswerId,
                   gm.sticker_id AS stickerId, COALESCE(gm.sticker_url, stickers.image_url) AS stickerUrl,
@@ -323,6 +336,7 @@ const initSocket = (httpServer) => {
                   gm.is_deleted AS isDeleted,
                   gm.created_at AS timestamp
            FROM group_messages gm JOIN users u ON u.id = gm.sender_id
+           LEFT JOIN community_bots bot ON bot.id = gm.bot_id
            LEFT JOIN group_channels channel ON channel.id = gm.channel_id
            LEFT JOIN group_messages reply_message ON reply_message.id = gm.reply_to_id
            LEFT JOIN users reply_user ON reply_user.id = reply_message.sender_id
@@ -331,12 +345,14 @@ const initSocket = (httpServer) => {
           [result.insertId]
         );
         const [createdMessage] = await loadCommunityEngagement(rows, socket.userId, pool.execute.bind(pool));
-        if (group.groupType === "community") {
+        if (group.groupType === "community" && !botId) {
           await recordReputationEvent(pool.execute.bind(pool), id, Number(socket.userId), "post", createdMessage._id, 1);
         }
-        notifyGroupMessage(io, createdMessage).catch((error) => {
-          console.error("Group message system notification error:", error.message);
-        });
+        if (!botId) {
+          notifyGroupMessage(io, createdMessage).catch((error) => {
+            console.error("Group message system notification error:", error.message);
+          });
+        }
         const roomName = channelId ? `group:${id}:channel:${channelId}` : `group:${id}`;
         io.to(roomName).emit("group-message", createdMessage);
         socket.emit("group-message", createdMessage);

@@ -13,6 +13,8 @@ const { sendMeetingReminders } = require("./services/meetingReminders");
 const { publishScheduledCommunityPosts } = require("./services/scheduledCommunityPosts");
 const { publishScheduledMessages } = require("./services/scheduledMessages");
 const authRoutes = require("./routes/authRoutes");
+const protect = require("./middleware/authMiddleware");
+const { deliverUpload, uploadFilenamePattern } = require("./controllers/mediaGalleryController");
 const { corsOrigin } = require("./utils/cors");
 
 const app = express();
@@ -88,13 +90,16 @@ app.use("/uploads/stickers", express.static(stickerDirectory, {
     res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
   },
 }));
-app.use("/uploads", express.static(uploadDirectory, {
-  dotfiles: "deny",
-  index: false,
-  maxAge: "1d",
-  setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
-}));
-
+app.get("/uploads/:filename", (req, res, next) => {
+  const filename = req.params.filename;
+  if (!/^\d+-avatar-[a-f0-9-]{36}\.(jpg|png|gif|webp|avif)$/i.test(filename)) return next();
+  return res.sendFile(path.join(uploadDirectory, filename), {
+    headers: { "X-Content-Type-Options": "nosniff", "Cache-Control": "public, max-age=86400" },
+  }, (error) => {
+    if (error && !res.headersSent) res.status(error.statusCode || 404).end();
+  });
+});
+app.get("/uploads/:filename", protect, deliverUpload);
 // Routes
 app.use("/api", authRoutes);
 

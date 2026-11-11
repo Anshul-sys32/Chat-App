@@ -9,6 +9,7 @@ import {
   FaPhone,
   FaCalendarAlt,
   FaCog,
+  FaImages,
   FaChevronLeft,
   FaChevronRight,
 } from 'react-icons/fa';
@@ -20,14 +21,16 @@ import Avatar from './Avatar';
 import CallHistory from './CallHistory';
 import Meetings from './Meetings';
 import SettingsPanel from './SettingsPanel';
+import MediaGallery from './MediaGallery';
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 
-const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSidebar, onCloseSidebar, onSelectChat, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, accent, onChangeAccent, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) => {
+const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSidebar, onCloseSidebar, onSelectChat, onJumpToGalleryMessage, onOpenAdmin, user, onUserUpdated, theme, onToggleTheme, accent, onChangeAccent, selectedChat, conversationMuted, conversationMuteLoading, conversationMuteSaving, conversationMuteError, onToggleConversationMute }) => {
   const [activeTab, setActiveTab] = useState('messages');
   const [peopleScope, setPeopleScope] = useState('local');
   const [search, setSearch] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches);
   const menuButtonRef = useRef(null);
   const closeButtonRef = useRef(null);
@@ -191,6 +194,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
             <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Calls</span>
             <IconButton icon={<FaCalendarAlt />} label="Meetings" onClick={() => selectTab('meetings')} active={isDesktop && activeTab === 'meetings'} />
             <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Meetings</span>
+            <IconButton icon={<FaImages />} label="Media gallery" onClick={() => setIsGalleryOpen(true)} active={false} />
           </nav>
           <div className="mt-3 flex items-center gap-2 border-t border-white/10 pt-3 sm:mt-auto sm:flex-col sm:border-t-0 sm:pt-0">
             <IconButton
@@ -266,6 +270,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
           onSaved={onUserUpdated}
         />
       )}
+      <MediaGallery open={isGalleryOpen} onClose={() => setIsGalleryOpen(false)} onJumpToMessage={onJumpToGalleryMessage} />
     </>
   );
 };
