@@ -237,7 +237,7 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
               return (
                 <g key={item.id} {...common}>
                   <foreignObject x={item.data.x} y={item.data.y} width="220" height="140">
-                    <div xmlns="http://www.w3.org/1999/xhtml" style={{ height: '100%', overflow: 'hidden', background: STICKY_COLORS[item.data.color], color: '#25333a', padding: '12px', boxShadow: selected ? '0 0 0 3px #268b79' : '0 4px 12px #172a3333', fontSize: '13px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                    <div xmlns="http://www.w3.org/1999/xhtml" style={{ height: '100%', overflow: 'hidden', background: STICKY_COLORS[item.data.color], color: '#25333a', padding: '12px', boxShadow: selected ? '0 0 0 3px var(--theme-accent)' : '0 4px 12px #172a3333', fontSize: '13px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                       {item.data.text}
                     </div>
                   </foreignObject>

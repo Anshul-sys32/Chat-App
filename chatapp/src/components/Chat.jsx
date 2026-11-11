@@ -1678,7 +1678,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               onClick={() => { setSavedMessagesOpen(true); loadSavedMessages(); }}
               title="Saved messages"
               aria-label="Saved messages"
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-amber-300"
+              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
             >
               <FaStar />
             </button>
@@ -1688,7 +1688,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 onClick={loadCommunityReputation}
                 title="Community contributions"
                 aria-label="Community contributions"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-amber-300"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
               >
                 <FaTrophy />
               </button>
@@ -1699,7 +1699,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 onClick={loadCommunityTasks}
                 title="Community task board"
                 aria-label="Community task board"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-emerald-300"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
               >
                 <FaTasks />
               </button>
@@ -1710,7 +1710,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 onClick={() => setWhiteboardOpen(true)}
                 title="Community whiteboard"
                 aria-label="Community whiteboard"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-sky-300"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
               >
                 <FaPencilAlt />
               </button>
@@ -1721,7 +1721,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 onClick={() => setCodeRoomOpen(true)}
                 title="Community code room"
                 aria-label="Community code room"
-                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-emerald-300"
+                className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
               >
                 <FaCode />
               </button>
@@ -1772,7 +1772,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                             </span>
                             <span className="mt-1 block line-clamp-2 break-words text-sm">{message.content || 'Attachment or media message'}</span>
                           </button>
-                          <button type="button" onClick={() => toggleSavedMessage(message, message.messageType)} aria-label="Remove saved message" title="Remove saved message" className="grid h-8 w-8 shrink-0 place-items-center rounded text-amber-300 hover:bg-white/10"><FaStar size={12} /></button>
+                          <button type="button" onClick={() => toggleSavedMessage(message, message.messageType)} aria-label="Remove saved message" title="Remove saved message" className="grid h-8 w-8 shrink-0 place-items-center rounded text-accent-text hover:bg-accent-soft"><FaStar size={12} /></button>
                         </li>
                       ))}
                     </ul>}
@@ -1873,7 +1873,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                           <span className="w-7 shrink-0 text-right text-xs tabular-nums text-white/45">{member.rank}</span>
                           <span className="min-w-0 flex-1 truncate text-sm">{member.username}{String(member.userId) === String(user?._id) ? ' · you' : ''}</span>
                           <span className="shrink-0 text-xs tabular-nums text-accent-text">{member.points} pts</span>
-                          <span className="hidden min-w-20 text-right text-[10px] text-amber-200/75 sm:inline">{member.badges.join(' · ')}</span>
+                          <span className="hidden min-w-20 text-right text-[10px] text-accent-text sm:inline">{member.badges.join(' · ')}</span>
                         </li>
                       ))}
                     </ol>
@@ -2147,7 +2147,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       )}
                       {!m.isDeleted && (
                         <button type="button" onClick={() => toggleSavedMessage(m)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-white/10">
-                          <FaStar className="text-amber-300" />
+                          <FaStar className="text-accent-text" />
                           {savedMessageKeys.has(`${selectedChat.type === 'group' ? 'group' : 'direct'}:${m._id}`) ? 'Remove saved message' : 'Save message'}
                         </button>
                       )}
@@ -2487,40 +2487,40 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </div>
           )}
           {isCommunityChat && communityComposerType === 'question' && (
-            <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-amber-300/15 bg-amber-950/15 p-3 sm:grid-cols-[minmax(10rem,0.35fr)_1fr]">
+            <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-accent-border bg-accent-soft p-3 sm:grid-cols-[minmax(10rem,0.35fr)_1fr]">
               <label className="min-w-0 text-[10px] text-white/55">Category
-                <select value={questionCategory} onChange={(event) => setQuestionCategory(event.target.value)} className="mt-1 block w-full rounded border border-white/10 bg-slate-900 px-2.5 py-2 text-xs text-white">
+                <select value={questionCategory} onChange={(event) => setQuestionCategory(event.target.value)} className="mt-1 block w-full rounded border border-white/10 bg-slate-900 px-2.5 py-2 text-xs text-white focus:border-accent-border">
                   {COMMUNITY_QUESTION_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
                 </select>
               </label>
               <label className="min-w-0 text-[10px] text-white/55">Tags · up to 5
-                <input value={questionTags} onChange={(event) => setQuestionTags(event.target.value)} maxLength={150} placeholder="javascript, mysql, deployment" aria-label="Question tags" className="mt-1 block w-full rounded border border-white/10 bg-slate-900 px-2.5 py-2 text-xs text-white placeholder:text-white/40" />
+                <input value={questionTags} onChange={(event) => setQuestionTags(event.target.value)} maxLength={150} placeholder="javascript, mysql, deployment" aria-label="Question tags" className="mt-1 block w-full rounded border border-white/10 bg-slate-900 px-2.5 py-2 text-xs text-white placeholder:text-white/40 focus:border-accent-border" />
               </label>
             </div>
           )}
           {isCommunityChat && communityComposerType === 'poll' && (
-            <div className="mx-auto mb-2 max-w-4xl space-y-2 rounded-lg border border-sky-300/15 bg-sky-950/15 p-3">
-              <input value={pollDraft.question} onChange={(event) => setPollDraft((draft) => ({ ...draft, question: event.target.value }))} maxLength={300} placeholder="What should the community decide?" aria-label="Poll question" className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-sky-300/50" />
+            <div className="mx-auto mb-2 max-w-4xl space-y-2 rounded-lg border border-accent-border bg-accent-soft p-3">
+              <input value={pollDraft.question} onChange={(event) => setPollDraft((draft) => ({ ...draft, question: event.target.value }))} maxLength={300} placeholder="What should the community decide?" aria-label="Poll question" className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-accent-border" />
               <div className="grid gap-2 sm:grid-cols-2">
                 {pollDraft.options.map((option, index) => (
                   <div key={index} className="flex min-w-0 items-center gap-1.5">
-                    <input value={option} onChange={(event) => setPollDraft((draft) => ({ ...draft, options: draft.options.map((current, optionIndex) => optionIndex === index ? event.target.value : current) }))} maxLength={100} placeholder={`Option ${index + 1}`} aria-label={`Poll option ${index + 1}`} className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white outline-none focus:border-sky-300/50" />
+                    <input value={option} onChange={(event) => setPollDraft((draft) => ({ ...draft, options: draft.options.map((current, optionIndex) => optionIndex === index ? event.target.value : current) }))} maxLength={100} placeholder={`Option ${index + 1}`} aria-label={`Poll option ${index + 1}`} className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white outline-none focus:border-accent-border" />
                     {pollDraft.options.length > 2 && <button type="button" onClick={() => setPollDraft((draft) => ({ ...draft, options: draft.options.filter((_, optionIndex) => optionIndex !== index) }))} className="grid h-8 w-8 shrink-0 place-items-center text-white/50 hover:text-rose-300" aria-label={`Remove option ${index + 1}`}><FaTimes size={11} /></button>}
                   </div>
                 ))}
               </div>
               <div className="flex items-center justify-between gap-3">
-                <button type="button" onClick={() => setPollDraft((draft) => ({ ...draft, options: [...draft.options, ''] }))} disabled={pollDraft.options.length >= 8} className="text-xs text-sky-200 hover:text-white disabled:opacity-40">Add option</button>
-                <label className="flex items-center gap-2 text-xs text-white/65"><input type="checkbox" checked={pollDraft.multipleChoice} onChange={(event) => setPollDraft((draft) => ({ ...draft, multipleChoice: event.target.checked }))} className="accent-sky-400" /> Allow multiple selections</label>
+                <button type="button" onClick={() => setPollDraft((draft) => ({ ...draft, options: [...draft.options, ''] }))} disabled={pollDraft.options.length >= 8} className="text-xs text-accent-text hover:text-accent-hover disabled:opacity-40">Add option</button>
+                <label className="flex items-center gap-2 text-xs text-white/65"><input type="checkbox" checked={pollDraft.multipleChoice} onChange={(event) => setPollDraft((draft) => ({ ...draft, multipleChoice: event.target.checked }))} className="accent-accent" /> Allow multiple selections</label>
               </div>
             </div>
           )}
           {isCommunityChat && communityComposerType === 'event' && (
-            <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-emerald-300/15 bg-emerald-950/15 p-3 sm:grid-cols-2">
-              <input value={eventDraft.title} onChange={(event) => setEventDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={120} placeholder="Event title" aria-label="Event title" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-emerald-300/50" />
-              <input type="datetime-local" value={eventDraft.startsAt} onChange={(event) => setEventDraft((draft) => ({ ...draft, startsAt: event.target.value }))} aria-label="Event date and time" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-emerald-300/50" />
-              <input value={eventDraft.location} onChange={(event) => setEventDraft((draft) => ({ ...draft, location: event.target.value }))} maxLength={200} placeholder="Location or meeting link" aria-label="Event location" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-emerald-300/50" />
-              <input value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} placeholder="Description (Markdown supported)" aria-label="Event description" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-emerald-300/50" />
+            <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-accent-border bg-accent-soft p-3 sm:grid-cols-2">
+              <input value={eventDraft.title} onChange={(event) => setEventDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={120} placeholder="Event title" aria-label="Event title" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-accent-border" />
+              <input type="datetime-local" value={eventDraft.startsAt} onChange={(event) => setEventDraft((draft) => ({ ...draft, startsAt: event.target.value }))} aria-label="Event date and time" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
+              <input value={eventDraft.location} onChange={(event) => setEventDraft((draft) => ({ ...draft, location: event.target.value }))} maxLength={200} placeholder="Location or meeting link" aria-label="Event location" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
+              <input value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} placeholder="Description (Markdown supported)" aria-label="Event description" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
             </div>
           )}
           <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-2xl border p-2 shadow-lg shadow-black/10">
