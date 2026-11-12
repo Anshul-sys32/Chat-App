@@ -264,7 +264,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
 
   return (
     <main className="workspace-theme min-h-0 flex-1 overflow-y-auto px-4 py-6 text-white sm:px-8">
-      <div className="glass-panel mx-auto max-w-5xl rounded-2xl p-4 sm:p-6">
+      <div className="theme-panel mx-auto max-w-5xl rounded-2xl p-4 sm:p-6">
         <div className="relative z-30 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">Administration</h1>
@@ -272,13 +272,13 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
           </div>
           <div className="flex items-center gap-3">
             <NotificationCenter />
-            <button type="button" onClick={onBack || (() => navigate("/chat"))} className="rounded-lg border border-white/15 px-3 py-2 text-sm hover:bg-white/10">
+            <button type="button" onClick={onBack || (() => navigate("/chat"))} className="rounded-lg border theme-border px-3 py-2 text-sm hover:bg-white/10">
               Back to chat
             </button>
           </div>
         </div>
         {error && <p role="alert" className="mt-4 rounded-lg bg-rose-950/70 px-4 py-3 text-sm text-rose-200">{error}</p>}
-        <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
+        <section className="theme-panel mt-6 rounded-xl p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Send a notification</h2>
           <p className="mt-1 text-sm text-white/60">Notify all active users or choose specific recipients.</p>
           {notificationSuccess && (
@@ -294,7 +294,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                 onChange={(event) => setNotificationTitle(event.target.value)}
                 maxLength={120}
                 required
-                className="w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
+                className="w-full rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
               />
             </label>
             <label className="block text-sm">
@@ -305,7 +305,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                 maxLength={2000}
                 rows={3}
                 required
-                className="w-full resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
+                className="w-full resize-y rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
               />
             </label>
             <label className="block text-sm">
@@ -313,7 +313,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               <select
                 value={notificationAudience}
                 onChange={(event) => setNotificationAudience(event.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white"
+                className="w-full rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-white"
               >
                 <option value="all">Everyone (active users)</option>
                 <option value="selected">Specific users</option>
@@ -326,7 +326,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                   value={notificationRecipientQuery}
                   onChange={(event) => setNotificationRecipientQuery(event.target.value)}
                   placeholder="alice, bob, charlie"
-                  className="mb-2 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
+                  className="mb-2 w-full rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
                 />
                 <select
                   multiple
@@ -334,7 +334,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                   onChange={(event) => setNotificationRecipients(
                     Array.from(event.target.selectedOptions, (option) => option.value)
                   )}
-                  className="max-h-48 w-full rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white"
+                  className="max-h-48 w-full rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-white"
                 >
                   {notificationRecipientMatches.map((candidate) => (
                     <option key={candidate._id} value={candidate._id}>
@@ -353,7 +353,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
             </button>
           </form>
         </section>
-        <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
+        <section className="theme-panel mt-6 rounded-xl p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Login page quotes</h2>
           <p className="mt-1 text-sm text-white/60">Add, edit, or remove the quotes shown beneath NFaNG. Quotes rotate on the sign-in page.</p>
           <form onSubmit={addLoginQuote} className="mt-4 flex flex-col gap-2 sm:flex-row">
@@ -365,7 +365,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
               required
               placeholder="Write a quote to show on the sign-in page"
               aria-label="New login quote"
-              className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
+              className="min-w-0 flex-1 resize-y rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-white outline-none focus:border-accent"
             />
             <button
               type="submit"
@@ -378,7 +378,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
           {quoteError && <p role="alert" className="mt-3 text-sm text-rose-300">{quoteError}</p>}
           <ul className="mt-4 space-y-2">
             {loginQuotes.map((quote) => (
-              <li key={quote._id} className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/[0.035] p-3 sm:flex-row sm:items-center">
+              <li key={quote._id} className="flex flex-col gap-2 rounded-lg border theme-border bg-white/[0.035] p-3 sm:flex-row sm:items-center">
                 {String(editingQuoteId) === String(quote._id) ? (
                   <textarea
                     value={editingQuoteText}
@@ -386,7 +386,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                     maxLength={500}
                     rows={2}
                     aria-label="Edit login quote"
-                    className="min-w-0 flex-1 resize-y rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none focus:border-accent"
+                    className="min-w-0 flex-1 resize-y rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-sm text-white outline-none focus:border-accent"
                   />
                 ) : (
                   <p className="min-w-0 flex-1 text-sm text-white/80">“{quote.quote}”</p>
@@ -395,36 +395,36 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                   {String(editingQuoteId) === String(quote._id) ? (
                     <>
                       <button type="button" onClick={() => saveLoginQuote(quote._id)} disabled={!editingQuoteText.trim()} className="rounded-md border border-accent-border px-3 py-1.5 text-xs text-accent-text hover:bg-accent-soft disabled:opacity-50">Save</button>
-                      <button type="button" onClick={() => setEditingQuoteId(null)} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Cancel</button>
+                      <button type="button" onClick={() => setEditingQuoteId(null)} className="rounded-md border theme-border px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Cancel</button>
                     </>
                   ) : (
-                    <button type="button" onClick={() => { setEditingQuoteId(quote._id); setEditingQuoteText(quote.quote); }} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Edit</button>
+                    <button type="button" onClick={() => { setEditingQuoteId(quote._id); setEditingQuoteText(quote.quote); }} className="rounded-md border theme-border px-3 py-1.5 text-xs text-white/70 hover:bg-white/10">Edit</button>
                   )}
                   <button type="button" onClick={() => deleteLoginQuote(quote)} className="rounded-md border border-rose-300/20 px-3 py-1.5 text-xs text-rose-200 hover:bg-rose-500/10">Remove</button>
                 </div>
               </li>
             ))}
-            {loginQuotes.length === 0 && <li className="rounded-lg border border-dashed border-white/15 px-3 py-5 text-center text-sm text-white/50">No login quotes yet.</li>}
+            {loginQuotes.length === 0 && <li className="rounded-lg border border-dashed theme-border px-3 py-5 text-center text-sm text-white/50">No login quotes yet.</li>}
           </ul>
         </section>
-        <section className="glass-panel mt-6 rounded-xl p-4 sm:p-5">
+        <section className="theme-panel mt-6 rounded-xl p-4 sm:p-5">
           <h2 className="text-lg font-semibold">Custom stickers</h2>
           <p className="mt-1 text-sm text-white/60">Upload an image or GIF. Stickers are resized, compressed, and shared with web and Android clients.</p>
           <form onSubmit={addSticker} className="mt-4 grid gap-2 sm:grid-cols-2">
-            <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
-            <select value={stickerCategory} onChange={(event) => setStickerCategory(event.target.value)} className="rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white">
+            <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
+            <select value={stickerCategory} onChange={(event) => setStickerCategory(event.target.value)} className="rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-sm text-white">
               {stickerCategories.map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
             <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="min-w-0 text-sm text-white/70" />
             <button type="submit" className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast">Add sticker</button>
           </form>
           <div className="mt-3 flex gap-2">
-            <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
-            <button type="button" onClick={addStickerCategory} className="rounded-lg border border-white/15 px-3 py-2 text-sm">Add category</button>
+            <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded-lg border theme-border bg-[#142d32] px-3 py-2 text-sm text-white outline-none" />
+            <button type="button" onClick={addStickerCategory} className="rounded-lg border theme-border px-3 py-2 text-sm">Add category</button>
           </div>
           <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
             {stickers.map((sticker) => (
-              <li key={sticker._id} className="relative rounded-lg border border-white/10 p-2">
+              <li key={sticker._id} className="relative rounded-lg border theme-border p-2">
                 <img src={`${API_URL}${sticker.imageUrl}`} alt={sticker.name} className="mx-auto h-16 w-16 object-contain" />
                 <p className="truncate text-center text-xs text-white/70">{sticker.name}</p>
                 <button type="button" onClick={() => deleteSticker(sticker)} className="mt-1 w-full text-xs text-rose-200">Remove</button>
@@ -437,7 +437,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
             {users.map((candidate) => {
               const isSelf = String(candidate._id) === String(user?._id);
               return (
-                <section key={candidate._id} className="glass-panel flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:items-center">
+                <section key={candidate._id} className="theme-panel flex flex-col gap-4 rounded-xl p-4 sm:flex-row sm:items-center">
                   <Avatar src={candidate.profilePicture || candidate.googlePicture} name={candidate.username} className="h-11 w-11 text-sm" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{candidate.username}{isSelf ? " (you)" : ""}</p>
@@ -452,7 +452,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                       value={candidate.role}
                       disabled={isSelf}
                       onChange={(event) => updateUser(candidate, { role: event.target.value })}
-                      className="rounded-md border border-white/10 bg-[#142d32] px-2 py-1.5 text-sm text-white disabled:opacity-50"
+                      className="rounded-md border theme-border bg-[#142d32] px-2 py-1.5 text-sm text-white disabled:opacity-50"
                     >
                       <option value="user">User</option>
                       <option value="moderator">Moderator</option>
@@ -475,7 +475,7 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                         value={candidate.status}
                         disabled={isSelf}
                         onChange={(event) => updateUser(candidate, { status: event.target.value })}
-                        className="rounded-md border border-white/10 bg-[#142d32] px-2 py-1.5 text-sm text-white disabled:opacity-50"
+                        className="rounded-md border theme-border bg-[#142d32] px-2 py-1.5 text-sm text-white disabled:opacity-50"
                       >
                         <option value="active">Active</option>
                         <option value="suspended">Suspended</option>
@@ -504,10 +504,10 @@ export default function AdminPanel({ user, onBack, onUserUpdated }) {
                 </section>
               );
             })}
-            {users.length === 0 && <p className="rounded-xl border border-dashed border-white/15 p-6 text-center text-sm text-white/50">No users found.</p>}
+            {users.length === 0 && <p className="rounded-xl border border-dashed theme-border p-6 text-center text-sm text-white/50">No users found.</p>}
           </div>
         )}
-        <section className="glass-panel mt-10 rounded-xl p-4">
+        <section className="theme-panel mt-10 rounded-xl p-4">
           <h2 className="mb-4 text-lg font-semibold">Group management</h2>
           <GroupList isAdmin />
         </section>

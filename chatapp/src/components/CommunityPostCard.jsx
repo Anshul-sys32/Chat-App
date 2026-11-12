@@ -36,7 +36,7 @@ export default function CommunityPostCard({ message, threadCount, onVote, onRsvp
             const count = counts[index] || 0;
             const percentage = total ? Math.round((count / total) * 100) : 0;
             return (
-              <label key={`${index}-${option}`} className="relative flex cursor-pointer items-center gap-2 overflow-hidden rounded border border-white/10 px-2.5 py-2 text-xs">
+              <label key={`${index}-${option}`} className="relative flex cursor-pointer items-center gap-2 overflow-hidden rounded border theme-border px-2.5 py-2 text-xs">
                 <span className="absolute inset-y-0 left-0 bg-sky-400/10" style={{ width: `${percentage}%` }} />
                 <input
                   type={data.multipleChoice ? 'checkbox' : 'radio'}
@@ -85,7 +85,7 @@ export default function CommunityPostCard({ message, threadCount, onVote, onRsvp
               type="button"
               onClick={() => onRsvp(message, response)}
               aria-pressed={results.myResponse === response}
-              className={`rounded border px-2.5 py-1.5 text-[11px] ${results.myResponse === response ? 'border-emerald-300/60 bg-emerald-300/15 text-emerald-100' : 'border-white/10 text-white/70 hover:bg-white/5'}`}
+              className={`rounded border px-2.5 py-1.5 text-[11px] ${results.myResponse === response ? 'border-emerald-300/60 bg-emerald-300/15 text-emerald-100' : 'theme-border text-white/70 hover:bg-white/5'}`}
             >
               {label} · {count}
             </button>

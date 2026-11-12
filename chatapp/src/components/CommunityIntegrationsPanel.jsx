@@ -98,8 +98,8 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="community-integrations-title" className="glass-panel flex max-h-[min(94dvh,60rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="community-integrations-title" className="theme-panel flex max-h-[min(94dvh,60rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b theme-border px-4 py-3 sm:px-5">
           <div className="min-w-0"><h2 id="community-integrations-title" className="text-sm font-semibold">Integrations · {groupName}</h2><p className="theme-muted mt-0.5 text-xs">Community connections, channel delivery, and execution history</p></div>
           <button type="button" onClick={onClose} aria-label="Close integrations" title="Close" className="grid h-9 w-9 shrink-0 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
         </header>
@@ -134,7 +134,7 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
                   ))}
                 </ul>}
               </section>
-              <section aria-labelledby="new-integration-title" className="border-t border-white/10 pt-4">
+              <section aria-labelledby="new-integration-title" className="border-t theme-border pt-4">
                 <h3 id="new-integration-title" className="text-sm font-semibold">Add an integration</h3>
                 <form onSubmit={createIntegration} className="mt-3 space-y-3">
                   <fieldset className="grid gap-2 sm:grid-cols-2">

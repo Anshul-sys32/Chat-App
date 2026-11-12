@@ -99,7 +99,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
           <>
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-sm font-semibold">People</h2>
-              <div className="flex rounded-lg border border-white/10 p-0.5" role="tablist" aria-label="People scope">
+              <div className="flex rounded-lg border theme-border p-0.5" role="tablist" aria-label="People scope">
                 {['local', 'global'].map((scope) => (
                   <button key={scope} type="button" role="tab" aria-selected={peopleScope === scope} onClick={() => setPeopleScope(scope)} className={`rounded-md px-2.5 py-1 text-[11px] capitalize ${peopleScope === scope ? 'bg-accent text-accent-contrast' : 'theme-muted hover:bg-white/10'}`}>
                     {scope === 'local' ? 'Local' : 'Global'}
@@ -170,7 +170,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
         }}
         className={`theme-sidebar fixed left-0 top-0 z-40 flex min-h-0 w-[min(22rem,calc(100vw-3rem))] flex-col overflow-hidden shadow-2xl backdrop-blur-2xl transition-[width,transform] duration-300 ease-in-out sm:flex-row sm:overflow-visible sm:translate-x-0 ${isDesktopPanelOpen ? 'sm:w-[22rem]' : 'sm:w-16'} ${isOpen ? 'pointer-events-auto translate-x-0' : 'pointer-events-none -translate-x-full sm:pointer-events-auto'}`}
       >
-        <div className="glass-rail relative z-20 flex shrink-0 flex-col border-b border-white/10 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:w-16 sm:items-center sm:border-b-0 sm:border-r sm:px-0 sm:py-10">
+        <div className="theme-rail relative z-20 flex shrink-0 flex-col border-b theme-border px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:w-16 sm:items-center sm:border-b-0 sm:border-r sm:px-0 sm:py-10">
           <div className="mb-3 flex items-center justify-between sm:absolute sm:left-3 sm:top-4 sm:mb-0">
             <span className="text-sm font-semibold sm:hidden">Navigation</span>
             <button ref={closeButtonRef} type="button" onClick={onCloseSidebar} className="theme-text hover:text-accent-text sm:hidden" aria-label="Close navigation menu" title="Close Menu">
@@ -196,7 +196,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
             <span className="theme-muted hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase sm:block">Meetings</span>
             <IconButton icon={<FaImages />} label="Media gallery" onClick={() => setIsGalleryOpen(true)} active={false} />
           </nav>
-          <div className="mt-3 flex items-center gap-2 border-t border-white/10 pt-3 sm:mt-auto sm:flex-col sm:border-t-0 sm:pt-0">
+          <div className="mt-3 flex items-center gap-2 border-t theme-border pt-3 sm:mt-auto sm:flex-col sm:border-t-0 sm:pt-0">
             <IconButton
               icon={<FaCog />}
               label="Settings"
@@ -215,9 +215,9 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
         {/* Dynamic Content Area */}
         <div
           style={{ '--sidebar-panel-width': isDesktopPanelOpen ? '18rem' : '0px' }}
-          className={`theme-sidebar-panel glass-panel relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l-0 transition-[width,opacity] duration-300 sm:w-[var(--sidebar-panel-width)] sm:flex-none ${isDesktopPanelOpen ? 'opacity-100' : 'sm:pointer-events-none sm:opacity-0'}`}
+          className={`theme-sidebar-panel theme-panel relative z-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l-0 transition-[width,opacity] duration-300 sm:w-[var(--sidebar-panel-width)] sm:flex-none ${isDesktopPanelOpen ? 'opacity-100' : 'sm:pointer-events-none sm:opacity-0'}`}
         >
-          <header className="hidden h-14 shrink-0 items-center justify-between border-b border-white/10 px-4 sm:flex">
+          <header className="hidden h-14 shrink-0 items-center justify-between border-b theme-border px-4 sm:flex">
             <h1 className="text-sm font-semibold">NFaNG</h1>
             <span className="theme-muted text-[11px]">{activeTab === 'messages' || activeTab === 'localUsers' ? 'People' : activeTab === 'groups' ? 'Groups' : activeTab === 'calls' ? 'Calls' : activeTab === 'meetings' ? 'Meetings' : 'Settings'}</span>
           </header>
@@ -229,7 +229,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
               placeholder={activeTab === 'messages' || activeTab === 'localUsers' ? 'Search people' : activeTab === 'groups' ? 'Search groups' : activeTab === 'calls' ? 'Search calls' : 'Search meetings'}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="glass-input theme-text mb-4 w-full rounded-lg p-2.5 placeholder:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent-border"
+              className="theme-control theme-text mb-4 w-full rounded-lg p-2.5 placeholder:opacity-60 focus:outline-none focus:ring-2 focus:ring-accent-border"
             />}
             {renderContent()}
           </div>

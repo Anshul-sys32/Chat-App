@@ -1727,7 +1727,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 >
                   <FaEllipsisV />
                 </button>
-                <FloatingPanel open={openBulkMenu} panelRef={bulkPanel.panelRef} style={bulkPanel.style} className="min-w-40 rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl">
+                <FloatingPanel open={openBulkMenu} panelRef={bulkPanel.panelRef} style={bulkPanel.style} className="workspace-popover theme-border min-w-40 rounded-lg border p-1 text-xs shadow-xl">
                     <button type="button" onClick={deleteSelectedMessages} className="block w-full rounded px-2 py-2 text-left text-rose-300 hover:bg-white/10">
                       Delete selected
                     </button>
@@ -1805,8 +1805,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
         {savedMessagesOpen && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setSavedMessagesOpen(false); }}>
-            <section role="dialog" aria-modal="true" aria-labelledby="saved-messages-title" className="glass-panel flex max-h-[min(80dvh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border shadow-2xl">
-              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <section role="dialog" aria-modal="true" aria-labelledby="saved-messages-title" className="theme-panel flex max-h-[min(80dvh,42rem)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b theme-border px-4 py-3">
                 <h2 id="saved-messages-title" className="text-sm font-semibold">Saved messages</h2>
                 <button type="button" onClick={() => setSavedMessagesOpen(false)} aria-label="Close saved messages" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
               </header>
@@ -1849,12 +1849,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
         {globalSearchOpen && (
           <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setGlobalSearchOpen(false); }}>
-            <section role="dialog" aria-modal="true" aria-labelledby="global-search-title" className="glass-panel flex max-h-[min(84dvh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border shadow-2xl">
-              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <section role="dialog" aria-modal="true" aria-labelledby="global-search-title" className="theme-panel flex max-h-[min(84dvh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b theme-border px-4 py-3">
                 <h2 id="global-search-title" className="text-sm font-semibold">Search conversations</h2>
                 <button type="button" onClick={() => setGlobalSearchOpen(false)} aria-label="Close search" title="Close search" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
               </header>
-              <form onSubmit={submitGlobalSearch} className="grid gap-2 border-b border-white/10 p-3 sm:grid-cols-[minmax(12rem,1fr)_auto_auto_auto_auto]">
+              <form onSubmit={submitGlobalSearch} className="grid gap-2 border-b theme-border p-3 sm:grid-cols-[minmax(12rem,1fr)_auto_auto_auto_auto]">
                 <input
                   autoFocus
                   type="search"
@@ -1864,9 +1864,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   onChange={(event) => setGlobalSearchQuery(event.target.value)}
                   placeholder="Search messages, files, people, links"
                   aria-label="Search query"
-                  className="min-w-0 rounded border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none focus:border-accent-border"
+                  className="theme-control min-w-0 rounded px-3 py-2 text-sm outline-none focus:border-accent-border"
                 />
-                <select value={globalSearchFilter} onChange={(event) => setGlobalSearchFilter(event.target.value)} aria-label="Search filter" className="rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs">
+                <select value={globalSearchFilter} onChange={(event) => setGlobalSearchFilter(event.target.value)} aria-label="Search filter" className="theme-control rounded px-2 py-2 text-xs">
                   <option value="all">All</option>
                   <option value="messages">Messages</option>
                   <option value="files">Files</option>
@@ -1875,8 +1875,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   <option value="direct">Direct</option>
                   <option value="group">Groups</option>
                 </select>
-                <input type="date" value={globalSearchFrom} onChange={(event) => setGlobalSearchFrom(event.target.value)} aria-label="From date" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs" />
-                <input type="date" value={globalSearchTo} onChange={(event) => setGlobalSearchTo(event.target.value)} aria-label="To date" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs" />
+                <input type="date" value={globalSearchFrom} onChange={(event) => setGlobalSearchFrom(event.target.value)} aria-label="From date" className="theme-control min-w-0 rounded px-2 py-2 text-xs" />
+                <input type="date" value={globalSearchTo} onChange={(event) => setGlobalSearchTo(event.target.value)} aria-label="To date" className="theme-control min-w-0 rounded px-2 py-2 text-xs" />
                 <button type="submit" disabled={globalSearchQuery.trim().length < 2 || globalSearchLoading} className="inline-flex items-center justify-center gap-2 rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">
                   <FaSearch /> Search
                 </button>
@@ -1920,8 +1920,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
         {reputationOpen && (
           <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setReputationOpen(false); }}>
-            <section role="dialog" aria-modal="true" aria-labelledby="community-reputation-title" className="glass-panel flex max-h-[min(84dvh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border shadow-2xl">
-              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <section role="dialog" aria-modal="true" aria-labelledby="community-reputation-title" className="theme-panel flex max-h-[min(84dvh,48rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b theme-border px-4 py-3">
                 <div>
                   <h2 id="community-reputation-title" className="text-sm font-semibold">Community contributions</h2>
                   {reputationData?.me && <p className="theme-muted mt-0.5 text-xs">Your score · {reputationData.me.points} points{reputationData.me.rank ? ` · rank ${reputationData.me.rank}` : ''}</p>}
@@ -1968,8 +1968,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
 
         {tasksOpen && (
           <div className="fixed inset-0 z-[97] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setTasksOpen(false); }}>
-            <section role="dialog" aria-modal="true" aria-labelledby="community-tasks-title" className="glass-panel flex max-h-[min(88dvh,52rem)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border shadow-2xl">
-              <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+            <section role="dialog" aria-modal="true" aria-labelledby="community-tasks-title" className="theme-panel flex max-h-[min(88dvh,52rem)] w-full max-w-4xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+              <header className="flex items-center justify-between gap-3 border-b theme-border px-4 py-3">
                 <div>
                   <h2 id="community-tasks-title" className="text-sm font-semibold">{selectedChat?.name || 'Community'} tasks</h2>
                   <p className="theme-muted mt-0.5 text-xs">{communityTasks.length} tasks</p>
@@ -1977,18 +1977,18 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 <button type="button" onClick={() => setTasksOpen(false)} aria-label="Close task board" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
               </header>
               {tasksError && <p role="alert" className="px-4 pt-3 text-xs text-rose-200">{tasksError}</p>}
-              <form onSubmit={createCommunityTask} className="grid gap-2 border-b border-white/10 p-3 sm:grid-cols-2">
-                <input value={taskDraft.title} onChange={(event) => setTaskDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={160} placeholder="Task title" aria-label="Task title" className="min-w-0 rounded border border-white/10 bg-black/20 px-3 py-2 text-sm" />
+              <form onSubmit={createCommunityTask} className="grid gap-2 border-b theme-border p-3 sm:grid-cols-2">
+                <input value={taskDraft.title} onChange={(event) => setTaskDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={160} placeholder="Task title" aria-label="Task title" className="theme-control min-w-0 rounded px-3 py-2 text-sm" />
                 <div className="grid grid-cols-2 gap-2">
-                  <select value={taskDraft.assignedTo} onChange={(event) => setTaskDraft((draft) => ({ ...draft, assignedTo: event.target.value }))} aria-label="Assign task to" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs">
+                  <select value={taskDraft.assignedTo} onChange={(event) => setTaskDraft((draft) => ({ ...draft, assignedTo: event.target.value }))} aria-label="Assign task to" className="theme-control min-w-0 rounded px-2 py-2 text-xs">
                     <option value="">Unassigned</option>
                     {taskMembers.map((member) => <option key={member.id} value={member.id}>{member.username}</option>)}
                   </select>
-                  <input type="datetime-local" value={taskDraft.dueAt} onChange={(event) => setTaskDraft((draft) => ({ ...draft, dueAt: event.target.value }))} aria-label="Task deadline" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs" />
+                  <input type="datetime-local" value={taskDraft.dueAt} onChange={(event) => setTaskDraft((draft) => ({ ...draft, dueAt: event.target.value }))} aria-label="Task deadline" className="theme-control min-w-0 rounded px-2 py-2 text-xs" />
                 </div>
-                <textarea value={taskDraft.description} onChange={(event) => setTaskDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} rows={2} placeholder="Description" aria-label="Task description" className="min-w-0 resize-y rounded border border-white/10 bg-black/20 px-3 py-2 text-xs sm:col-span-2" />
+                <textarea value={taskDraft.description} onChange={(event) => setTaskDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} rows={2} placeholder="Description" aria-label="Task description" className="theme-control min-w-0 resize-y rounded px-3 py-2 text-xs sm:col-span-2" />
                 <div className="flex min-w-0 gap-2 sm:col-span-2">
-                  <select value={taskDraft.linkedMessageId} onChange={(event) => setTaskDraft((draft) => ({ ...draft, linkedMessageId: event.target.value }))} aria-label="Link a discussion message" className="min-w-0 flex-1 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs">
+                  <select value={taskDraft.linkedMessageId} onChange={(event) => setTaskDraft((draft) => ({ ...draft, linkedMessageId: event.target.value }))} aria-label="Link a discussion message" className="theme-control min-w-0 flex-1 rounded px-2 py-2 text-xs">
                     <option value="">No linked discussion</option>
                     {messages.filter((message) => !message.isDeleted).map((message) => <option key={message._id} value={message._id}>{String(message.content || 'Attachment').slice(0, 100)}</option>)}
                   </select>
@@ -2010,16 +2010,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                               <p className="mt-1 text-[10px] text-white/40">Created by {task.creatorName}</p>
                             </div>
                             <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-                              <select value={task.status} onChange={(event) => updateCommunityTask(task, { status: event.target.value })} aria-label={`Status for ${task.title}`} className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-[11px]">
+                              <select value={task.status} onChange={(event) => updateCommunityTask(task, { status: event.target.value })} aria-label={`Status for ${task.title}`} className="theme-control rounded px-2 py-1.5 text-[11px]">
                                 <option value="todo">To do</option>
                                 <option value="in_progress">In progress</option>
                                 <option value="done">Done</option>
                               </select>
-                              <select value={task.assignedTo || ''} onChange={(event) => updateCommunityTask(task, { assignedTo: event.target.value })} aria-label={`Assignee for ${task.title}`} className="max-w-32 rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-[11px]">
+                              <select value={task.assignedTo || ''} onChange={(event) => updateCommunityTask(task, { assignedTo: event.target.value })} aria-label={`Assignee for ${task.title}`} className="theme-control max-w-32 rounded px-2 py-1.5 text-[11px]">
                                 <option value="">Unassigned</option>
                                 {taskMembers.map((member) => <option key={member.id} value={member.id}>{member.username}</option>)}
                               </select>
-                              <input type="datetime-local" value={localDue ? localDue.toISOString().slice(0, 16) : ''} onChange={(event) => updateCommunityTask(task, { dueAt: event.target.value })} aria-label={`Deadline for ${task.title}`} className="max-w-40 rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-[10px]" />
+                              <input type="datetime-local" value={localDue ? localDue.toISOString().slice(0, 16) : ''} onChange={(event) => updateCommunityTask(task, { dueAt: event.target.value })} aria-label={`Deadline for ${task.title}`} className="theme-control max-w-40 rounded px-2 py-1.5 text-[10px]" />
                               {task.linkedMessageId && <button type="button" onClick={() => openTaskDiscussion(task)} className="rounded px-2 py-1.5 text-[11px] text-accent-text hover:bg-white/10">Open discussion</button>}
                               <button type="button" onClick={() => deleteCommunityTask(task.id)} aria-label={`Delete ${task.title}`} title="Delete task" className="grid h-7 w-7 place-items-center rounded text-white/45 hover:bg-white/10 hover:text-rose-200"><FaTimes size={10} /></button>
                             </div>
@@ -2066,7 +2066,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 <button
                   type="button"
                   onClick={() => setMessagesAttempt((attempt) => attempt + 1)}
-                  className="mt-3 rounded-md border border-white/20 px-3 py-1.5 font-medium hover:bg-white/10"
+                  className="mt-3 rounded-md border theme-border px-3 py-1.5 font-medium hover:bg-white/10"
                 >
                   Retry loading
                 </button>
@@ -2454,7 +2454,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             <p role="status" className="mx-auto mb-2 max-w-4xl text-xs text-amber-200">Only community leaders can post in this channel.</p>
           )}
           {isAnnouncementChannel && (
-            <section className="mx-auto mb-2 max-w-4xl space-y-2 border-b border-white/10 pb-2" aria-label="Scheduled announcements">
+            <section className="mx-auto mb-2 max-w-4xl space-y-2 border-b theme-border pb-2" aria-label="Scheduled announcements">
               <form onSubmit={scheduleAnnouncement} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
                 <input
                   value={announcementDraft.content}
@@ -2462,7 +2462,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   maxLength={10000}
                   placeholder="Announcement text"
                   aria-label="Announcement text"
-                  className="min-w-0 rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white"
+                  className="min-w-0 rounded border theme-border theme-control px-3 py-2 text-xs text-white"
                   disabled={!canPostToCommunityChannel || announcementSaving}
                 />
                 <input
@@ -2470,14 +2470,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   value={announcementDraft.scheduledAt}
                   onChange={(event) => setAnnouncementDraft((draft) => ({ ...draft, scheduledAt: event.target.value }))}
                   aria-label="Announcement delivery time"
-                  className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs text-white"
+                  className="min-w-0 rounded border theme-border theme-control px-2 py-2 text-xs text-white"
                   disabled={!canPostToCommunityChannel || announcementSaving}
                 />
                 <select
                   value={announcementDraft.recurrence}
                   onChange={(event) => setAnnouncementDraft((draft) => ({ ...draft, recurrence: event.target.value }))}
                   aria-label="Announcement recurrence"
-                  className="rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs text-white"
+                  className="rounded border theme-border theme-control px-2 py-2 text-xs text-white"
                   disabled={!canPostToCommunityChannel || announcementSaving}
                 >
                   <option value="once">Once</option>
@@ -2512,7 +2512,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </section>
           )}
           {selectedChat && (
-            <section className="mx-auto mb-2 max-w-4xl border-b border-white/10 pb-2" aria-label="Scheduled messages">
+            <section className="mx-auto mb-2 max-w-4xl border-b theme-border pb-2" aria-label="Scheduled messages">
               <button
                 type="button"
                 onClick={() => setScheduledMessagesOpen((open) => !open)}
@@ -2532,7 +2532,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       value={scheduledMessageAt}
                       onChange={(event) => setScheduledMessageAt(event.target.value)}
                       aria-label="Scheduled message delivery time"
-                      className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-xs text-white"
+                      className="min-w-0 rounded border theme-border theme-control px-2 py-2 text-xs text-white"
                     />
                     <div className="flex gap-1">
                       <button
@@ -2543,7 +2543,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                         <FaCalendarAlt /> {scheduledMessageSaving ? 'Saving…' : editingScheduledMessageId ? 'Update' : 'Schedule'}
                       </button>
                       {editingScheduledMessageId && (
-                        <button type="button" onClick={() => { setEditingScheduledMessageId(null); setScheduledMessageAt(''); setMsg(''); }} className="rounded border border-white/10 px-2 text-xs text-white/65 hover:bg-white/10">Cancel edit</button>
+                        <button type="button" onClick={() => { setEditingScheduledMessageId(null); setScheduledMessageAt(''); setMsg(''); }} className="rounded border theme-border px-2 text-xs text-white/65 hover:bg-white/10">Cancel edit</button>
                       )}
                     </div>
                   </form>
@@ -2572,7 +2572,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             </p>
           )}
           {isCommunityChat && (
-            <div className="mx-auto mb-2 flex max-w-4xl items-center gap-1 overflow-x-auto rounded-lg border border-white/10 bg-black/10 p-1" role="group" aria-label="Community post type">
+            <div className="mx-auto mb-2 flex max-w-4xl items-center gap-1 overflow-x-auto rounded-lg border theme-border theme-raised-surface p-1" role="group" aria-label="Community post type">
               {[
                 ['message', 'Message'], ['question', 'Question'], ['poll', 'Poll'], ['event', 'Event'],
               ].map(([type, label]) => (
@@ -2591,22 +2591,22 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           {isCommunityChat && communityComposerType === 'question' && (
             <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-accent-border bg-accent-soft p-3 sm:grid-cols-[minmax(10rem,0.35fr)_1fr]">
               <label className="min-w-0 text-[10px] text-white/55">Category
-                <select value={questionCategory} onChange={(event) => setQuestionCategory(event.target.value)} className="mt-1 block w-full rounded border border-white/10 bg-slate-900 px-2.5 py-2 text-xs text-white focus:border-accent-border">
+                <select value={questionCategory} onChange={(event) => setQuestionCategory(event.target.value)} className="mt-1 block w-full rounded border theme-border theme-control px-2.5 py-2 text-xs text-white focus:border-accent-border">
                   {COMMUNITY_QUESTION_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
                 </select>
               </label>
               <label className="min-w-0 text-[10px] text-white/55">Tags · up to 5
-                <input value={questionTags} onChange={(event) => setQuestionTags(event.target.value)} maxLength={150} placeholder="javascript, mysql, deployment" aria-label="Question tags" className="mt-1 block w-full rounded border border-white/10 bg-slate-900 px-2.5 py-2 text-xs text-white placeholder:text-white/40 focus:border-accent-border" />
+                <input value={questionTags} onChange={(event) => setQuestionTags(event.target.value)} maxLength={150} placeholder="javascript, mysql, deployment" aria-label="Question tags" className="mt-1 block w-full rounded border theme-border theme-control px-2.5 py-2 text-xs text-white placeholder:text-white/40 focus:border-accent-border" />
               </label>
             </div>
           )}
           {isCommunityChat && communityComposerType === 'poll' && (
             <div className="mx-auto mb-2 max-w-4xl space-y-2 rounded-lg border border-accent-border bg-accent-soft p-3">
-              <input value={pollDraft.question} onChange={(event) => setPollDraft((draft) => ({ ...draft, question: event.target.value }))} maxLength={300} placeholder="What should the community decide?" aria-label="Poll question" className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-accent-border" />
+              <input value={pollDraft.question} onChange={(event) => setPollDraft((draft) => ({ ...draft, question: event.target.value }))} maxLength={300} placeholder="What should the community decide?" aria-label="Poll question" className="w-full rounded border theme-border theme-control px-3 py-2 text-sm text-white outline-none focus:border-accent-border" />
               <div className="grid gap-2 sm:grid-cols-2">
                 {pollDraft.options.map((option, index) => (
                   <div key={index} className="flex min-w-0 items-center gap-1.5">
-                    <input value={option} onChange={(event) => setPollDraft((draft) => ({ ...draft, options: draft.options.map((current, optionIndex) => optionIndex === index ? event.target.value : current) }))} maxLength={100} placeholder={`Option ${index + 1}`} aria-label={`Poll option ${index + 1}`} className="min-w-0 flex-1 rounded border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white outline-none focus:border-accent-border" />
+                    <input value={option} onChange={(event) => setPollDraft((draft) => ({ ...draft, options: draft.options.map((current, optionIndex) => optionIndex === index ? event.target.value : current) }))} maxLength={100} placeholder={`Option ${index + 1}`} aria-label={`Poll option ${index + 1}`} className="min-w-0 flex-1 rounded border theme-border theme-control px-2.5 py-2 text-xs text-white outline-none focus:border-accent-border" />
                     {pollDraft.options.length > 2 && <button type="button" onClick={() => setPollDraft((draft) => ({ ...draft, options: draft.options.filter((_, optionIndex) => optionIndex !== index) }))} className="grid h-8 w-8 shrink-0 place-items-center text-white/50 hover:text-rose-300" aria-label={`Remove option ${index + 1}`}><FaTimes size={11} /></button>}
                   </div>
                 ))}
@@ -2619,10 +2619,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           )}
           {isCommunityChat && communityComposerType === 'event' && (
             <div className="mx-auto mb-2 grid max-w-4xl gap-2 rounded-lg border border-accent-border bg-accent-soft p-3 sm:grid-cols-2">
-              <input value={eventDraft.title} onChange={(event) => setEventDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={120} placeholder="Event title" aria-label="Event title" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-accent-border" />
-              <input type="datetime-local" value={eventDraft.startsAt} onChange={(event) => setEventDraft((draft) => ({ ...draft, startsAt: event.target.value }))} aria-label="Event date and time" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
-              <input value={eventDraft.location} onChange={(event) => setEventDraft((draft) => ({ ...draft, location: event.target.value }))} maxLength={200} placeholder="Location or meeting link" aria-label="Event location" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
-              <input value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} placeholder="Description (Markdown supported)" aria-label="Event description" className="rounded border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
+              <input value={eventDraft.title} onChange={(event) => setEventDraft((draft) => ({ ...draft, title: event.target.value }))} maxLength={120} placeholder="Event title" aria-label="Event title" className="rounded border theme-border theme-control px-3 py-2 text-sm text-white outline-none focus:border-accent-border" />
+              <input type="datetime-local" value={eventDraft.startsAt} onChange={(event) => setEventDraft((draft) => ({ ...draft, startsAt: event.target.value }))} aria-label="Event date and time" className="rounded border theme-border theme-control px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
+              <input value={eventDraft.location} onChange={(event) => setEventDraft((draft) => ({ ...draft, location: event.target.value }))} maxLength={200} placeholder="Location or meeting link" aria-label="Event location" className="rounded border theme-border theme-control px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
+              <input value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} maxLength={3000} placeholder="Description (Markdown supported)" aria-label="Event description" className="rounded border theme-border theme-control px-3 py-2 text-xs text-white outline-none focus:border-accent-border" />
             </div>
           )}
           <form onSubmit={sendMessage} className="theme-composer flex w-full min-w-0 items-center gap-2 rounded-xl border p-2">
@@ -2647,8 +2647,8 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               >
                 <FaSmile />
               </button>
-              <FloatingPanel open={showStickers} panelRef={stickerPanel.panelRef} style={stickerPanel.style} className="w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-white/15 bg-slate-950 p-3 shadow-xl">
-                  <div className="mb-2 flex flex-wrap gap-1 border-b border-white/10 pb-2">
+              <FloatingPanel open={showStickers} panelRef={stickerPanel.panelRef} style={stickerPanel.style} className="workspace-popover theme-border w-[min(22rem,calc(100vw-1rem))] rounded-xl border p-3 shadow-xl">
+                  <div className="mb-2 flex flex-wrap gap-1 border-b theme-border pb-2">
                     {['all', 'favorites', 'recent', ...stickerCategories].map((category) => (
                       <button type="button" key={category} onClick={() => setStickerCategory(category)} className={`rounded px-2 py-1 text-[11px] capitalize ${stickerCategory === category ? 'bg-accent text-accent-contrast' : 'text-white/70 hover:bg-white/10'}`}>
                         {category === 'all' ? 'All' : category}
@@ -2662,14 +2662,14 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     <span className="text-[11px] text-white/50">Images and GIFs</span>
                   </div>
                   {showAddSticker && (
-                    <div className="mb-2 space-y-2 border-b border-white/10 pb-2 text-left">
-                      <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="w-full rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
-                      <select value={stickerUploadCategory} onChange={(event) => setStickerUploadCategory(event.target.value)} className="w-full rounded border border-white/20 bg-slate-900 px-2 py-1 text-xs text-white">
+                    <div className="mb-2 space-y-2 border-b theme-border pb-2 text-left">
+                      <input value={stickerName} onChange={(event) => setStickerName(event.target.value)} required maxLength={100} placeholder="Sticker name" className="w-full rounded border theme-border bg-white/10 px-2 py-1 text-xs text-white outline-none" />
+                      <select value={stickerUploadCategory} onChange={(event) => setStickerUploadCategory(event.target.value)} className="w-full rounded border theme-border theme-control px-2 py-1 text-xs text-white">
                         {stickerCategories.map((category) => <option key={category} value={category}>{category}</option>)}
                       </select>
                       <div className="flex gap-1">
-                        <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded border border-white/20 bg-white/10 px-2 py-1 text-xs text-white outline-none" />
-                        <button type="button" onClick={createStickerCategory} className="rounded border border-white/20 px-2 text-[11px]">Add category</button>
+                        <input value={newStickerCategory} onChange={(event) => setNewStickerCategory(event.target.value)} maxLength={60} placeholder="New shared category" className="min-w-0 flex-1 rounded border theme-border bg-white/10 px-2 py-1 text-xs text-white outline-none" />
+                        <button type="button" onClick={createStickerCategory} className="rounded border theme-border px-2 text-[11px]">Add category</button>
                       </div>
                       <input type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" onChange={(event) => setStickerFile(event.target.files?.[0] || null)} className="w-full text-[11px] text-white/70" />
                       {stickerError && <p className="text-xs text-rose-300">{stickerError}</p>}
@@ -2716,7 +2716,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             ) : isCommunityChat ? (
               <div className="composer-editor relative min-w-0 flex-1">
                 {matchingBotCommands.length > 0 && (
-                  <ul role="listbox" aria-label="Slash commands" className="glass-panel absolute bottom-full left-0 z-[70] mb-2 max-h-56 w-full max-w-sm overflow-y-auto rounded-lg border p-1 shadow-xl">
+                  <ul role="listbox" aria-label="Slash commands" className="theme-panel absolute bottom-full left-0 z-[70] mb-2 max-h-56 w-full max-w-sm overflow-y-auto rounded-lg border p-1 shadow-xl">
                     {matchingBotCommands.map((command) => (
                       <li key={`${command.botName}:${command.key}`}>
                         <button type="button" role="option" aria-selected="false" onClick={() => setMsg(`/${command.key} `)} className="flex w-full items-start gap-3 rounded px-3 py-2 text-left hover:bg-white/10">
@@ -2806,7 +2806,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           {selectedFiles.length > 0 && (
             <ul className="mx-auto mt-2 flex max-w-4xl flex-wrap gap-2" aria-label="Selected attachments">
               {selectedFiles.map((file, index) => (
-                <li key={`${file.name}-${file.lastModified}-${index}`} className="theme-muted flex items-center gap-2 rounded-lg border border-white/10 px-2 py-1 text-xs">
+                <li key={`${file.name}-${file.lastModified}-${index}`} className="theme-muted flex items-center gap-2 rounded-lg border theme-border px-2 py-1 text-xs">
                   <span className="max-w-48 truncate">{file.name} · {formatFileSize(file.size)}</span>
                   <button
                     type="button"
@@ -2830,23 +2830,23 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             && (String(threadRoot.sender) === String(user?._id) || selectedChat?.role === 'admin' || user?.role === 'admin');
           return (
             <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 p-0 backdrop-blur-sm sm:items-center sm:p-5" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setActiveThread(null)}>
-              <section role="dialog" aria-modal="true" aria-label="Message thread" className="theme-page flex max-h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-white/10 shadow-2xl sm:rounded-xl">
+              <section role="dialog" aria-modal="true" aria-label="Message thread" className="theme-surface flex max-h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border theme-border shadow-2xl sm:rounded-xl">
                 <header className="theme-header flex shrink-0 items-center gap-3 border-b px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <h2 className="text-sm font-semibold">{threadRoot.messageType === 'question' ? 'Question discussion' : 'Thread'}</h2>
                     <p className="theme-muted mt-0.5 truncate text-xs">#{selectedChat?.channelName || 'community'}</p>
                   </div>
-                  <button type="button" onClick={() => setActiveThread(null)} className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close thread"><FaTimes /></button>
+                  <button type="button" onClick={() => setActiveThread(null)} className="grid h-9 w-9 place-items-center rounded-lg border theme-border text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close thread"><FaTimes /></button>
                 </header>
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-                  <article className="border-b border-white/10 pb-3">
+                  <article className="border-b theme-border pb-3">
                     <p className="mb-1 text-xs font-semibold text-sky-200">{threadRoot.senderName || 'Community member'} · original post</p>
                     {threadRoot.messageType && ['poll', 'event'].includes(threadRoot.messageType)
                       ? <CommunityPostCard message={threadRoot} threadCount={replies.length} onVote={voteInPoll} onRsvp={respondToEvent} onOpenThread={setActiveThread} />
                       : <MarkdownMessage>{threadRoot.content}</MarkdownMessage>}
                   </article>
                   {replies.length ? replies.map((reply) => (
-                    <article key={reply._id} className={`rounded-lg border p-3 ${String(threadRoot.acceptedAnswerId) === String(reply._id) ? 'border-emerald-300/40 bg-emerald-950/20' : 'border-white/10 bg-white/[0.025]'}`}>
+                    <article key={reply._id} className={`rounded-lg border p-3 ${String(threadRoot.acceptedAnswerId) === String(reply._id) ? 'border-emerald-300/40 bg-emerald-950/20' : 'theme-border bg-white/[0.025]'}`}>
                       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs font-semibold text-white/75">{reply.senderName || 'Community member'}{String(reply.sender) === String(user?._id) ? ' · you' : ''}</p>
                         {String(threadRoot.acceptedAnswerId) === String(reply._id) && <span className="text-[10px] font-semibold text-emerald-200">Accepted answer</span>}

@@ -173,7 +173,7 @@ export default function MediaDeviceSettings({ userId }) {
       {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
       <label className="block space-y-1.5 text-sm">
         <span>Microphone</span>
-        <select value={preferences.audioInputId} onChange={saveSelect("audioInputId")} className="glass-input theme-text min-w-0 w-full max-w-full rounded-md p-2.5">
+        <select value={preferences.audioInputId} onChange={saveSelect("audioInputId")} className="theme-control theme-text min-w-0 w-full max-w-full rounded-md p-2.5">
           <option value="">System default</option>
           {inputDevices.audio.map((device, index) => (
             <option key={device.deviceId || `audio-${index}`} value={device.deviceId}>{deviceName(device, index, "Microphone")}</option>
@@ -194,7 +194,7 @@ export default function MediaDeviceSettings({ userId }) {
       )}
       <label className="block space-y-1.5 text-sm">
         <span>Camera</span>
-        <select value={preferences.videoInputId} onChange={saveSelect("videoInputId")} className="glass-input theme-text min-w-0 w-full max-w-full rounded-md p-2.5">
+        <select value={preferences.videoInputId} onChange={saveSelect("videoInputId")} className="theme-control theme-text min-w-0 w-full max-w-full rounded-md p-2.5">
           <option value="">System default</option>
           {inputDevices.video.map((device, index) => (
             <option key={device.deviceId || `video-${index}`} value={device.deviceId}>{deviceName(device, index, "Camera")}</option>
@@ -210,7 +210,7 @@ export default function MediaDeviceSettings({ userId }) {
       )}
       <label className="block space-y-1.5 text-sm">
         <span>Speaker</span>
-        <select value={preferences.audioOutputId} onChange={saveSelect("audioOutputId")} className="glass-input theme-text min-w-0 w-full max-w-full rounded-md p-2.5">
+        <select value={preferences.audioOutputId} onChange={saveSelect("audioOutputId")} className="theme-control theme-text min-w-0 w-full max-w-full rounded-md p-2.5">
           <option value="">System default</option>
           {audioRoutes.map((route) => <option key={route.id} value={route.id}>{route.label}</option>)}
         </select>

@@ -133,15 +133,15 @@ export default function CommunityCodeRoom({ groupId, groupName, userName, onClos
 
   return (
     <div className="fixed inset-0 z-[99] flex items-center justify-center bg-black/70 p-2 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="code-room-title" className="glass-panel flex h-[min(94dvh,56rem)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border shadow-2xl">
-        <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3">
-          <span className="grid h-8 w-8 place-items-center rounded border border-white/10 text-accent-text"><FaCode /></span>
+      <section role="dialog" aria-modal="true" aria-labelledby="code-room-title" className="theme-panel flex h-[min(94dvh,56rem)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+        <header className="flex shrink-0 items-center gap-3 border-b theme-border px-4 py-3">
+          <span className="grid h-8 w-8 place-items-center rounded border theme-border text-accent-text"><FaCode /></span>
           <div className="min-w-0 flex-1">
             <h2 id="code-room-title" className="truncate text-sm font-semibold">{groupName} code room</h2>
             <p className="theme-muted mt-0.5 text-xs">{!connected ? 'Reconnecting…' : synced ? 'Connected · changes sync live' : 'Syncing shared document…'}</p>
           </div>
           <label className="sr-only" htmlFor="code-room-language">Language</label>
-          <select id="code-room-language" value={language} onChange={(event) => setLanguage(event.target.value)} className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-xs">
+          <select id="code-room-language" value={language} onChange={(event) => setLanguage(event.target.value)} className="rounded border theme-border bg-slate-900 px-2 py-1.5 text-xs">
             {CODE_ROOM_LANGUAGES.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
           <button type="button" onClick={onClose} aria-label="Close code room" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>

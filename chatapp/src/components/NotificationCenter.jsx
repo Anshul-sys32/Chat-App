@@ -358,7 +358,7 @@ export default function NotificationCenter({ onNavigate }) {
           </div>
           {error && <p role="alert" className="mt-2 text-xs text-rose-400">{error}</p>}
           {isSettingsOpen && (
-            <div aria-label="Notification preferences" className="mt-3 space-y-3 border-y border-white/10 py-3">
+            <div aria-label="Notification preferences" className="mt-3 space-y-3 border-y theme-border py-3">
               <p className="theme-muted text-xs font-semibold uppercase">Chat system notifications</p>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={preferences.directMessages} disabled={preferencesLoading} onChange={(event) => updatePreference("directMessages", event.target.checked)} className="accent-accent" />
@@ -452,7 +452,7 @@ function NotificationItem({ notification, index, onOpen, onRespond, onMeetingRes
           </div>
         </div>
       ) : (
-        <button type="button" onClick={() => onOpen(notification)} className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${notification.isRead ? "border-white/5 opacity-75" : "border-accent-border bg-accent-soft"}`}>
+        <button type="button" onClick={() => onOpen(notification)} className={`w-full rounded-lg border p-3 text-left transition hover:bg-white/5 ${notification.isRead ? "theme-border opacity-75" : "border-accent-border bg-accent-soft"}`}>
           {content}
         </button>
       )}

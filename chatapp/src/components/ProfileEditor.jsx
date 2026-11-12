@@ -136,7 +136,7 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" tabIndex={-1} className="glass-panel min-w-0 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl p-5 shadow-2xl sm:p-6">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="profile-editor-title" tabIndex={-1} className="theme-panel min-w-0 max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl p-5 shadow-2xl sm:p-6">
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h2 id="profile-editor-title" className="text-xl font-semibold text-white">
@@ -168,7 +168,7 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
                 type="button"
                 onClick={() => avatarInput.current?.click()}
                 disabled={uploadingAvatar}
-                className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10 disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg border theme-border px-3 py-2 text-sm text-white/80 transition hover:bg-white/10 disabled:opacity-60"
               >
                 <FaCamera size={12} /> {uploadingAvatar ? "Uploading…" : "Change photo"}
               </button>
@@ -178,25 +178,25 @@ export default function ProfileEditor({ user, isAdmin = false, onClose, onSaved 
           </div>
           <label className="block text-sm text-white/75">
             Username
-            <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={2} maxLength={100} autoComplete="username" className="glass-input mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none" />
+            <input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={2} maxLength={100} autoComplete="username" className="theme-control mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none" />
           </label>
           <label className="block text-sm text-white/75">
             Email
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={255} autoComplete="email" className="glass-input mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none" />
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={255} autoComplete="email" className="theme-control mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none" />
           </label>
           {!isAdmin && (
             <label className="block text-sm text-white/75">
               Current password
-              <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" placeholder="Required to change an existing password" className="glass-input mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none placeholder:text-white/35" />
+              <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" placeholder="Required to change an existing password" className="theme-control mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none placeholder:text-white/35" />
             </label>
           )}
           <label className="block text-sm text-white/75">
             {isAdmin ? "Replacement password (optional)" : "New password (optional)"}
-            <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} autoComplete="new-password" className="glass-input mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none" />
+            <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={8} autoComplete="new-password" className="theme-control mt-1.5 w-full rounded-lg px-3 py-2.5 text-white outline-none" />
           </label>
           {error && <p role="alert" className="rounded-lg bg-rose-950/70 px-3 py-2 text-sm text-rose-200">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose} className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10">Cancel</button>
+            <button type="button" onClick={onClose} className="rounded-lg border theme-border px-4 py-2 text-sm text-white/80 transition hover:bg-white/10">Cancel</button>
             <button type="submit" disabled={saving} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-contrast transition hover:bg-accent-hover disabled:opacity-60">
               {saving ? "Saving…" : "Save changes"}
             </button>

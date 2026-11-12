@@ -152,8 +152,8 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-2 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="media-gallery-title" className="glass-panel flex max-h-[min(94dvh,60rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="media-gallery-title" className="theme-panel flex max-h-[min(94dvh,60rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border shadow-2xl outline-none">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b theme-border px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <h2 id="media-gallery-title" className="text-sm font-semibold">{conversation ? `Media · ${conversation.name || conversation.username || 'Conversation'}` : 'Media gallery'}</h2>
             <p className="theme-muted mt-0.5 text-xs">{conversation?.channelName ? `# ${conversation.channelName}` : 'Photos, files, audio, video, and links'}</p>
@@ -239,11 +239,11 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
                 })}
               </ul>}
         </div>
-        <footer className="flex shrink-0 items-center justify-between border-t border-white/10 px-4 py-3 text-xs sm:px-5">
+        <footer className="flex shrink-0 items-center justify-between border-t theme-border px-4 py-3 text-xs sm:px-5">
           <span className="theme-muted">Page {page}</span>
           <div className="flex gap-2">
-            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Previous page" className="rounded border border-white/15 px-3 py-1.5 disabled:opacity-40">Previous</button>
-            <button type="button" disabled={!hasMore || loading} onClick={() => setPage((current) => current + 1)} aria-label="Next page" className="rounded border border-white/15 px-3 py-1.5 disabled:opacity-40">Next</button>
+            <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))} aria-label="Previous page" className="rounded border theme-border px-3 py-1.5 disabled:opacity-40">Previous</button>
+            <button type="button" disabled={!hasMore || loading} onClick={() => setPage((current) => current + 1)} aria-label="Next page" className="rounded border theme-border px-3 py-1.5 disabled:opacity-40">Next</button>
           </div>
         </footer>
       </section>

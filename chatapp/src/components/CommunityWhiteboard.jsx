@@ -172,15 +172,15 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[98] flex items-center justify-center bg-black/65 p-2 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="whiteboard-title" className="glass-panel flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border shadow-2xl">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+      <section role="dialog" aria-modal="true" aria-labelledby="whiteboard-title" className="theme-panel flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b theme-border px-4 py-3">
           <div>
             <h2 id="whiteboard-title" className="text-sm font-semibold">Community whiteboard</h2>
             <p className="theme-muted mt-0.5 text-xs">Shared board · {items.length} items</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close whiteboard" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
         </header>
-        <div className="flex flex-wrap items-center gap-2 border-b border-white/10 p-2">
+        <div className="flex flex-wrap items-center gap-2 border-b theme-border p-2">
           {[
             ['stroke', <FaPencilAlt />, 'Draw'],
             ['rectangle', <FaSquare />, 'Rectangle'],
@@ -188,26 +188,26 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
             ['arrow', <FaArrowRight />, 'Arrow'],
             ['sticky', <FaStickyNote />, 'Sticky note'],
           ].map(([value, icon, label]) => (
-            <button key={value} type="button" onClick={() => setTool(value)} aria-pressed={tool === value} title={label} className={`inline-flex h-8 items-center gap-2 rounded border px-2.5 text-xs ${tool === value ? 'border-accent-border bg-accent/20 text-accent-text' : 'border-white/10 text-white/65 hover:bg-white/10'}`}>
+            <button key={value} type="button" onClick={() => setTool(value)} aria-pressed={tool === value} title={label} className={`inline-flex h-8 items-center gap-2 rounded border px-2.5 text-xs ${tool === value ? 'border-accent-border bg-accent/20 text-accent-text' : 'theme-border text-white/65 hover:bg-white/10'}`}>
               {icon}<span>{label}</span>
             </button>
           ))}
           {tool === 'sticky' ? (
             <>
-              <input value={stickyText} onChange={(event) => setStickyText(event.target.value)} maxLength={2000} placeholder="Sticky note text, then click board" aria-label="Sticky note text" className="min-w-36 flex-1 rounded border border-white/10 bg-black/20 px-2 py-1.5 text-xs sm:max-w-72" />
-              <select value={stickyColor} onChange={(event) => setStickyColor(event.target.value)} aria-label="Sticky note color" className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-xs">
+              <input value={stickyText} onChange={(event) => setStickyText(event.target.value)} maxLength={2000} placeholder="Sticky note text, then click board" aria-label="Sticky note text" className="min-w-36 flex-1 rounded border theme-border theme-control px-2 py-1.5 text-xs sm:max-w-72" />
+              <select value={stickyColor} onChange={(event) => setStickyColor(event.target.value)} aria-label="Sticky note color" className="rounded border theme-border theme-control px-2 py-1.5 text-xs">
                 {Object.keys(STICKY_COLORS).map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </>
           ) : (
             <>
               <div className="flex items-center gap-1" role="group" aria-label="Drawing color">
-                {COLORS.map((value) => <button key={value} type="button" onClick={() => setColor(value)} aria-label={`Use ${value}`} aria-pressed={color === value} className={`h-6 w-6 rounded-full border-2 ${color === value ? 'border-white' : 'border-white/20'}`} style={{ backgroundColor: value }} />)}
+                {COLORS.map((value) => <button key={value} type="button" onClick={() => setColor(value)} aria-label={`Use ${value}`} aria-pressed={color === value} className={`h-6 w-6 rounded-full border-2 ${color === value ? 'border-white' : 'theme-border'}`} style={{ backgroundColor: value }} />)}
               </div>
               <input type="range" min="1" max="18" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} aria-label="Stroke width" className="w-20 accent-accent" />
             </>
           )}
-          <button type="button" onClick={deleteSelected} disabled={!selectedItemId} title="Delete selected item" aria-label="Delete selected item" className="ml-auto grid h-8 w-8 place-items-center rounded border border-white/10 text-white/55 hover:text-rose-200 disabled:opacity-30"><FaTrash /></button>
+          <button type="button" onClick={deleteSelected} disabled={!selectedItemId} title="Delete selected item" aria-label="Delete selected item" className="ml-auto grid h-8 w-8 place-items-center rounded border theme-border text-white/55 hover:text-rose-200 disabled:opacity-30"><FaTrash /></button>
         </div>
         {error && <p role="alert" className="px-3 pt-2 text-xs text-rose-200">{error}</p>}
         <div className="min-h-0 overflow-auto p-2 sm:p-4">

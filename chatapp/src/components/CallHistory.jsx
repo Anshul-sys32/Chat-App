@@ -67,7 +67,7 @@ export default function CallHistory({ onStartChat, search = '' }) {
       ) : (
         <ul className="space-y-2">
           {visibleCalls.map((call) => (
-            <li key={call._id} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.045] px-3 py-2">
+            <li key={call._id} className="flex items-center gap-2 rounded-xl border theme-border bg-white/[0.045] px-3 py-2">
               <span className={call.direction === "outgoing" ? "text-emerald-300" : "text-sky-300"} title={`${call.direction} ${call.callType} call`}>
                 {call.status === "declined" || call.status === "missed" ? <FaPhoneSlash /> : <FaPhone />}
               </span>
