@@ -11,7 +11,12 @@ const authConfig = () => ({
   withCredentials: true,
 });
 
-export default function CommunityWhiteboard({ groupId, onClose }) {
+export default function CommunityWhiteboard({ groupId, sessionId = null, session = null, readOnly = false, embedded = false, onClose }) {
+  const isSession = Boolean(sessionId);
+  const isReadOnly = readOnly || session?.status === 'closed';
+  const boardUrl = isSession
+    ? `${API_URL}/api/collab-sessions/${sessionId}/whiteboard`
+    : `${API_URL}/api/groups/${groupId}/whiteboard`;
   const [items, setItems] = useState([]);
   const [remoteStrokes, setRemoteStrokes] = useState({});
   const [tool, setTool] = useState('stroke');
@@ -23,26 +28,35 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
   const [drawing, setDrawing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [connected, setConnected] = useState(Socket.connected);
   const [error, setError] = useState('');
   const svgRef = useRef(null);
 
   useEffect(() => {
     let active = true;
-    axios.get(`${API_URL}/api/groups/${groupId}/whiteboard`, authConfig())
+    setItems([]);
+    setRemoteStrokes({});
+    setLoading(true);
+    setError('');
+    axios.get(boardUrl, authConfig())
       .then(({ data }) => { if (active) setItems(data.items || []); })
       .catch((requestError) => { if (active) setError(requestError.response?.data?.message || 'Could not load the whiteboard.'); })
       .finally(() => { if (active) setLoading(false); });
     const upsert = (item) => setItems((previous) => previous.some((entry) => String(entry.id) === String(item.id))
       ? previous.map((entry) => String(entry.id) === String(item.id) ? item : entry)
       : [...previous, item]);
-    const handleCreated = ({ groupId: changedGroupId, item }) => { if (String(changedGroupId) === String(groupId)) upsert(item); };
-    const handleUpdated = ({ groupId: changedGroupId, item }) => { if (String(changedGroupId) === String(groupId)) upsert(item); };
-    const handleDeleted = ({ groupId: changedGroupId, itemId }) => {
-      if (String(changedGroupId) !== String(groupId)) return;
+    const matchesBoard = (payload) => isSession
+      ? String(payload.sessionId) === String(sessionId)
+      : String(payload.groupId) === String(groupId);
+    const handleCreated = (payload) => { if (matchesBoard(payload)) upsert(payload.item); };
+    const handleUpdated = (payload) => { if (matchesBoard(payload)) upsert(payload.item); };
+    const handleDeleted = (payload) => {
+      if (!matchesBoard(payload)) return;
+      const { itemId } = payload;
       setItems((previous) => previous.filter((item) => String(item.id) !== String(itemId)));
     };
     const handleRemoteStroke = (stroke) => {
-      if (String(stroke.groupId) !== String(groupId) || stroke.socketId === Socket.id) return;
+      if (!(isSession ? String(stroke.sessionId) === String(sessionId) : String(stroke.groupId) === String(groupId)) || stroke.socketId === Socket.id) return;
       if (stroke.finished) {
         setRemoteStrokes((previous) => {
           const next = { ...previous };
@@ -60,20 +74,33 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
       }));
     };
     const handleSocketDisconnect = () => setRemoteStrokes({});
+    const joinSession = () => {
+      setConnected(Socket.connected);
+      if (isSession && Socket.connected) Socket.emit('collab-session-join', { sessionId });
+    };
+    const handleDisconnect = () => {
+      setConnected(false);
+      handleSocketDisconnect();
+    };
+    const strokeEvent = isSession ? 'collab-whiteboard-stroke' : 'whiteboard-stroke';
     Socket.on('whiteboard-item-created', handleCreated);
     Socket.on('whiteboard-item-updated', handleUpdated);
     Socket.on('whiteboard-item-deleted', handleDeleted);
-    Socket.on('whiteboard-stroke', handleRemoteStroke);
-    Socket.on('disconnect', handleSocketDisconnect);
+    Socket.on(strokeEvent, handleRemoteStroke);
+    Socket.on('disconnect', handleDisconnect);
+    if (Socket.connected) joinSession();
+    Socket.on('connect', joinSession);
     return () => {
       active = false;
+      if (isSession && Socket.connected) Socket.emit('collab-session-leave', { sessionId });
       Socket.off('whiteboard-item-created', handleCreated);
       Socket.off('whiteboard-item-updated', handleUpdated);
       Socket.off('whiteboard-item-deleted', handleDeleted);
-      Socket.off('whiteboard-stroke', handleRemoteStroke);
-      Socket.off('disconnect', handleSocketDisconnect);
+      Socket.off(strokeEvent, handleRemoteStroke);
+      Socket.off('disconnect', handleDisconnect);
+      Socket.off('connect', joinSession);
     };
-  }, [groupId]);
+  }, [groupId, sessionId, boardUrl, isSession]);
 
   const pointFromEvent = (event) => {
     const bounds = svgRef.current?.getBoundingClientRect();
@@ -85,10 +112,11 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
   };
 
   const saveItem = async (itemType, data) => {
+    if (isReadOnly) return;
     setSaving(true);
     setError('');
     try {
-      const { data: response } = await axios.post(`${API_URL}/api/groups/${groupId}/whiteboard`, { itemType, data }, authConfig());
+      const { data: response } = await axios.post(boardUrl, { itemType, data }, authConfig());
       setItems((previous) => previous.some((item) => String(item.id) === String(response.item.id)) ? previous : [...previous, response.item]);
       setSelectedItemId(String(response.item.id));
     } catch (requestError) {
@@ -99,7 +127,7 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
   };
 
   const handlePointerDown = (event) => {
-    if (event.button !== 0 || saving) return;
+    if (event.button !== 0 || saving || isReadOnly) return;
     const point = pointFromEvent(event);
     if (tool === 'sticky') {
       if (!stickyText.trim()) {
@@ -121,7 +149,7 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
     const point = pointFromEvent(event);
     if (drawing.type === 'stroke') {
       setDrawing((current) => current && ({ ...current, points: [...current.points, point] }));
-      Socket.emit('whiteboard-stroke', { groupId, points: [point], color, width: strokeWidth });
+      Socket.emit(isSession ? 'collab-whiteboard-stroke' : 'whiteboard-stroke', { groupId, ...(isSession ? { sessionId } : {}), points: [point], color, width: strokeWidth });
     }
     else setDrawing((current) => current && ({ ...current, end: point }));
   };
@@ -132,7 +160,7 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
     const current = drawing;
     setDrawing(null);
     if (current.type === 'stroke') {
-      Socket.emit('whiteboard-stroke', { groupId, points: [], color, width: strokeWidth, finished: true });
+      Socket.emit(isSession ? 'collab-whiteboard-stroke' : 'whiteboard-stroke', { groupId, ...(isSession ? { sessionId } : {}), points: [], color, width: strokeWidth, finished: true });
       if (current.points.length < 2) return;
       await saveItem('stroke', { points: [...current.points, finalPoint], color, width: strokeWidth });
       return;
@@ -150,10 +178,10 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
   };
 
   const deleteSelected = async () => {
-    if (!selectedItemId) return;
+    if (!selectedItemId || isReadOnly) return;
     setError('');
     try {
-      await axios.delete(`${API_URL}/api/groups/${groupId}/whiteboard/${selectedItemId}`, authConfig());
+      await axios.delete(`${boardUrl}/${selectedItemId}`, authConfig());
       setItems((previous) => previous.filter((item) => String(item.id) !== selectedItemId));
       setSelectedItemId(null);
     } catch (requestError) {
@@ -171,17 +199,17 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
         : null;
 
   return (
-    <div className="fixed inset-0 z-[98] flex items-center justify-center bg-black/65 p-2 sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="whiteboard-title" className="theme-panel flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border shadow-2xl">
+    <div className={embedded ? 'min-h-0 flex flex-1 flex-col' : 'fixed inset-0 z-[98] flex items-center justify-center bg-black/65 p-2 sm:p-5'} onMouseDown={(event) => { if (!embedded && event.target === event.currentTarget) onClose(); }}>
+      <section role={embedded ? undefined : 'dialog'} aria-modal={embedded ? undefined : true} aria-labelledby="whiteboard-title" className={`theme-panel flex ${embedded ? 'min-h-0 flex-1' : 'max-h-[94dvh] w-full max-w-6xl'} flex-col overflow-hidden rounded-xl border shadow-2xl`}>
         <header className="flex shrink-0 items-center justify-between gap-3 border-b theme-border px-4 py-3">
           <div>
-            <h2 id="whiteboard-title" className="text-sm font-semibold">Community whiteboard</h2>
-            <p className="theme-muted mt-0.5 text-xs">Shared board · {items.length} items</p>
+            <h2 id="whiteboard-title" className="text-sm font-semibold">{session?.name || 'Community whiteboard'}</h2>
+            <p className="theme-muted mt-0.5 text-xs">{isReadOnly ? 'Closed · read-only' : connected ? 'Connected · changes sync live' : 'Reconnecting…'} · {items.length} items</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close whiteboard" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
+          {!embedded && <button type="button" onClick={onClose} aria-label="Close whiteboard" title="Close" className="grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaTimes /></button>}
         </header>
         <div className="flex flex-wrap items-center gap-2 border-b theme-border p-2">
-          {[
+          {!isReadOnly && [
             ['stroke', <FaPencilAlt />, 'Draw'],
             ['rectangle', <FaSquare />, 'Rectangle'],
             ['ellipse', <FaCircle />, 'Ellipse'],
@@ -192,7 +220,7 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
               {icon}<span>{label}</span>
             </button>
           ))}
-          {tool === 'sticky' ? (
+          {!isReadOnly && (tool === 'sticky' ? (
             <>
               <input value={stickyText} onChange={(event) => setStickyText(event.target.value)} maxLength={2000} placeholder="Sticky note text, then click board" aria-label="Sticky note text" className="min-w-36 flex-1 rounded border theme-border theme-control px-2 py-1.5 text-xs sm:max-w-72" />
               <select value={stickyColor} onChange={(event) => setStickyColor(event.target.value)} aria-label="Sticky note color" className="rounded border theme-border theme-control px-2 py-1.5 text-xs">
@@ -206,8 +234,8 @@ export default function CommunityWhiteboard({ groupId, onClose }) {
               </div>
               <input type="range" min="1" max="18" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} aria-label="Stroke width" className="w-20 accent-accent" />
             </>
-          )}
-          <button type="button" onClick={deleteSelected} disabled={!selectedItemId} title="Delete selected item" aria-label="Delete selected item" className="ml-auto grid h-8 w-8 place-items-center rounded border theme-border text-white/55 hover:text-rose-200 disabled:opacity-30"><FaTrash /></button>
+          ))}
+          {!isReadOnly && <button type="button" onClick={deleteSelected} disabled={!selectedItemId} title="Delete selected item" aria-label="Delete selected item" className="ml-auto grid h-8 w-8 place-items-center rounded border theme-border text-white/55 hover:text-rose-200 disabled:opacity-30"><FaTrash /></button>}
         </div>
         {error && <p role="alert" className="px-3 pt-2 text-xs text-rose-200">{error}</p>}
         <div className="min-h-0 overflow-auto p-2 sm:p-4">

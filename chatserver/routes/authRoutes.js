@@ -42,6 +42,13 @@ const {
 } = require("../controllers/communityIntegrationsController");
 const { getCommunityReputation } = require("../controllers/communityReputationController");
 const {
+	closeCommunitySession,
+	createCommunitySession,
+	getCommunitySession,
+	listCommunitySessions,
+	updateCommunitySession,
+} = require("../controllers/communityCollabSessionsController");
+const {
 	createCommunityTask,
 	deleteCommunityTask,
 	listCommunityTasks,
@@ -49,8 +56,12 @@ const {
 } = require("../controllers/communityTasksController");
 const {
 	createWhiteboardItem,
+	createSessionWhiteboardItem,
 	deleteWhiteboardItem,
+	deleteSessionWhiteboardItem,
+	listSessionWhiteboardItems,
 	listWhiteboardItems,
+	updateSessionWhiteboardItem,
 	updateWhiteboardItem,
 } = require("../controllers/communityWhiteboardController");
 const {
@@ -1404,6 +1415,15 @@ router.get("/groups/:groupId/whiteboard", protect, listWhiteboardItems);
 router.post("/groups/:groupId/whiteboard", protect, createWhiteboardItem);
 router.patch("/groups/:groupId/whiteboard/:itemId", protect, updateWhiteboardItem);
 router.delete("/groups/:groupId/whiteboard/:itemId", protect, deleteWhiteboardItem);
+router.get("/groups/:groupId/channels/:channelId/collab-sessions", protect, listCommunitySessions);
+router.post("/groups/:groupId/channels/:channelId/collab-sessions", protect, createCommunitySession);
+router.get("/collab-sessions/:sessionId", protect, getCommunitySession);
+router.patch("/collab-sessions/:sessionId", protect, updateCommunitySession);
+router.post("/collab-sessions/:sessionId/close", protect, closeCommunitySession);
+router.get("/collab-sessions/:sessionId/whiteboard", protect, listSessionWhiteboardItems);
+router.post("/collab-sessions/:sessionId/whiteboard", protect, createSessionWhiteboardItem);
+router.patch("/collab-sessions/:sessionId/whiteboard/:itemId", protect, updateSessionWhiteboardItem);
+router.delete("/collab-sessions/:sessionId/whiteboard/:itemId", protect, deleteSessionWhiteboardItem);
 router.get("/scheduled-messages", protect, listScheduledMessages);
 router.post("/scheduled-messages", protect, createScheduledMessage);
 router.put("/scheduled-messages/:messageId", protect, updateScheduledMessage);
@@ -1547,6 +1567,11 @@ router.delete("/groups/:groupId", protect, async (req, res) => {
 		io?.in(`code-room:${groupId}`).socketsLeave(`code-room:${groupId}`);
 		const [channels] = await pool.execute("SELECT id FROM group_channels WHERE group_id = ?", [groupId]);
 		for (const channel of channels) io?.in(`group:${groupId}:channel:${channel.id}`).socketsLeave(`group:${groupId}:channel:${channel.id}`);
+		const [sessions] = await pool.execute("SELECT id FROM community_collab_sessions WHERE group_id = ?", [groupId]);
+		for (const session of sessions) {
+			io?.to(`collab-session:${session.id}`).emit("collab-session-error", { sessionId: session.id, message: "This community is no longer active." });
+			io?.in(`collab-session:${session.id}`).socketsLeave(`collab-session:${session.id}`);
+		}
 		return res.status(204).end();
 	} catch (error) {
 		console.error("Deactivate group error:", error);
@@ -1943,6 +1968,11 @@ router.delete("/groups/:groupId/members/:userId", protect, async (req, res) => {
 			io.in(`user:${userId}`).socketsLeave(`code-room:${groupId}`);
 			for (const channel of channels) {
 				io.in(`user:${userId}`).socketsLeave(`group:${groupId}:channel:${channel.id}`);
+			}
+			const [sessions] = await pool.execute("SELECT id FROM community_collab_sessions WHERE group_id = ?", [groupId]);
+			for (const session of sessions) {
+				io.to(`collab-session:${session.id}`).emit("collab-session-participant-left", { sessionId: session.id, userId });
+				io.in(`user:${userId}`).socketsLeave(`collab-session:${session.id}`);
 			}
 			io.to(`group:${groupId}`).emit("group-member-changed", { groupId, userId });
 		}

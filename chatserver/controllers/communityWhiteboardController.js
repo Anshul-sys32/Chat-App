@@ -1,5 +1,6 @@
 const { pool } = require("../config/db");
 const { canAccessGroup, canManageGroup, getGroupAccess } = require("../services/groupAccess");
+const { authorizeSession, sessionRoom } = require("../services/communityCollabSessions");
 
 const ITEM_TYPES = new Set(["stroke", "sticky", "rectangle", "ellipse", "arrow"]);
 const validCoordinate = (value, max) => Number.isFinite(value) && value >= 0 && value <= max;
@@ -53,7 +54,7 @@ const listWhiteboardItems = async (req, res) => {
               item.created_by AS createdBy, creator.username AS creatorName,
               item.updated_at AS updatedAt
        FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
-       WHERE item.group_id = ? ORDER BY item.id LIMIT 2000`,
+      WHERE item.group_id = ? AND item.session_id IS NULL ORDER BY item.id LIMIT 2000`,
       [groupId]
     );
     return res.json({ items: items.map((item) => ({
@@ -111,7 +112,7 @@ const updateWhiteboardItem = async (req, res) => {
     const authorized = await resolveCommunity(groupId, req.user);
     if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
     const [items] = await pool.execute(
-      "SELECT created_by AS createdBy FROM community_whiteboard_items WHERE id = ? AND group_id = ? LIMIT 1",
+      "SELECT created_by AS createdBy FROM community_whiteboard_items WHERE id = ? AND group_id = ? AND session_id IS NULL LIMIT 1",
       [itemId, groupId]
     );
     if (!items.length) return res.status(404).json({ message: "Whiteboard item not found." });
@@ -120,7 +121,7 @@ const updateWhiteboardItem = async (req, res) => {
       return res.status(403).json({ message: "Only the item creator or a community manager can edit this item." });
     }
     await pool.execute(
-      "UPDATE community_whiteboard_items SET updated_by = ?, item_type = ?, data = ? WHERE id = ? AND group_id = ?",
+      "UPDATE community_whiteboard_items SET updated_by = ?, item_type = ?, data = ? WHERE id = ? AND group_id = ? AND session_id IS NULL",
       [req.user.id, itemType, JSON.stringify(data), itemId, groupId]
     );
     const [rows] = await pool.execute(
@@ -150,7 +151,7 @@ const deleteWhiteboardItem = async (req, res) => {
     const authorized = await resolveCommunity(groupId, req.user);
     if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
     const [items] = await pool.execute(
-      "SELECT created_by AS createdBy FROM community_whiteboard_items WHERE id = ? AND group_id = ? LIMIT 1",
+      "SELECT created_by AS createdBy FROM community_whiteboard_items WHERE id = ? AND group_id = ? AND session_id IS NULL LIMIT 1",
       [itemId, groupId]
     );
     if (!items.length) return res.status(404).json({ message: "Whiteboard item not found." });
@@ -158,7 +159,7 @@ const deleteWhiteboardItem = async (req, res) => {
       && !canManageGroup(authorized.group, "manageMessages", req.user.role)) {
       return res.status(403).json({ message: "Only the item creator or a community manager can remove this item." });
     }
-    await pool.execute("DELETE FROM community_whiteboard_items WHERE id = ? AND group_id = ?", [itemId, groupId]);
+    await pool.execute("DELETE FROM community_whiteboard_items WHERE id = ? AND group_id = ? AND session_id IS NULL", [itemId, groupId]);
     req.app.get("io")?.to(`group:${groupId}`).emit("whiteboard-item-deleted", { groupId, itemId });
     return res.status(204).end();
   } catch (error) {
@@ -167,4 +168,159 @@ const deleteWhiteboardItem = async (req, res) => {
   }
 };
 
-module.exports = { createWhiteboardItem, deleteWhiteboardItem, listWhiteboardItems, updateWhiteboardItem, validateWhiteboardItem };
+const resolveWhiteboardSession = async (req, res, write = false) => {
+  const authorized = await authorizeSession(req.params.sessionId, req.user, { write });
+  if (authorized.status) {
+    res.status(authorized.status).json({ message: authorized.message });
+    return null;
+  }
+  if (authorized.session.sessionType !== "whiteboard") {
+    res.status(400).json({ message: "This collaborative session is not a whiteboard." });
+    return null;
+  }
+  return authorized;
+};
+
+const listSessionWhiteboardItems = async (req, res) => {
+  try {
+    const authorized = await resolveWhiteboardSession(req, res);
+    if (!authorized) return;
+    const [items] = await pool.execute(
+      `SELECT item.id, item.item_type AS itemType, item.data,
+              item.created_by AS createdBy, creator.username AS creatorName,
+              item.updated_at AS updatedAt
+       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+       WHERE item.group_id = ? AND item.session_id = ? ORDER BY item.id LIMIT 2000`,
+      [authorized.session.groupId, authorized.session.id]
+    );
+    return res.json({ items: items.map((item) => ({
+      ...item,
+      data: typeof item.data === "string" ? JSON.parse(item.data) : item.data,
+    })) });
+  } catch (error) {
+    console.error("List session whiteboard items error:", error);
+    return res.status(500).json({ message: "Could not load this whiteboard." });
+  }
+};
+
+const createSessionWhiteboardItem = async (req, res) => {
+  const itemType = req.body?.itemType;
+  const data = req.body?.data;
+  const validationError = validateWhiteboardItem(itemType, data);
+  if (validationError) return res.status(400).json({ message: validationError });
+  try {
+    const authorized = await resolveWhiteboardSession(req, res, true);
+    if (!authorized) return;
+    const [result] = await pool.execute(
+      `INSERT INTO community_whiteboard_items
+       (group_id, session_id, created_by, updated_by, item_type, data)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [authorized.session.groupId, authorized.session.id, req.user.id, req.user.id, itemType, JSON.stringify(data)]
+    );
+    const [rows] = await pool.execute(
+      `SELECT item.id, item.item_type AS itemType, item.data,
+              item.created_by AS createdBy, creator.username AS creatorName,
+              item.updated_at AS updatedAt
+       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+       WHERE item.id = ? AND item.session_id = ? LIMIT 1`,
+      [result.insertId, authorized.session.id]
+    );
+    const item = { ...rows[0], data: typeof rows[0].data === "string" ? JSON.parse(rows[0].data) : rows[0].data };
+    req.app.get("io")?.to(sessionRoom(authorized.session.id)).emit("whiteboard-item-created", {
+      groupId: authorized.session.groupId,
+      sessionId: authorized.session.id,
+      item,
+    });
+    return res.status(201).json({ item });
+  } catch (error) {
+    console.error("Create session whiteboard item error:", error);
+    return res.status(500).json({ message: "Could not save this whiteboard item." });
+  }
+};
+
+const updateSessionWhiteboardItem = async (req, res) => {
+  const itemId = Number(req.params.itemId);
+  const itemType = req.body?.itemType;
+  const data = req.body?.data;
+  if (!Number.isSafeInteger(itemId) || itemId < 1) return res.status(400).json({ message: "Invalid whiteboard item." });
+  const validationError = validateWhiteboardItem(itemType, data);
+  if (validationError) return res.status(400).json({ message: validationError });
+  try {
+    const authorized = await resolveWhiteboardSession(req, res, true);
+    if (!authorized) return;
+    const [items] = await pool.execute(
+      "SELECT created_by AS createdBy FROM community_whiteboard_items WHERE id = ? AND group_id = ? AND session_id = ? LIMIT 1",
+      [itemId, authorized.session.groupId, authorized.session.id]
+    );
+    if (!items.length) return res.status(404).json({ message: "Whiteboard item not found." });
+    if (Number(items[0].createdBy) !== Number(req.user.id)
+      && !canManageGroup(authorized.group, "manageMessages", req.user.role)) {
+      return res.status(403).json({ message: "Only the item creator or a community manager can edit this item." });
+    }
+    await pool.execute(
+      "UPDATE community_whiteboard_items SET updated_by = ?, item_type = ?, data = ? WHERE id = ? AND group_id = ? AND session_id = ?",
+      [req.user.id, itemType, JSON.stringify(data), itemId, authorized.session.groupId, authorized.session.id]
+    );
+    const [rows] = await pool.execute(
+      `SELECT item.id, item.item_type AS itemType, item.data,
+              item.created_by AS createdBy, creator.username AS creatorName,
+              item.updated_at AS updatedAt
+       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+       WHERE item.id = ? AND item.session_id = ? LIMIT 1`,
+      [itemId, authorized.session.id]
+    );
+    const item = { ...rows[0], data: typeof rows[0].data === "string" ? JSON.parse(rows[0].data) : rows[0].data };
+    req.app.get("io")?.to(sessionRoom(authorized.session.id)).emit("whiteboard-item-updated", {
+      groupId: authorized.session.groupId,
+      sessionId: authorized.session.id,
+      item,
+    });
+    return res.json({ item });
+  } catch (error) {
+    console.error("Update session whiteboard item error:", error);
+    return res.status(500).json({ message: "Could not update this whiteboard item." });
+  }
+};
+
+const deleteSessionWhiteboardItem = async (req, res) => {
+  const itemId = Number(req.params.itemId);
+  if (!Number.isSafeInteger(itemId) || itemId < 1) return res.status(400).json({ message: "Invalid whiteboard item." });
+  try {
+    const authorized = await resolveWhiteboardSession(req, res, true);
+    if (!authorized) return;
+    const [items] = await pool.execute(
+      "SELECT created_by AS createdBy FROM community_whiteboard_items WHERE id = ? AND group_id = ? AND session_id = ? LIMIT 1",
+      [itemId, authorized.session.groupId, authorized.session.id]
+    );
+    if (!items.length) return res.status(404).json({ message: "Whiteboard item not found." });
+    if (Number(items[0].createdBy) !== Number(req.user.id)
+      && !canManageGroup(authorized.group, "manageMessages", req.user.role)) {
+      return res.status(403).json({ message: "Only the item creator or a community manager can remove this item." });
+    }
+    await pool.execute(
+      "DELETE FROM community_whiteboard_items WHERE id = ? AND group_id = ? AND session_id = ?",
+      [itemId, authorized.session.groupId, authorized.session.id]
+    );
+    req.app.get("io")?.to(sessionRoom(authorized.session.id)).emit("whiteboard-item-deleted", {
+      groupId: authorized.session.groupId,
+      sessionId: authorized.session.id,
+      itemId,
+    });
+    return res.status(204).end();
+  } catch (error) {
+    console.error("Delete session whiteboard item error:", error);
+    return res.status(500).json({ message: "Could not remove this whiteboard item." });
+  }
+};
+
+module.exports = {
+  createSessionWhiteboardItem,
+  createWhiteboardItem,
+  deleteSessionWhiteboardItem,
+  deleteWhiteboardItem,
+  listSessionWhiteboardItems,
+  listWhiteboardItems,
+  updateSessionWhiteboardItem,
+  updateWhiteboardItem,
+  validateWhiteboardItem,
+};

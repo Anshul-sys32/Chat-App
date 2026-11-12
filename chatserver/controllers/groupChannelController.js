@@ -186,6 +186,14 @@ const archiveChannel = async (req, res) => {
     if (io) {
       io.to(`group:${groupId}`).emit("group-channel-archived", { groupId, channelId });
       io.in(`group:${groupId}:channel:${channelId}`).socketsLeave(`group:${groupId}:channel:${channelId}`);
+      const [sessions] = await pool.execute(
+        "SELECT id FROM community_collab_sessions WHERE group_id = ? AND channel_id = ?",
+        [groupId, channelId]
+      );
+      for (const session of sessions) {
+        io.to(`collab-session:${session.id}`).emit("collab-session-error", { sessionId: session.id, message: "This session channel is no longer available." });
+        io.in(`collab-session:${session.id}`).socketsLeave(`collab-session:${session.id}`);
+      }
     }
     return res.status(204).end();
   } catch (error) {

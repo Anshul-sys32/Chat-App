@@ -514,6 +514,110 @@ body {
   box-shadow: inset 2px 0 0 var(--theme-accent);
 }
 
+.community-session-card {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--theme-border);
+  border-left: 3px solid var(--theme-accent);
+  border-radius: 9px;
+  color: var(--theme-text);
+  background-color: var(--theme-surface-raised);
+}
+
+.community-session-card.is-code-room {
+  border-left-color: #568bd6;
+}
+
+.community-session-card.is-whiteboard {
+  border-left-color: #32a58a;
+}
+
+.community-session-card.is-closed {
+  opacity: 0.78;
+}
+
+.community-session-card-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--theme-accent-text);
+  background: var(--theme-accent-soft);
+}
+
+.community-session-type,
+.community-session-participant {
+  color: var(--theme-muted);
+  background-color: var(--theme-control);
+  border-radius: 5px;
+  font-size: 10px;
+  padding: 3px 7px;
+}
+
+.community-session-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--theme-status-success);
+}
+
+.community-session-status > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.community-session-status.is-closed {
+  color: var(--theme-muted);
+}
+
+.community-session-action {
+  color: var(--theme-accent-contrast);
+  background: var(--theme-accent);
+}
+
+.community-session-action:not(:disabled):hover {
+  background: var(--theme-accent-hover);
+}
+
+.community-session-workspace {
+  min-height: 0;
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+}
+
+.community-session-workspace-header {
+  border-color: var(--theme-border);
+  background: var(--theme-surface);
+}
+
+.session-close-action {
+  color: var(--theme-status-danger);
+  border: 1px solid color-mix(in srgb, var(--theme-status-danger) 36%, transparent);
+  background: color-mix(in srgb, var(--theme-status-danger) 10%, transparent);
+}
+
+.session-close-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--theme-status-danger) 18%, transparent);
+}
+
+.community-session-participant {
+  border: 1px solid var(--theme-border);
+}
+
+.community-filter-bar {
+  position: relative;
+  z-index: 20;
+}
+
 .theme-sidebar {
   color: var(--theme-text);
   background: var(--theme-surface);

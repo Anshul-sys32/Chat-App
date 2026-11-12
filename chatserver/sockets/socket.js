@@ -11,6 +11,7 @@ const { loadCommunityEngagement, validateCommunityPost } = require("../services/
 const { executeBotCommand } = require("../services/communityBots");
 const { recordReputationEvent } = require("../services/communityReputation");
 const { validateWhiteboardStroke } = require("../services/whiteboardStrokePolicy");
+const { authorizeSession, sessionRoom } = require("../services/communityCollabSessions");
 const Y = require("yjs");
 const { MAX_CODE_SYNC_BYTES, validateAwarenessUpdate, validateCodeUpdate } = require("../services/codeRoomPolicy");
 const { existsSync } = require("node:fs");
@@ -360,6 +361,153 @@ const initSocket = (httpServer) => {
       } catch (error) {
         console.error("Group message DB error:", error.message);
         socket.emit("message-error", { message: "Group message could not be saved." });
+      }
+    });
+
+    socket.on("collab-session-join", async (payload = {}) => {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      try {
+        let authorized = await authorizeSession(sessionId, { id: socket.userId, role: socket.userRole }, { write: true });
+        let readOnly = false;
+        if (authorized.status === 410) {
+          authorized = await authorizeSession(sessionId, { id: socket.userId, role: socket.userRole });
+          readOnly = authorized.session?.status === "closed";
+          if (!authorized.status && !readOnly) {
+            authorized = { status: 410, message: "This session is closed and read-only." };
+          }
+        }
+        if (authorized.status) {
+          return socket.emit("collab-session-error", { sessionId, message: authorized.message || "You do not have permission to join this session." });
+        }
+        const room = sessionRoom(sessionId);
+        const alreadyJoined = socket.rooms.has(room);
+        socket.join(room);
+        if (authorized.session.sessionType === "code_room") {
+          socket.to(room).emit("collab-code-awareness-request", { sessionId });
+          const [rows] = await pool.execute(
+            "SELECT document_state AS documentState FROM community_collab_code_states WHERE session_id = ? LIMIT 1",
+            [sessionId]
+          );
+          const update = rows[0]?.documentState || new Uint8Array();
+          if (update.byteLength > MAX_CODE_SYNC_BYTES) {
+            socket.emit("collab-session-error", { sessionId, message: "This Code Room has exceeded its sync limit." });
+            socket.leave(room);
+            return;
+          }
+          socket.emit("collab-code-sync", { sessionId, update });
+        }
+        const roomSockets = await io.in(room).fetchSockets();
+        const participants = [...new Map(roomSockets.map((participant) => [String(participant.userId), {
+          userId: Number(participant.userId),
+          userName: participant.userName || "Community member",
+        }])).values()];
+        socket.emit("collab-session-participants", { sessionId, participants });
+        if (!alreadyJoined) {
+          socket.to(room).emit("collab-session-participant-joined", {
+            sessionId,
+            userId: Number(socket.userId),
+            userName: socket.userName || "Community member",
+          });
+        }
+        socket.emit("collab-session-joined", { sessionId, sessionType: authorized.session.sessionType, status: authorized.session.status, readOnly });
+      } catch (error) {
+        console.error("Collaborative session join error:", error.message);
+        socket.emit("collab-session-error", { sessionId, message: "Could not join this session." });
+      }
+    });
+
+    socket.on("collab-session-leave", (payload = {}) => {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      if (!/^[a-f\d]{8}-([a-f\d]{4}-){3}[a-f\d]{12}$/i.test(sessionId)) return;
+      const room = sessionRoom(sessionId);
+      if (!socket.rooms.has(room)) return;
+      socket.leave(room);
+      socket.to(room).emit("collab-session-participant-left", { sessionId, userId: Number(socket.userId) });
+    });
+
+    socket.on("collab-code-update", async (payload = {}) => {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      const update = validateCodeUpdate(payload.update);
+      const room = sessionRoom(sessionId);
+      if (!update || !socket.rooms.has(room)) return;
+      try {
+        const authorized = await authorizeSession(sessionId, { id: socket.userId, role: socket.userRole }, { write: true });
+        if (authorized.status || authorized.session.sessionType !== "code_room") {
+          socket.leave(room);
+          return socket.emit("collab-session-error", { sessionId, message: authorized.message || "This session is not a Code Room." });
+        }
+        const connection = await pool.getConnection();
+        try {
+          await connection.beginTransaction();
+          await connection.execute(
+            "INSERT IGNORE INTO community_collab_code_states (session_id, updated_by, document_state) VALUES (?, ?, ?)",
+            [sessionId, Number(socket.userId), update]
+          );
+          const [rows] = await connection.execute(
+            "SELECT document_state AS documentState FROM community_collab_code_states WHERE session_id = ? FOR UPDATE",
+            [sessionId]
+          );
+          const merged = Y.mergeUpdates([rows[0].documentState, update]);
+          if (merged.byteLength > MAX_CODE_SYNC_BYTES) {
+            await connection.rollback();
+            return socket.emit("collab-session-error", { sessionId, message: "This Code Room has exceeded its sync limit." });
+          }
+          await connection.execute(
+            "UPDATE community_collab_code_states SET updated_by = ?, document_state = ? WHERE session_id = ?",
+            [Number(socket.userId), merged, sessionId]
+          );
+          await connection.commit();
+        } catch (error) {
+          await connection.rollback().catch(() => {});
+          throw error;
+        } finally {
+          connection.release();
+        }
+        socket.to(room).emit("collab-code-update", { sessionId, update });
+      } catch (error) {
+        console.error("Collaborative Code Room update error:", error.message);
+        socket.emit("collab-session-error", { sessionId, message: "Could not save this Code Room update." });
+      }
+    });
+
+    socket.on("collab-code-awareness", async (payload = {}) => {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      const update = validateAwarenessUpdate(payload.update);
+      const room = sessionRoom(sessionId);
+      if (!update || !socket.rooms.has(room)) return;
+      try {
+        const authorized = await authorizeSession(sessionId, { id: socket.userId, role: socket.userRole }, { write: true });
+        if (authorized.status || authorized.session.sessionType !== "code_room") {
+          socket.leave(room);
+          return;
+        }
+        socket.to(room).emit("collab-code-awareness", { sessionId, update });
+      } catch (error) {
+        console.error("Collaborative Code Room awareness error:", error.message);
+      }
+    });
+
+    socket.on("collab-whiteboard-stroke", async (payload = {}) => {
+      const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+      const room = sessionRoom(sessionId);
+      if (!validateWhiteboardStroke(payload) || !socket.rooms.has(room)) return;
+      try {
+        const authorized = await authorizeSession(sessionId, { id: socket.userId, role: socket.userRole }, { write: true });
+        if (authorized.status || authorized.session.sessionType !== "whiteboard") {
+          socket.leave(room);
+          return;
+        }
+        socket.to(room).emit("collab-whiteboard-stroke", {
+          sessionId,
+          userId: Number(socket.userId),
+          socketId: socket.id,
+          points: payload.points,
+          color: payload.color,
+          width: payload.width,
+          finished: payload.finished === true,
+        });
+      } catch (error) {
+        console.error("Collaborative Whiteboard stroke relay error:", error.message);
       }
     });
 
@@ -837,6 +985,16 @@ const initSocket = (httpServer) => {
         }
       } else {
         commitSfuUpgrade(String(roomId), room);
+      }
+    });
+
+    socket.on("disconnecting", () => {
+      for (const room of socket.rooms) {
+        if (!room.startsWith("collab-session:")) continue;
+        socket.to(room).emit("collab-session-participant-left", {
+          sessionId: room.slice("collab-session:".length),
+          userId: Number(socket.userId),
+        });
       }
     });
 

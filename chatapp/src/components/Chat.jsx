@@ -1,10 +1,10 @@
-import React, { Suspense, lazy, useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
 import Sidebar from './Sidebar';
 import Socket from '../Socket';
 import { connectAndRegisterUser } from "../Socket";
-import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaExternalLinkAlt, FaHashtag, FaImages, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaPlug, FaReply, FaRobot, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaCalendarAlt, FaCode, FaCopy, FaEllipsisV, FaExternalLinkAlt, FaFilter, FaHashtag, FaImages, FaMicrophone, FaPaperclip, FaPencilAlt, FaPhone, FaPlug, FaReply, FaRobot, FaSearch, FaSmile, FaStar, FaTasks, FaTimes, FaTrophy, FaUsers, FaVideo } from 'react-icons/fa';
 import VideoCall from './VideoCall';
 import AdminPanel from './AdminPanel';
 import NotificationCenter from './NotificationCenter';
@@ -12,7 +12,8 @@ import VoiceRecorder from './VoiceRecorder';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
 import Avatar from './Avatar';
 import CommunityPostCard from './CommunityPostCard';
-import CommunityWhiteboard from './CommunityWhiteboard';
+import CommunitySessionCard from './CommunitySessionCard';
+import CommunitySessionWorkspace from './CommunitySessionWorkspace';
 import MarkdownMessage from './MarkdownMessage';
 import { loadStickerCatalog, releaseStickerSources } from '../stickerCache';
 import FloatingPanel from './FloatingPanel';
@@ -21,8 +22,6 @@ import { normalizeNotificationTarget } from '../notificationDeliveryPolicy';
 import MediaGallery from './MediaGallery';
 import CommunityBotsPanel from './CommunityBotsPanel';
 import CommunityIntegrationsPanel from './CommunityIntegrationsPanel';
-
-const CommunityCodeRoom = lazy(() => import('./CommunityCodeRoom'));
 
 const API_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_SERVER_URL || "";
 const MAX_FILES_PER_MESSAGE = 5;
@@ -111,6 +110,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [communityCategoryFilter, setCommunityCategoryFilter] = useState('all');
   const [communityTagFilter, setCommunityTagFilter] = useState('');
   const [communityPostSort, setCommunityPostSort] = useState('newest');
+  const [communityFiltersOpen, setCommunityFiltersOpen] = useState(false);
   const [pollDraft, setPollDraft] = useState({ question: '', options: ['', ''], multipleChoice: false });
   const [eventDraft, setEventDraft] = useState({ title: '', description: '', location: '', startsAt: '' });
   const [announcementDraft, setAnnouncementDraft] = useState({ content: '', scheduledAt: '', recurrence: 'once' });
@@ -148,8 +148,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState('');
   const [taskDraft, setTaskDraft] = useState({ title: '', description: '', assignedTo: '', dueAt: '', linkedMessageId: '' });
-  const [whiteboardOpen, setWhiteboardOpen] = useState(false);
-  const [codeRoomOpen, setCodeRoomOpen] = useState(false);
+  const [communitySessions, setCommunitySessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState('');
+  const [createSessionOpen, setCreateSessionOpen] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
+  const [sessionDraft, setSessionDraft] = useState({ sessionType: 'code_room', name: '', summary: '' });
+  const [activeCollabSession, setActiveCollabSession] = useState(null);
   const [openMessageMenu, setOpenMessageMenu] = useState(null);
   const [openReactionPicker, setOpenReactionPicker] = useState(null);
   const messageMenuRef = React.useRef(null);
@@ -319,11 +324,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     setCommunityCategoryFilter('all');
     setCommunityTagFilter('');
     setCommunityPostSort('newest');
+    setCommunityFiltersOpen(false);
     setOpenMessageMenu(null);
     setSelectedMessageIds([]);
     setIsSelectionMode(false);
     setOpenBulkMenu(false);
-  }, [selectedChat?._id]);
+  }, [selectedChat?._id, selectedChat?.channelId]);
 
   useEffect(() => {
     if (!pendingForward || !selectedChat?._id || String(selectedChat._id) === String(pendingForward.sourceChatId)) return;
@@ -383,7 +389,20 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   useEffect(() => {
     const footer = footerRef.current;
     if (!footer) return undefined;
-    const measureFooter = () => setFooterHeight(footer.getBoundingClientRect().height);
+    const measureFooter = () => {
+      const nextHeight = footer.getBoundingClientRect().height;
+      const container = messagesContainerRef.current;
+      const wasAtBottom = container
+        && container.scrollHeight - container.clientHeight - container.scrollTop <= 48;
+      setFooterHeight((currentHeight) => {
+        if (currentHeight === nextHeight) return currentHeight;
+        if (wasAtBottom) requestAnimationFrame(() => {
+          const currentContainer = messagesContainerRef.current;
+          if (currentContainer) currentContainer.scrollTop = currentContainer.scrollHeight;
+        });
+        return nextHeight;
+      });
+    };
     measureFooter();
     const observer = new ResizeObserver(measureFooter);
     observer.observe(footer);
@@ -448,6 +467,19 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     const handleCommunityTaskDeleted = ({ groupId, taskId }) => {
       if (selectedChatRef.current?.type !== 'group' || String(groupId) !== String(selectedChatRef.current?._id)) return;
       setCommunityTasks((previous) => previous.filter((task) => String(task.id) !== String(taskId)));
+    };
+    const handleCommunitySessionCreated = (session) => {
+      if (selectedChatRef.current?.type !== 'group'
+        || String(session.groupId) !== String(selectedChatRef.current?._id)
+        || String(session.channelId) !== String(selectedChatRef.current?.channelId)) return;
+      setCommunitySessions((previous) => previous.some((item) => item.id === session.id) ? previous : [...previous, session]);
+    };
+    const handleCommunitySessionUpdated = (session) => {
+      if (selectedChatRef.current?.type !== 'group'
+        || String(session.groupId) !== String(selectedChatRef.current?._id)
+        || String(session.channelId) !== String(selectedChatRef.current?.channelId)) return;
+      setCommunitySessions((previous) => previous.map((item) => item.id === session.id ? session : item));
+      setActiveCollabSession((current) => current?.id === session.id ? session : current);
     };
     const handleGroupMessage = (data) => {
       if (selectedChatRef.current?.type !== 'group') return;
@@ -544,6 +576,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
     Socket.on('scheduled-message-updated', handleScheduledMessageUpdated);
     Socket.on('community-task-updated', handleCommunityTaskUpdated);
     Socket.on('community-task-deleted', handleCommunityTaskDeleted);
+    Socket.on('community-session-created', handleCommunitySessionCreated);
+    Socket.on('community-session-updated', handleCommunitySessionUpdated);
+    Socket.on('community-session-closed', handleCommunitySessionUpdated);
     Socket.on('group-message', handleGroupMessage);
     Socket.on('group-message-engagement', handleGroupEngagement);
     Socket.on('direct-message-engagement', handleDirectMessageEngagement);
@@ -563,6 +598,9 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       Socket.off('scheduled-message-updated', handleScheduledMessageUpdated);
       Socket.off('community-task-updated', handleCommunityTaskUpdated);
       Socket.off('community-task-deleted', handleCommunityTaskDeleted);
+      Socket.off('community-session-created', handleCommunitySessionCreated);
+      Socket.off('community-session-updated', handleCommunitySessionUpdated);
+      Socket.off('community-session-closed', handleCommunitySessionUpdated);
       Socket.off('group-message', handleGroupMessage);
       Socket.off('group-message-engagement', handleGroupEngagement);
       Socket.off('direct-message-engagement', handleDirectMessageEngagement);
@@ -586,6 +624,57 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
   const selectedChatRef = React.useRef(selectedChat);
   selectedChatRef.current = selectedChat;
   const conversationMuteRequestRef = React.useRef(0);
+
+  const updateCommunitySessionState = useCallback((session) => {
+    setCommunitySessions((previous) => previous.some((item) => item.id === session.id)
+      ? previous.map((item) => item.id === session.id ? session : item)
+      : [...previous, session]);
+    setActiveCollabSession((current) => current?.id === session.id ? session : current);
+  }, []);
+
+  useEffect(() => {
+    setCommunitySessions([]);
+    setSessionsError('');
+    setActiveCollabSession(null);
+    if (selectedChat?.type !== 'group' || selectedChat.groupType !== 'community' || !selectedChat.channelId) {
+      setSessionsLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setSessionsLoading(true);
+    axios.get(`${API_URL}/api/groups/${selectedChat._id}/channels/${selectedChat.channelId}/collab-sessions`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      withCredentials: true,
+    }).then(({ data }) => {
+      if (active) setCommunitySessions(data.sessions || []);
+    }).catch((error) => {
+      if (active) setSessionsError(error.response?.data?.message || 'Could not load collaborative sessions.');
+    }).finally(() => {
+      if (active) setSessionsLoading(false);
+    });
+    return () => { active = false; };
+  }, [selectedChat?._id, selectedChat?.channelId, selectedChat?.groupType, selectedChat?.type]);
+
+  const submitCreateCommunitySession = async (event) => {
+    event.preventDefault();
+    if (!selectedChat?._id || !selectedChat?.channelId || creatingSession) return;
+    setCreatingSession(true);
+    setSessionsError('');
+    try {
+      const { data } = await axios.post(
+        `${API_URL}/api/groups/${selectedChat._id}/channels/${selectedChat.channelId}/collab-sessions`,
+        sessionDraft,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, withCredentials: true },
+      );
+      updateCommunitySessionState(data.session);
+      setCreateSessionOpen(false);
+      setSessionDraft({ sessionType: 'code_room', name: '', summary: '' });
+    } catch (error) {
+      setSessionsError(error.response?.data?.message || 'Could not create this session.');
+    } finally {
+      setCreatingSession(false);
+    }
+  };
 
   useEffect(() => {
     setScheduledMessages([]);
@@ -1651,6 +1740,10 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
       return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
     })
     : messages;
+  const timelineItems = [
+    ...visibleMessages.map((message) => ({ kind: 'message', timestamp: message.timestamp, item: message })),
+    ...communitySessions.map((session) => ({ kind: 'session', timestamp: session.createdAt, item: session })),
+  ].sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
   const savedMessageKeys = new Set(savedMessages.map((message) => `${message.messageType}:${message._id}`));
 
   return (
@@ -1769,12 +1862,13 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                 {selectedChat && <button type="button" onClick={() => { setOpenCommunityTools(false); setConversationGalleryOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaImages /> Conversation media</button>}
                 {isCommunityChat && <>
                   <div className="theme-border my-1 border-t" role="separator" />
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityFiltersOpen((open) => !open); }} aria-pressed={communityFiltersOpen} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaFilter /> {communityFiltersOpen ? 'Hide message filters' : 'Filter messages'}</button>
                   <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityBotsOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaRobot /> Bots and commands</button>
                   <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityIntegrationsOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaPlug /> Integrations</button>
                   <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityReputation(); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaTrophy /> Contributions</button>
                   <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityTasks(); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaTasks /> Task board</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); setWhiteboardOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaPencilAlt /> Whiteboard</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCodeRoomOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaCode /> Code room</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setSessionDraft({ sessionType: 'whiteboard', name: '', summary: '' }); setSessionsError(''); setCreateSessionOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaPencilAlt /> Start whiteboard session</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setSessionDraft({ sessionType: 'code_room', name: '', summary: '' }); setSessionsError(''); setCreateSessionOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaCode /> Start Code Room</button>
                 </>}
               </FloatingPanel>
             </div>
@@ -1802,6 +1896,37 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             )}
           </div>
         </header>
+
+        {isCommunityChat && communityFiltersOpen && !activeCollabSession && (
+          <section className="community-filter-bar theme-border theme-surface-raised shrink-0 border-b px-3 py-2 sm:px-5" aria-label="Forum question filters">
+            <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-2">
+              <span className="theme-muted mr-1 flex items-center gap-1.5 text-[11px] font-semibold"><FaFilter aria-hidden="true" /> Filters</span>
+              <label className="sr-only" htmlFor="community-question-status">Question status</label>
+              <select id="community-question-status" value={communityPostFilter} onChange={(event) => setCommunityPostFilter(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
+                <option value="all">All posts</option>
+                <option value="questions">Questions</option>
+                <option value="unsolved">Unsolved</option>
+                <option value="solved">Solved</option>
+              </select>
+              <label className="sr-only" htmlFor="community-question-category">Category</label>
+              <select id="community-question-category" value={communityCategoryFilter} onChange={(event) => setCommunityCategoryFilter(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
+                <option value="all">All categories</option>
+                {COMMUNITY_QUESTION_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <label className="sr-only" htmlFor="community-question-sort">Sort questions</label>
+              <select id="community-question-sort" value={communityPostSort} onChange={(event) => setCommunityPostSort(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
+                <option value="newest">Newest</option>
+                <option value="discussion">Most discussed</option>
+                <option value="solved">Solved first</option>
+              </select>
+              <label className="relative min-w-[8rem] flex-1 sm:max-w-52">
+                <FaHashtag className="theme-muted pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px]" />
+                <input value={communityTagFilter} onChange={(event) => setCommunityTagFilter(event.target.value)} aria-label="Filter by tag" placeholder="Filter by tag" className="theme-control w-full rounded py-1.5 pl-7 pr-2 text-xs" />
+              </label>
+              <button type="button" onClick={() => setCommunityFiltersOpen(false)} aria-label="Close message filters" title="Close filters" className="theme-icon-button ml-auto grid h-8 w-8 shrink-0 place-items-center rounded"><FaTimes /></button>
+            </div>
+          </section>
+        )}
 
         {savedMessagesOpen && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) setSavedMessagesOpen(false); }}>
@@ -2032,13 +2157,28 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
           </div>
         )}
 
-        {whiteboardOpen && selectedChat?.type === 'group' && (
-          <CommunityWhiteboard groupId={selectedChat._id} onClose={() => setWhiteboardOpen(false)} />
-        )}
-        {codeRoomOpen && selectedChat?.type === 'group' && (
-          <Suspense fallback={<div role="status" className="fixed inset-0 z-[99] grid place-items-center bg-black/70 text-sm text-white">Loading code room…</div>}>
-            <CommunityCodeRoom groupId={selectedChat._id} groupName={selectedChat.name} userName={user?.username} onClose={() => setCodeRoomOpen(false)} />
-          </Suspense>
+        {createSessionOpen && isCommunityChat && (
+          <div className="theme-overlay fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget && !creatingSession) setCreateSessionOpen(false); }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="create-community-session-title" className="theme-panel w-full max-w-lg rounded-lg border p-4 shadow-2xl sm:p-5">
+              <header className="theme-border mb-4 flex items-start justify-between gap-3 border-b pb-3">
+                <div><h2 id="create-community-session-title" className="text-sm font-semibold">Start a {sessionDraft.sessionType === 'code_room' ? 'Code Room' : 'Whiteboard'}</h2><p className="theme-muted mt-1 text-xs">A session card will appear in this channel.</p></div>
+                <button type="button" onClick={() => setCreateSessionOpen(false)} disabled={creatingSession} aria-label="Close session form" className="theme-icon-button grid h-8 w-8 shrink-0 place-items-center rounded"><FaTimes /></button>
+              </header>
+              <form onSubmit={submitCreateCommunitySession} className="grid gap-3">
+                <label className="grid gap-1.5 text-xs font-medium">Session name
+                  <input value={sessionDraft.name} onChange={(event) => setSessionDraft((current) => ({ ...current, name: event.target.value }))} required maxLength={120} placeholder="e.g. Python API design" className="theme-control min-w-0 rounded px-3 py-2 text-sm" />
+                </label>
+                <label className="grid gap-1.5 text-xs font-medium">Short summary
+                  <textarea value={sessionDraft.summary} onChange={(event) => setSessionDraft((current) => ({ ...current, summary: event.target.value }))} required maxLength={500} rows={3} placeholder="What will the group work on?" className="theme-control min-w-0 resize-y rounded px-3 py-2 text-sm" />
+                </label>
+                {sessionsError && <p role="alert" className="text-xs text-rose-300">{sessionsError}</p>}
+                <div className="flex justify-end gap-2 pt-1">
+                  <button type="button" onClick={() => setCreateSessionOpen(false)} disabled={creatingSession} className="theme-muted theme-border rounded border px-3 py-2 text-xs hover:bg-accent-soft">Cancel</button>
+                  <button type="submit" disabled={creatingSession || !canPostToCommunityChannel} className="rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">{creatingSession ? 'Creating…' : `Create ${sessionDraft.sessionType === 'code_room' ? 'Code Room' : 'Whiteboard'}`}</button>
+                </div>
+              </form>
+            </section>
+          </div>
         )}
 
         <div id="chat-area-overlay" className="pointer-events-none absolute inset-0 z-[65]" />
@@ -2048,10 +2188,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
         <main
           ref={messagesContainerRef}
           onScroll={handleMessagesScroll}
-          style={{ paddingBottom: `${footerHeight + 16}px` }}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-6 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
+          className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain py-4 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-6 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
-          <div className="chat-content-panel mx-auto flex min-h-full w-full max-w-5xl flex-col space-y-3 px-1 py-2 sm:px-2 sm:py-4">
+          <div
+            style={{ paddingBottom: `${activeCollabSession ? 16 : footerHeight + 16}px` }}
+            className={`chat-content-panel mx-auto flex min-h-full w-full max-w-5xl shrink-0 flex-col space-y-3 px-1 py-2 sm:px-2 sm:py-4 ${activeCollabSession ? 'hidden' : ''}`}
+          >
             {!selectedChat && <div className="flex h-full min-h-[55vh] flex-col items-center justify-center text-center">
               <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-accent-border bg-accent-soft text-accent-text"><FaUsers size={25} /></div>
               <h2 className="text-xl font-semibold">Your conversations</h2>
@@ -2092,36 +2234,15 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             {selectedChat && loadingOlder && (
               <p role="status" className="theme-muted py-2 text-center text-xs">Loading older messages…</p>
             )}
-            {isCommunityChat && (
-              <section className="theme-border theme-raised-surface mb-3 rounded-lg border p-2.5" aria-label="Forum question filters">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="sr-only" htmlFor="community-question-status">Question status</label>
-                  <select id="community-question-status" value={communityPostFilter} onChange={(event) => setCommunityPostFilter(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
-                    <option value="all">All posts</option>
-                    <option value="questions">Questions</option>
-                    <option value="unsolved">Unsolved</option>
-                    <option value="solved">Solved</option>
-                  </select>
-                  <label className="sr-only" htmlFor="community-question-category">Category</label>
-                  <select id="community-question-category" value={communityCategoryFilter} onChange={(event) => setCommunityCategoryFilter(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
-                    <option value="all">All categories</option>
-                    {COMMUNITY_QUESTION_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
-                  </select>
-                  <label className="sr-only" htmlFor="community-question-sort">Sort questions</label>
-                  <select id="community-question-sort" value={communityPostSort} onChange={(event) => setCommunityPostSort(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
-                    <option value="newest">Newest</option>
-                    <option value="discussion">Most discussed</option>
-                    <option value="solved">Solved first</option>
-                  </select>
-                  <label className="relative min-w-[8rem] flex-1 sm:max-w-52">
-                    <FaHashtag className="theme-muted pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px]" />
-                    <input value={communityTagFilter} onChange={(event) => setCommunityTagFilter(event.target.value)} aria-label="Filter by tag" placeholder="Filter by tag" className="theme-control w-full rounded py-1.5 pl-7 pr-2 text-xs" />
-                  </label>
-                </div>
-              </section>
-            )}
-            {selectedChat && visibleMessages.map((m, messageIndex) => {
-              const previousMessage = visibleMessages[messageIndex - 1];
+            {sessionsLoading && <p role="status" className="theme-muted py-2 text-center text-xs">Loading collaborative sessions…</p>}
+            {sessionsError && !createSessionOpen && <p role="alert" className="text-xs text-rose-300">{sessionsError}</p>}
+            {selectedChat && timelineItems.map((timelineItem, messageIndex) => {
+              if (timelineItem.kind === 'session') {
+                return <CommunitySessionCard key={`session:${timelineItem.item.id}`} session={timelineItem.item} currentUserId={user?._id} onJoin={setActiveCollabSession} />;
+              }
+              const m = timelineItem.item;
+              const previousTimelineItem = timelineItems[messageIndex - 1];
+              const previousMessage = previousTimelineItem?.kind === 'message' ? previousTimelineItem.item : null;
               const isGrouped = previousMessage
                 && String(previousMessage.sender) === String(m.sender)
                 && String(previousMessage.botId || '') === String(m.botId || '')
@@ -2436,13 +2557,22 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               );
             })}
           </div>
+          {activeCollabSession && (
+            <CommunitySessionWorkspace
+              session={{ ...activeCollabSession, channelName: selectedChat?.channelName }}
+              groupName={selectedChat?.name || selectedChat?.username || 'Community'}
+              user={user}
+              onBack={() => setActiveCollabSession(null)}
+              onSessionUpdated={updateCommunitySessionState}
+            />
+          )}
         </main>
 
         {/* Footer */}
         <footer
           ref={footerRef}
           style={{ '--desktop-sidebar-offset': isDesktopPanelOpen ? '22rem' : '4rem' }}
-          hidden={isCommunityCallChannel}
+          hidden={isCommunityCallChannel || Boolean(activeCollabSession)}
           className="theme-footer fixed inset-x-0 bottom-0 z-30 box-border w-full min-w-0 rounded-t-2xl border pt-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl sm:left-[var(--desktop-sidebar-offset)] sm:right-0 sm:w-[calc(100%-var(--desktop-sidebar-offset))] sm:py-4 sm:pl-[max(2rem,env(safe-area-inset-left))] sm:pr-[max(2rem,env(safe-area-inset-right))]"
         >
           {selectedChat && !socketConnected && (

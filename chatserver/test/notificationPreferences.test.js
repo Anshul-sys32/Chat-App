@@ -33,6 +33,7 @@ const codeRoomSnapshotMigration = require("../migrations/202611010020_code_room_
 const communityCallChannelsMigration = require("../migrations/202611010021_community_call_channels");
 const communityBotsMigration = require("../migrations/202611010022_community_bots");
 const communityIntegrationsMigration = require("../migrations/202611010023_community_integrations");
+const communityCollabSessionsMigration = require("../migrations/202611010024_community_collab_sessions");
 const {
   canInviteToCallRoom,
   canNegotiateCallRoomOffer,
@@ -187,6 +188,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010021_community_call_channels",
     "202611010022_community_bots",
     "202611010023_community_integrations",
+    "202611010024_community_collab_sessions",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -255,6 +257,15 @@ test("saved-message and scheduled-announcement routes register during router ini
     "post:/groups/:groupId/whiteboard",
     "patch:/groups/:groupId/whiteboard/:itemId",
     "delete:/groups/:groupId/whiteboard/:itemId",
+    "get:/groups/:groupId/channels/:channelId/collab-sessions",
+    "post:/groups/:groupId/channels/:channelId/collab-sessions",
+    "get:/collab-sessions/:sessionId",
+    "patch:/collab-sessions/:sessionId",
+    "post:/collab-sessions/:sessionId/close",
+    "get:/collab-sessions/:sessionId/whiteboard",
+    "post:/collab-sessions/:sessionId/whiteboard",
+    "patch:/collab-sessions/:sessionId/whiteboard/:itemId",
+    "delete:/collab-sessions/:sessionId/whiteboard/:itemId",
     "get:/groups/:groupId/reputation",
   ]) {
     assert.ok(registered.includes(route), `${route} should be registered`);
