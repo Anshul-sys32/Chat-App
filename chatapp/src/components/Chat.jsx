@@ -1750,51 +1750,34 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
             >
               <FaSearch />
             </button>
-            <button
-              type="button"
-              onClick={() => { setSavedMessagesOpen(true); loadSavedMessages(); }}
-              title="Saved messages"
-              aria-label="Saved messages"
-              className="chat-action theme-text grid h-10 w-10 place-items-center rounded-xl border transition hover:text-accent-text"
-            >
-              <FaStar />
-            </button>
-            {selectedChat && (
+            <NotificationCenter onNavigate={navigateToNotificationTarget} />
+            <div className="relative">
               <button
                 type="button"
-                onClick={() => setConversationGalleryOpen(true)}
-                title="Conversation media"
-                aria-label="Conversation media"
+                ref={communityToolsPanel.triggerRef}
+                onClick={() => setOpenCommunityTools((current) => !current)}
+                aria-expanded={openCommunityTools}
+                aria-controls="conversation-more-panel"
+                title="More conversation actions"
+                aria-label="More conversation actions"
                 className="chat-action theme-text grid h-10 w-10 place-items-center rounded-lg border transition hover:text-accent-text"
               >
-                <FaImages />
+                <FaEllipsisV />
               </button>
-            )}
-            {isCommunityChat && (
-              <div className="relative">
-                <button
-                  type="button"
-                  ref={communityToolsPanel.triggerRef}
-                  onClick={() => setOpenCommunityTools((current) => !current)}
-                  aria-expanded={openCommunityTools}
-                  aria-controls="community-tools-panel"
-                  title="Community tools"
-                  aria-label="Community tools"
-                  className="chat-action theme-text grid h-10 w-10 place-items-center rounded-lg border transition hover:text-accent-text"
-                >
-                  <FaEllipsisV />
-                </button>
-                <FloatingPanel id="community-tools-panel" role="group" ariaLabel="Community tools" open={openCommunityTools} panelRef={communityToolsPanel.panelRef} style={communityToolsPanel.style} className="workspace-popover theme-popover z-[80] min-w-52 rounded-lg border p-1 shadow-xl">
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityBotsOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaRobot /> Bots and commands</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityIntegrationsOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaPlug /> Integrations</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityReputation(); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaTrophy /> Contributions</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityTasks(); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaTasks /> Task board</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); setWhiteboardOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaPencilAlt /> Whiteboard</button>
-                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCodeRoomOpen(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs hover:bg-accent-soft"><FaCode /> Code room</button>
-                </FloatingPanel>
-              </div>
-            )}
-            <NotificationCenter onNavigate={navigateToNotificationTarget} />
+              <FloatingPanel id="conversation-more-panel" role="group" ariaLabel="More conversation actions" open={openCommunityTools} panelRef={communityToolsPanel.panelRef} style={communityToolsPanel.style} className="workspace-popover theme-popover z-[80] min-w-52 rounded-lg border p-1 shadow-xl">
+                <button type="button" onClick={() => { setOpenCommunityTools(false); setSavedMessagesOpen(true); loadSavedMessages(); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaStar /> Saved messages</button>
+                {selectedChat && <button type="button" onClick={() => { setOpenCommunityTools(false); setConversationGalleryOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaImages /> Conversation media</button>}
+                {isCommunityChat && <>
+                  <div className="theme-border my-1 border-t" role="separator" />
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityBotsOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaRobot /> Bots and commands</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCommunityIntegrationsOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaPlug /> Integrations</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityReputation(); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaTrophy /> Contributions</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); loadCommunityTasks(); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaTasks /> Task board</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setWhiteboardOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaPencilAlt /> Whiteboard</button>
+                  <button type="button" onClick={() => { setOpenCommunityTools(false); setCodeRoomOpen(true); }} className="workspace-menu-item flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs"><FaCode /> Code room</button>
+                </>}
+              </FloatingPanel>
+            </div>
             {selectedChat && <>
               <button
                 onClick={() => { setCallType(isCommunityCallChannel ? selectedChat.channelType : 'audio'); setIsVideoOpen(true); }}
@@ -2110,37 +2093,43 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               <p role="status" className="theme-muted py-2 text-center text-xs">Loading older messages…</p>
             )}
             {isCommunityChat && (
-              <section className="mb-3 rounded-lg border border-white/10 bg-black/10 p-2.5" aria-label="Forum question filters">
+              <section className="theme-border theme-raised-surface mb-3 rounded-lg border p-2.5" aria-label="Forum question filters">
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="sr-only" htmlFor="community-question-status">Question status</label>
-                  <select id="community-question-status" value={communityPostFilter} onChange={(event) => setCommunityPostFilter(event.target.value)} className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white">
+                  <select id="community-question-status" value={communityPostFilter} onChange={(event) => setCommunityPostFilter(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
                     <option value="all">All posts</option>
                     <option value="questions">Questions</option>
                     <option value="unsolved">Unsolved</option>
                     <option value="solved">Solved</option>
                   </select>
                   <label className="sr-only" htmlFor="community-question-category">Category</label>
-                  <select id="community-question-category" value={communityCategoryFilter} onChange={(event) => setCommunityCategoryFilter(event.target.value)} className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white">
+                  <select id="community-question-category" value={communityCategoryFilter} onChange={(event) => setCommunityCategoryFilter(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
                     <option value="all">All categories</option>
                     {COMMUNITY_QUESTION_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}
                   </select>
                   <label className="sr-only" htmlFor="community-question-sort">Sort questions</label>
-                  <select id="community-question-sort" value={communityPostSort} onChange={(event) => setCommunityPostSort(event.target.value)} className="rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-xs text-white">
+                  <select id="community-question-sort" value={communityPostSort} onChange={(event) => setCommunityPostSort(event.target.value)} className="theme-control rounded px-2 py-1.5 text-xs">
                     <option value="newest">Newest</option>
                     <option value="discussion">Most discussed</option>
                     <option value="solved">Solved first</option>
                   </select>
                   <label className="relative min-w-[8rem] flex-1 sm:max-w-52">
-                    <FaHashtag className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-white/40" />
-                    <input value={communityTagFilter} onChange={(event) => setCommunityTagFilter(event.target.value)} aria-label="Filter by tag" placeholder="Filter by tag" className="w-full rounded border border-white/10 bg-slate-900 py-1.5 pl-7 pr-2 text-xs text-white placeholder:text-white/40" />
+                    <FaHashtag className="theme-muted pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px]" />
+                    <input value={communityTagFilter} onChange={(event) => setCommunityTagFilter(event.target.value)} aria-label="Filter by tag" placeholder="Filter by tag" className="theme-control w-full rounded py-1.5 pl-7 pr-2 text-xs" />
                   </label>
                 </div>
               </section>
             )}
-            {selectedChat && visibleMessages.map((m) => (
+            {selectedChat && visibleMessages.map((m, messageIndex) => {
+              const previousMessage = visibleMessages[messageIndex - 1];
+              const isGrouped = previousMessage
+                && String(previousMessage.sender) === String(m.sender)
+                && String(previousMessage.botId || '') === String(m.botId || '')
+                && Math.abs(new Date(previousMessage.timestamp).getTime() - new Date(m.timestamp).getTime()) <= 5 * 60 * 1000;
+              return (
               <div
                 key={m._id}
-                className={`message-row relative flex w-full min-w-0 touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'} ${highlightedMessageId === String(m._id) ? 'message-reply-highlight' : ''}`}
+                className={`message-row ${isGrouped ? 'message-row-grouped' : 'message-row-start'} relative flex w-full min-w-0 touch-pan-y ${String(m.sender) === String(user?._id) ? 'justify-end' : 'justify-start'} ${highlightedMessageId === String(m._id) ? 'message-reply-highlight' : ''}`}
                 style={{
                   transform: `translate3d(${replySwipe.messageId === String(m._id) ? replySwipe.offset : 0}px, 0, 0)`,
                   transition: replySwipe.messageId === String(m._id) && replySwipe.dragging ? 'none' : 'transform 180ms ease-out',
@@ -2209,7 +2198,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
               >
                 <div
                   data-message-id={m._id}
-                  className={`relative max-w-[min(82%,34rem)] rounded-2xl pl-4 pr-10 py-2.5 text-sm shadow ${String(m.sender) === String(user?._id)
+                  className={`chat-bubble relative max-w-[min(82%,34rem)] rounded-2xl pl-4 pr-10 py-2.5 text-sm shadow ${isGrouped ? 'is-grouped' : ''} ${String(m.sender) === String(user?._id)
                     ? 'chat-bubble-own rounded-br-sm'
                     : 'chat-bubble-peer rounded-bl-sm'
                     }`}
@@ -2220,7 +2209,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     onPointerDown={(event) => event.stopPropagation()}
                     aria-label={`Message actions for ${m.senderName || 'message'}`}
                     title="Message actions"
-                    className="absolute right-2 top-2 rounded-md p-1 opacity-60 transition hover:bg-black/20 hover:opacity-100"
+                    className="chat-message-action absolute right-2 top-2 rounded-md p-1 opacity-60 transition hover:opacity-100"
                   >
                     <FaEllipsisV size={12} />
                   </button>
@@ -2238,7 +2227,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                         maxHeight: messageMenuPosition?.maxHeight ?? 'calc(100dvh - 16px)',
                         visibility: messageMenuPosition ? 'visible' : 'hidden',
                       }}
-                      className="z-[100] overflow-y-auto rounded-lg border border-black/20 bg-slate-950 p-1 text-xs text-white shadow-xl"
+                      className="workspace-popover theme-popover theme-border z-[100] overflow-y-auto rounded-lg border p-1 text-xs shadow-xl"
                     >
                       {!m.isDeleted && (
                         <button type="button" onClick={() => { setReplyTo(m); setOpenMessageMenu(null); }} className="block w-full rounded px-2 py-1.5 text-left hover:bg-white/10">
@@ -2271,7 +2260,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   {selectedMessageIds.includes(String(m._id)) && (
                     <span className="absolute -left-2 -top-2 grid h-5 w-5 place-items-center rounded-full bg-accent text-[10px] font-bold text-accent-contrast">✓</span>
                   )}
-                  {(selectedChat.type === 'group' || String(m.sender) !== String(user?._id) || m.botId) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) && !m.botId ? 'text-accent-text' : 'text-accent-deep'}`}>
+                  {!isGrouped && (selectedChat.type === 'group' || String(m.sender) !== String(user?._id) || m.botId) && <p className={`mb-0.5 text-xs font-semibold ${String(m.sender) === String(user?._id) && !m.botId ? 'text-accent-text' : 'text-accent-deep'}`}>
                     {String(m.sender) === String(user?._id) && !m.botId ? 'You' : m.senderName || selectedChat.username}
                   </p>}
                   {selectedChat.type === 'group' && selectedChat.groupType === 'community' && !m.isDeleted
@@ -2298,7 +2287,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                   ))}
                   {selectedChat.type === 'group' && selectedChat.groupType === 'community'
                     && !['question', 'poll', 'event'].includes(m.messageType) && (
-                      <button type="button" onClick={() => setActiveThread(m)} className="mt-1 block text-[10px] text-sky-200/75 hover:text-white">
+                      <button type="button" onClick={() => setActiveThread(m)} className="mt-1 block text-[10px] text-accent-text hover:underline">
                         {messages.filter((item) => String(item.replyToId) === String(m._id)).length
                           ? `Open thread · ${messages.filter((item) => String(item.replyToId) === String(m._id)).length} replies`
                           : 'Start thread'}
@@ -2329,16 +2318,17 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                     {m.replyToId && (() => {
                       const quoted = messages.find((candidate) => String(candidate._id) === String(m.replyToId));
                       return (
-                        <div
+                        <button
+                          type="button"
                           onClick={() => jumpToMessage(quoted)}
-                          className="flex min-w-0 max-w-[52%] cursor-pointer items-center gap-2 rounded-md border border-accent-border bg-slate-950/80 px-2 py-1.5 text-left text-xs text-accent-text shadow-inner"
+                          className="theme-border theme-raised-surface flex min-w-0 max-w-[52%] cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs text-accent-text"
                         >
                           <FaReply className="shrink-0 text-accent-text" />
                           <span className="min-w-0">
                             <span className="block truncate font-semibold">Replying to {quoted?.senderName || m.replySenderName || (String(quoted?.sender) === String(user?._id) ? 'You' : 'message')}</span>
                             <span className="block truncate">{quoted?.content || m.replyContent || 'Attachment'}</span>
                           </span>
-                        </div>
+                        </button>
                       );
                     })()}
                   {!m.isDeleted && getAttachments(m).length > 0 && (
@@ -2379,9 +2369,11 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                           href={`${API_URL}${attachment.url}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="block break-all underline"
+                          className="theme-attachment theme-border inline-flex max-w-full items-center gap-2 break-all rounded-md border px-2.5 py-2 text-left text-xs underline"
                         >
-                          {attachment.name} ({formatFileSize(attachment.size)})
+                          <FaPaperclip className="shrink-0" />
+                          <span className="min-w-0 break-all">{attachment.name}</span>
+                          <span className="theme-muted shrink-0 no-underline">{formatFileSize(attachment.size)}</span>
                         </a>
                       )}
                     </div>
@@ -2400,7 +2392,7 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                           aria-label={`${reaction.emoji} reaction, ${reaction.count}`}
                           aria-pressed={reaction.reactedByMe}
                           title={`${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
-                          className={`inline-flex h-7 min-w-8 items-center justify-center gap-1 rounded-full border px-2 text-xs ${reaction.reactedByMe ? 'border-accent-border bg-accent/20 text-accent-text' : 'border-white/10 bg-white/[0.04] hover:bg-white/10'}`}
+                          className={`inline-flex h-7 min-w-8 items-center justify-center gap-1 rounded-full border px-2 text-xs ${reaction.reactedByMe ? 'border-accent-border bg-accent/20 text-accent-text' : 'theme-border theme-raised-surface hover:bg-accent-soft'}`}
                         >
                           <span>{reaction.emoji}</span><span>{reaction.count}</span>
                         </button>
@@ -2411,12 +2403,12 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                         aria-label="Add reaction"
                         aria-expanded={openReactionPicker === String(m._id)}
                         title="Add reaction"
-                        className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-xs opacity-70 hover:bg-white/10 hover:opacity-100"
+                        className="theme-border grid h-7 w-7 place-items-center rounded-full border text-xs opacity-70 hover:bg-accent-soft hover:opacity-100"
                       >
                         <FaSmile />
                       </button>
                       {openReactionPicker === String(m._id) && (
-                        <div className="flex items-center gap-1 rounded-full border border-white/10 bg-slate-950/95 p-1" role="group" aria-label="Choose a reaction">
+                        <div className="workspace-popover theme-border flex items-center gap-1 rounded-full border p-1" role="group" aria-label="Choose a reaction">
                           {MESSAGE_REACTIONS.map((emoji) => (
                             <button
                               key={emoji}
@@ -2433,15 +2425,16 @@ export default function Chat({ user, selectedChat, onSelectChat, onUserUpdated, 
                       )}
                     </div>
                   )}
-                  <span className="chat-message-time mt-1 block text-right text-[10px]">
+                  <time className="chat-message-time mt-1 block text-right text-[10px]" dateTime={new Date(m.timestamp).toISOString()}>
                     {new Date(m.timestamp).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit',
                     })}
-                  </span>
+                  </time>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </main>
 

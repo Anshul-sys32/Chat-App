@@ -43,7 +43,9 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const dialogRef = useDialogFocus(open, onClose);
+  const [previewItem, setPreviewItem] = useState(null);
+  const dialogRef = useDialogFocus(open && !previewItem, onClose);
+  const previewDialogRef = useDialogFocus(Boolean(previewItem), () => setPreviewItem(null));
 
   useEffect(() => {
     if (!open) return undefined;
@@ -159,57 +161,74 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
           <button type="button" onClick={onClose} aria-label="Close media gallery" title="Close gallery" className="grid h-9 w-9 shrink-0 place-items-center rounded hover:bg-white/10"><FaTimes /></button>
         </header>
 
-        <form onSubmit={(event) => { event.preventDefault(); setPage(1); setAppliedFilters({ ...filters }); }} className="grid shrink-0 gap-2 border-b border-white/10 p-3 sm:grid-cols-2 lg:grid-cols-6 sm:px-5">
-          <input value={filters.search} onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))} maxLength={100} aria-label="Search media" placeholder="Search files or messages" className="glass-input min-w-0 rounded border px-3 py-2 text-sm sm:col-span-2 lg:col-span-2" />
-          <select value={filters.mediaType} onChange={(event) => { const mediaType = event.target.value; setFilters((current) => ({ ...current, mediaType })); }} aria-label="Media type" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-sm">
-            {mediaOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-          <label className="min-w-0">
-            <span className="sr-only">Filter by sender</span>
-            <input list="gallery-senders" value={filters.sender} onChange={(event) => setFilters((current) => ({ ...current, sender: event.target.value }))} maxLength={80} aria-label="Filter by sender" placeholder="Sender name" className="glass-input min-w-0 w-full rounded border px-3 py-2 text-sm" />
-            <datalist id="gallery-senders">{[...new Set(items.map((item) => item.senderName).filter(Boolean))].map((name) => <option key={name} value={name} />)}</datalist>
-          </label>
-          <input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} aria-label="From date" className="glass-input min-w-0 rounded border px-2 py-2 text-sm" />
-          <div className="flex min-w-0 gap-2">
-            <input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} aria-label="To date" className="glass-input min-w-0 flex-1 rounded border px-2 py-2 text-sm" />
-            <button type="submit" className="shrink-0 rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast">Apply</button>
-          </div>
-          <label className="flex items-center gap-2 text-xs sm:col-span-2 lg:col-span-6">
-            <span className="theme-muted">Sort</span>
-            <select value={filters.sort} onChange={(event) => { const sort = event.target.value; setFilters((current) => ({ ...current, sort })); setPage(1); setAppliedFilters((current) => ({ ...current, sort })); }} aria-label="Sort media" className="rounded border border-white/10 bg-slate-900 px-2 py-1.5">
+        <form onSubmit={(event) => { event.preventDefault(); setPage(1); setAppliedFilters({ ...filters }); }} className="theme-border grid shrink-0 gap-3 border-b p-3 sm:px-5">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex">
+            <input value={filters.search} onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))} maxLength={100} aria-label="Search media" placeholder="Search files or messages" className="theme-control col-span-2 min-w-0 rounded px-3 py-2 text-sm sm:col-span-1 sm:flex-1" />
+            <label className="flex items-center gap-2 text-xs">
+              <span className="theme-muted">Sort</span>
+              <select value={filters.sort} onChange={(event) => { const sort = event.target.value; setFilters((current) => ({ ...current, sort })); setPage(1); setAppliedFilters((current) => ({ ...current, sort })); }} aria-label="Sort media" className="theme-control rounded px-2 py-2">
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
-            </select>
-          </label>
+              </select>
+            </label>
+            <button type="submit" className="shrink-0 rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast">Apply</button>
+          </div>
+          <div className="gallery-type-filters flex min-w-0 gap-1 overflow-x-auto pb-0.5" role="group" aria-label="Filter by media type">
+            {mediaOptions.map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={filters.mediaType === value}
+                onClick={() => {
+                  setPage(1);
+                  setFilters((current) => ({ ...current, mediaType: value }));
+                  setAppliedFilters((current) => ({ ...current, mediaType: value }));
+                }}
+                className={`gallery-type-filter shrink-0 rounded px-3 py-1.5 text-xs ${filters.mediaType === value ? 'is-selected' : ''}`}
+              >{label}</button>
+            ))}
+          </div>
+          <details className="min-w-0 text-xs">
+            <summary className="theme-muted w-fit cursor-pointer select-none rounded py-1 hover:text-accent-text">More filters</summary>
+            <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-3">
+              <label className="min-w-0">
+                <span className="sr-only">Filter by sender</span>
+                <input list="gallery-senders" value={filters.sender} onChange={(event) => setFilters((current) => ({ ...current, sender: event.target.value }))} maxLength={80} aria-label="Filter by sender" placeholder="Sender name" className="theme-control w-full min-w-0 rounded px-3 py-2" />
+                <datalist id="gallery-senders">{[...new Set(items.map((item) => item.senderName).filter(Boolean))].map((name) => <option key={name} value={name} />)}</datalist>
+              </label>
+              <input type="date" value={filters.from} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} aria-label="From date" className="theme-control min-w-0 rounded px-2 py-2" />
+              <input type="date" value={filters.to} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} aria-label="To date" className="theme-control min-w-0 rounded px-2 py-2" />
+            </div>
+          </details>
         </form>
 
         {error && <p role="alert" className="mx-4 mt-3 rounded border border-rose-300/20 bg-rose-950/30 px-3 py-2 text-sm text-rose-200 sm:mx-5">{error}</p>}
         <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
           {loading ? <p role="status" className="theme-muted py-12 text-center text-sm">Loading media…</p>
             : items.length === 0 ? <p className="theme-muted py-12 text-center text-sm">{error ? 'Media is unavailable.' : 'No media matches these filters.'}</p>
-              : <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              : <ul className="gallery-media-grid grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                 {items.map((item, index) => {
                   const key = `${item.messageType}:${item.messageId}:${item.url}:${index}`;
                   const saved = savedKeys.has(saveKey(item));
                   return (
-                    <li key={key} className="glass-panel min-w-0 overflow-hidden rounded-md border border-white/10">
-                      <div className="grid aspect-[16/10] place-items-center overflow-hidden bg-black/20">
-                        {item.mediaType === 'image' && <img src={mediaUrl(item)} alt={item.name || 'Shared image'} loading="lazy" crossOrigin="use-credentials" className="h-full w-full object-contain" />}
+                    <li key={key} className="gallery-media-card theme-border flex min-w-0 flex-col overflow-hidden rounded-md border">
+                      <div className={`gallery-media-preview grid place-items-center overflow-hidden ${['document', 'file'].includes(item.mediaType) ? 'is-file' : ''} ${item.mediaType === 'video' ? 'is-video' : ''} ${item.mediaType === 'audio' ? 'is-audio' : ''} ${item.mediaType === 'link' ? 'is-link' : ''}`}>
+                        {item.mediaType === 'image' && <button type="button" onClick={() => setPreviewItem(item)} aria-label={`Preview ${item.name || 'shared image'}`} title="Open image preview" className="gallery-image-preview h-full w-full"><img src={mediaUrl(item)} alt={item.name || 'Shared image'} loading="lazy" crossOrigin="use-credentials" className="h-full w-full object-cover" /></button>}
                         {item.mediaType === 'video' && <video src={mediaUrl(item)} controls preload="metadata" crossOrigin="use-credentials" className="h-full w-full object-contain" aria-label={item.name || 'Shared video'} />}
-                        {item.mediaType === 'audio' && <div className="w-full px-4"><FaVolumeUp className="theme-muted mx-auto mb-4 text-2xl" /><audio src={mediaUrl(item)} controls preload="none" crossOrigin="use-credentials" className="w-full" aria-label={item.name || 'Shared audio'} /></div>}
+                        {item.mediaType === 'audio' && <div className="w-full px-4"><FaVolumeUp className="theme-muted mx-auto mb-3 text-2xl" /><audio src={mediaUrl(item)} controls preload="none" crossOrigin="use-credentials" className="w-full" aria-label={item.name || 'Shared audio'} /></div>}
                         {item.mediaType === 'link' && <a href={item.url} target="_blank" rel="noreferrer" className="flex max-h-full w-full flex-col items-center justify-center gap-3 overflow-hidden p-4 text-center text-accent-text"><FaLink className="shrink-0 text-2xl" /><span className="line-clamp-3 break-all text-sm">{item.url}</span></a>}
-                        {!['image', 'video', 'audio', 'link'].includes(item.mediaType) && <div className="flex flex-col items-center gap-2 px-4 text-center"><FaFile className="text-3xl opacity-55" /><span className="line-clamp-2 break-all text-xs">{item.name || 'Shared file'}</span></div>}
+                        {!['image', 'video', 'audio', 'link'].includes(item.mediaType) && <div className="flex min-w-0 items-center gap-3 px-4 py-5"><FaFile className="theme-muted shrink-0 text-2xl" /><div className="min-w-0"><span className="block break-all text-sm font-medium">{item.name || 'Shared file'}</span>{formatSize(item.size) && <span className="theme-muted mt-1 block text-xs">{formatSize(item.size)}</span>}</div></div>}
                       </div>
-                      <div className="min-w-0 p-3">
+                      <div className="flex min-w-0 flex-1 flex-col p-3">
                         <div className="flex min-w-0 items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium" title={item.name}>{item.name || item.url}</p>
-                            <p className="theme-muted mt-1 truncate text-[11px]">{item.senderName} · {displayDate(item.timestamp)}{formatSize(item.size) ? ` · ${formatSize(item.size)}` : ''}</p>
+                            <p className="theme-muted mt-1 truncate text-[11px]">{item.senderName} · {displayDate(item.timestamp)}</p>
                             <p className="theme-muted mt-1 line-clamp-2 break-words text-xs">{item.messageContent || 'Shared in a message'}</p>
                           </div>
-                          <span className="theme-muted shrink-0 text-[10px] capitalize">{item.mediaType}</span>
+                          <span className="gallery-type-label theme-muted shrink-0 rounded px-1.5 py-1 text-[10px] capitalize">{item.mediaType}</span>
                         </div>
-                        <div className="mt-3 flex items-center justify-end gap-1 border-t border-white/10 pt-2">
+                        <div className="theme-border mt-auto flex items-center justify-end gap-1 border-t pt-2">
                           <button type="button" onClick={() => toggleSaved(item)} aria-label={saved ? 'Remove saved message' : 'Save message'} title={saved ? 'Remove saved message' : 'Save message'} className={`grid h-8 w-8 place-items-center rounded hover:bg-white/10 ${saved ? 'text-amber-300' : 'theme-muted'}`}><FaStar /></button>
                           <button type="button" onClick={() => downloadItem(item)} aria-label={item.mediaType === 'link' ? 'Open link' : 'Download file'} title={item.mediaType === 'link' ? 'Open link' : 'Download'} className="theme-muted grid h-8 w-8 place-items-center rounded hover:bg-white/10"><FaDownload /></button>
                           <button type="button" onClick={() => jumpToMessage(item)} className="flex h-8 items-center gap-2 rounded px-2 text-xs text-accent-text hover:bg-white/10"><FaExternalLinkAlt /> Jump to message</button>
@@ -228,6 +247,23 @@ export default function MediaGallery({ open, onClose, conversation = null, onJum
           </div>
         </footer>
       </section>
+      {previewItem && (
+        <div className="theme-overlay fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-8" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewItem(null); }}>
+          <section ref={previewDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="gallery-preview-title" className="gallery-preview-dialog flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-lg border outline-none">
+            <header className="theme-border flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3">
+              <h3 id="gallery-preview-title" className="min-w-0 truncate text-sm font-medium">{previewItem.name || 'Shared image'}</h3>
+              <div className="flex shrink-0 items-center gap-1">
+                <button type="button" onClick={() => downloadItem(previewItem)} aria-label="Download image" title="Download image" className="theme-icon-button grid h-9 w-9 place-items-center rounded"><FaDownload /></button>
+                <button type="button" onClick={() => setPreviewItem(null)} aria-label="Close image preview" title="Close preview" className="theme-icon-button grid h-9 w-9 place-items-center rounded"><FaTimes /></button>
+              </div>
+            </header>
+            <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-2 sm:p-4">
+              <img src={mediaUrl(previewItem)} alt={previewItem.name || 'Shared image'} crossOrigin="use-credentials" className="max-h-[calc(94dvh-7rem)] max-w-full object-contain" />
+            </div>
+            <p className="theme-muted px-4 pb-3 text-xs">{previewItem.senderName} · {displayDate(previewItem.timestamp)}</p>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

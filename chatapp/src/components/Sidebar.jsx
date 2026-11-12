@@ -111,7 +111,7 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
           </>
         );
       case 'groups':
-        return <GroupList search={search} onSelectGroup={handleSelectChat} isAdmin={user?.role === 'admin'} />;
+        return <GroupList search={search} onSelectGroup={handleSelectChat} selectedChat={selectedChat} isAdmin={user?.role === 'admin'} />;
       case 'calls':
         return <CallHistory search={search} onStartChat={handleSelectChat} />;
       case 'meetings':
@@ -187,13 +187,13 @@ const Sidebar = ({ isOpen, isDesktopPanelOpen, onToggleDesktopPanel, toggleSideb
           </div>
           <nav aria-label="Main navigation" className="flex flex-wrap items-center gap-2 sm:mt-10 sm:flex-col sm:items-center sm:gap-2">
             <IconButton icon={<FaUsers />} label="Messages · People" onClick={() => selectTab('messages')} active={activeTab === 'messages' || activeTab === 'localUsers'} />
-            <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Messages</span>
+            <span className="theme-muted hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase sm:block">Messages</span>
             <IconButton icon={<FaLayerGroup />} label="Groups" onClick={() => selectTab('groups')} active={activeTab === 'groups'} />
-            <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Groups</span>
+            <span className="theme-muted hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase sm:block">Groups</span>
             <IconButton icon={<FaPhone />} label="Calls" onClick={() => selectTab('calls')} active={activeTab === 'calls'} />
-            <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Calls</span>
+            <span className="theme-muted hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase sm:block">Calls</span>
             <IconButton icon={<FaCalendarAlt />} label="Meetings" onClick={() => selectTab('meetings')} active={activeTab === 'meetings'} />
-            <span className="hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase text-white/40 sm:block">Meetings</span>
+            <span className="theme-muted hidden w-12 -mt-0 text-center text-[8px] font-semibold uppercase sm:block">Meetings</span>
             <IconButton icon={<FaImages />} label="Media gallery" onClick={() => setIsGalleryOpen(true)} active={false} />
           </nav>
           <div className="mt-3 flex items-center gap-2 border-t border-white/10 pt-3 sm:mt-auto sm:flex-col sm:border-t-0 sm:pt-0">

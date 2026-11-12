@@ -9,10 +9,10 @@ const authConfig = () => ({
   withCredentials: true,
 });
 const providers = [
-  ['github', 'GitHub'],
-  ['webhook', 'Incoming webhook'],
-  ['rss', 'RSS feed'],
-  ['google_calendar', 'Google Calendar'],
+  ['github', 'GitHub', 'Deliver repository activity to a channel.', true],
+  ['webhook', 'Incoming webhook', 'Receive signed events from another service.', true],
+  ['rss', 'RSS feed', 'Configure a feed destination; polling is unavailable.', true],
+  ['google_calendar', 'Google Calendar', 'Unavailable until OAuth is configured.', false],
 ];
 
 export default function CommunityIntegrationsPanel({ groupId, groupName, onClose }) {
@@ -86,6 +86,14 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
     }
   };
 
+  const toggleLogs = (integrationId) => {
+    if (logs[integrationId]) {
+      setLogs((current) => ({ ...current, [integrationId]: null }));
+      return;
+    }
+    loadLogs(integrationId);
+  };
+
   const currentProvider = providers.find(([key]) => key === draft.provider);
 
   return (
@@ -101,22 +109,26 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
             <>
               <section aria-labelledby="integration-list-title">
                 <div className="flex items-center justify-between gap-3"><h3 id="integration-list-title" className="text-sm font-semibold">Connected services</h3><span className="theme-muted text-xs">{integrations.length}</span></div>
-                {integrations.length === 0 ? <p className="theme-muted py-6 text-center text-sm">No integrations configured.</p> : <ul className="mt-2 divide-y divide-white/10">
+                {integrations.length === 0 ? <p className="theme-muted py-6 text-center text-sm">No integrations configured.</p> : <ul className="mt-3 grid gap-3 lg:grid-cols-2">
                   {integrations.map((integration) => (
-                    <li key={integration.id} className="py-3">
-                      <div className="flex flex-wrap items-start gap-3">
-                        <div className="min-w-0 flex-1"><p className="text-sm font-medium">{integration.name}<span className="theme-muted ml-2 text-[10px] uppercase">{integration.provider.replace('_', ' ')}</span></p><p className="theme-muted mt-1 flex items-center gap-1.5 text-xs"><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${integration.operational ? 'bg-emerald-400' : 'bg-amber-400'}`} />#{integration.channelName} · {integration.operational ? 'Operational' : 'Needs setup'}</p>
-                          {integration.provider === 'webhook' || integration.provider === 'github' ? <p className="mt-1 break-all font-mono text-[10px] text-accent-text">{API_URL}/api/integrations/{integration.id}/webhook</p> : null}
+                    <li key={integration.id} className="integration-card theme-border min-w-0 rounded-md border p-3">
+                      <div className="flex min-w-0 flex-wrap items-start gap-3">
+                        <div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{integration.name}<span className="theme-muted ml-2 text-[10px] uppercase">{integration.provider.replace('_', ' ')}</span></p><p className={`integration-status mt-1 flex items-center gap-1.5 text-xs ${!integration.enabled ? 'is-paused' : integration.operational ? 'is-operational' : 'is-attention'}`}><span aria-hidden="true" />#{integration.channelName} · {!integration.enabled ? 'Paused' : integration.operational ? 'Operational' : 'Needs setup'}</p>
+                          {integration.provider === 'webhook' || integration.provider === 'github' ? <p className="integration-endpoint mt-2 break-all rounded px-2 py-1.5 font-mono text-[10px]">{API_URL}/api/integrations/{integration.id}/webhook</p> : null}
                           {integration.provider === 'rss' && <p className="theme-muted mt-1 text-[11px]">RSS polling is not active in this server build.</p>}
                           {integration.provider === 'google_calendar' && <p className="theme-muted mt-1 text-[11px]">OAuth authorization is not configured.</p>}
                         </div>
-                        <select value={integration.channelId} disabled={saving} onChange={(event) => perform(() => axios.patch(`${API_URL}/api/groups/${groupId}/integrations/${integration.id}`, { channelId: event.target.value }, authConfig()))} aria-label={`Destination channel for ${integration.name}`} className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-1.5 text-xs">{channels.map((channel) => <option key={channel._id} value={channel._id}>#{channel.name}</option>)}</select>
-                        <label className="flex shrink-0 items-center gap-2 text-xs"><input type="checkbox" checked={integration.enabled} disabled={saving} onChange={(event) => perform(() => axios.patch(`${API_URL}/api/groups/${groupId}/integrations/${integration.id}`, { enabled: event.target.checked }, authConfig()))} />Enabled</label>
-                        <button type="button" onClick={() => loadLogs(integration.id)} className="rounded border border-white/15 px-2.5 py-1.5 text-xs hover:bg-white/10">History</button>
-                        <button type="button" disabled={saving} onClick={() => perform(() => axios.delete(`${API_URL}/api/groups/${groupId}/integrations/${integration.id}`, authConfig()))} className="rounded px-2 py-1.5 text-xs text-rose-200 hover:bg-rose-950/40 disabled:opacity-40">Uninstall</button>
+                        <div className="flex w-full flex-wrap items-center gap-2">
+                          <select value={integration.channelId} disabled={saving} onChange={(event) => perform(() => axios.patch(`${API_URL}/api/groups/${groupId}/integrations/${integration.id}`, { channelId: event.target.value }, authConfig()))} aria-label={`Destination channel for ${integration.name}`} className="theme-control min-w-0 flex-1 rounded px-2 py-1.5 text-xs">{channels.map((channel) => <option key={channel._id} value={channel._id}>#{channel.name}</option>)}</select>
+                          <label className="flex shrink-0 items-center gap-2 text-xs"><input type="checkbox" checked={integration.enabled} disabled={saving} onChange={(event) => perform(() => axios.patch(`${API_URL}/api/groups/${groupId}/integrations/${integration.id}`, { enabled: event.target.checked }, authConfig()))} />Enabled</label>
+                        </div>
                       </div>
-                      {logs[integration.id] && <ol className="mt-3 max-h-40 divide-y divide-white/5 overflow-y-auto rounded border border-white/10 px-3">
-                        {logs[integration.id].length ? logs[integration.id].map((log) => <li key={log.id} className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-2 text-[11px]"><span><span className={log.status === 'failed' ? 'text-rose-200' : log.status === 'succeeded' ? 'text-emerald-200' : 'theme-muted'}>{log.status}</span><span className="theme-muted ml-2">{log.message}</span></span><time className="theme-muted">{new Date(log.createdAt).toLocaleString()}</time></li>) : <li className="theme-muted py-3 text-xs">No executions recorded.</li>}
+                      <div className="theme-border mt-3 flex items-center justify-between gap-2 border-t pt-2">
+                        <button type="button" aria-expanded={Boolean(logs[integration.id])} onClick={() => toggleLogs(integration.id)} className="workspace-menu-item rounded px-2 py-1 text-xs">{logs[integration.id] ? 'Hide history' : 'Execution history'}</button>
+                        <button type="button" disabled={saving} onClick={() => perform(() => axios.delete(`${API_URL}/api/groups/${groupId}/integrations/${integration.id}`, authConfig()))} className="rounded px-2 py-1 text-xs theme-status-danger hover:bg-rose-500/10 disabled:opacity-40">Uninstall</button>
+                      </div>
+                      {logs[integration.id] && <ol aria-label={`Execution history for ${integration.name}`} className="integration-history theme-border mt-2 max-h-48 divide-y overflow-y-auto rounded border px-3">
+                        {logs[integration.id].length ? logs[integration.id].map((log) => <li key={log.id} className="grid gap-x-3 gap-y-1 py-2 text-[11px] sm:grid-cols-[5.5rem_minmax(0,1fr)]"><div className="flex items-center gap-2"><span aria-hidden="true" className={`integration-log-dot ${log.status === 'failed' ? 'is-failed' : log.status === 'succeeded' ? 'is-succeeded' : ''}`} /><span className={log.status === 'failed' ? 'theme-status-danger' : log.status === 'succeeded' ? 'theme-status-success' : 'theme-muted'}>{log.status}</span></div><div className="min-w-0"><p className="break-words">{log.message || 'No details provided.'}</p><time className="theme-muted mt-1 block">{new Date(log.createdAt).toLocaleString()}</time></div></li>) : <li className="theme-muted py-3 text-xs">No executions recorded.</li>}
                       </ol>}
                     </li>
                   ))}
@@ -124,15 +136,22 @@ export default function CommunityIntegrationsPanel({ groupId, groupName, onClose
               </section>
               <section aria-labelledby="new-integration-title" className="border-t border-white/10 pt-4">
                 <h3 id="new-integration-title" className="text-sm font-semibold">Add an integration</h3>
-                <form onSubmit={createIntegration} className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                  <select value={draft.provider} onChange={(event) => setDraft((current) => ({ ...current, provider: event.target.value, secret: '', feedUrl: '' }))} aria-label="Integration provider" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-sm">
-                    {providers.map(([key, label]) => <option key={key} value={key}>{label}{key === 'google_calendar' ? ' · unavailable' : ''}</option>)}
-                  </select>
-                  <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} maxLength={80} required placeholder="Integration name" aria-label="Integration name" className="glass-input min-w-0 rounded border px-3 py-2 text-sm" />
-                  <select value={draft.channelId} onChange={(event) => setDraft((current) => ({ ...current, channelId: event.target.value }))} required aria-label="Destination channel" className="min-w-0 rounded border border-white/10 bg-slate-900 px-2 py-2 text-sm"><option value="">Destination channel</option>{channels.map((channel) => <option key={channel._id} value={channel._id}>#{channel.name}</option>)}</select>
-                  {draft.provider === 'rss' ? <input type="url" value={draft.feedUrl} onChange={(event) => setDraft((current) => ({ ...current, feedUrl: event.target.value }))} required placeholder="https://example.com/feed.xml" aria-label="RSS feed URL" className="glass-input min-w-0 rounded border px-3 py-2 text-sm" /> : <span className="hidden lg:block" />}
-                  {['github', 'webhook'].includes(draft.provider) && <input value={draft.events} onChange={(event) => setDraft((current) => ({ ...current, events: event.target.value }))} maxLength={500} placeholder="Optional events, comma separated" aria-label="Subscribed event types" className="glass-input min-w-0 rounded border px-3 py-2 text-sm sm:col-span-2" />}
-                  {['github', 'webhook'].includes(draft.provider) && <input type="password" autoComplete="new-password" value={draft.secret} onChange={(event) => setDraft((current) => ({ ...current, secret: event.target.value }))} required maxLength={4096} placeholder="Webhook signing secret" aria-label="Webhook signing secret" className="glass-input min-w-0 rounded border px-3 py-2 text-sm sm:col-span-2" />}
+                <form onSubmit={createIntegration} className="mt-3 space-y-3">
+                  <fieldset className="grid gap-2 sm:grid-cols-2">
+                    <legend className="sr-only">Integration provider</legend>
+                    {providers.map(([key, label, description, available]) => <label key={key} className={`integration-provider-card theme-border min-w-0 cursor-pointer rounded-md border p-3 ${draft.provider === key ? 'is-selected' : ''}`}>
+                      <input type="radio" name="integration-provider" value={key} checked={draft.provider === key} onChange={() => setDraft((current) => ({ ...current, provider: key, secret: '', feedUrl: '' }))} className="sr-only" />
+                      <span className="flex items-center justify-between gap-2"><span className="text-xs font-semibold">{label}</span><span className={`provider-availability ${available ? 'is-available' : 'is-unavailable'}`}>{available ? 'Available' : 'Unavailable'}</span></span>
+                      <span className="theme-muted mt-1 block text-[11px] leading-4">{description}</span>
+                    </label>)}
+                  </fieldset>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} maxLength={80} required placeholder="Integration name" aria-label="Integration name" className="theme-control min-w-0 rounded px-3 py-2 text-sm" />
+                    <select value={draft.channelId} onChange={(event) => setDraft((current) => ({ ...current, channelId: event.target.value }))} required aria-label="Destination channel" className="theme-control min-w-0 rounded px-2 py-2 text-sm"><option value="">Destination channel</option>{channels.map((channel) => <option key={channel._id} value={channel._id}>#{channel.name}</option>)}</select>
+                    {draft.provider === 'rss' && <input type="url" value={draft.feedUrl} onChange={(event) => setDraft((current) => ({ ...current, feedUrl: event.target.value }))} required placeholder="https://example.com/feed.xml" aria-label="RSS feed URL" className="theme-control min-w-0 rounded px-3 py-2 text-sm sm:col-span-2" />}
+                    {['github', 'webhook'].includes(draft.provider) && <input value={draft.events} onChange={(event) => setDraft((current) => ({ ...current, events: event.target.value }))} maxLength={500} placeholder="Optional events, comma separated" aria-label="Subscribed event types" className="theme-control min-w-0 rounded px-3 py-2 text-sm sm:col-span-2" />}
+                    {['github', 'webhook'].includes(draft.provider) && <input type="password" autoComplete="new-password" value={draft.secret} onChange={(event) => setDraft((current) => ({ ...current, secret: event.target.value }))} required maxLength={4096} placeholder="Webhook signing secret" aria-label="Webhook signing secret" className="theme-control min-w-0 rounded px-3 py-2 text-sm sm:col-span-2" />}
+                  </div>
                   <button type="submit" disabled={saving || draft.provider === 'google_calendar' || channels.length === 0} className="w-fit rounded bg-accent px-3 py-2 text-xs font-semibold text-accent-contrast disabled:opacity-40">Add {currentProvider?.[1]}</button>
                   {draft.provider === 'rss' && <p className="theme-muted self-center text-xs">Feed configured but not operational until server polling is enabled.</p>}
                   {draft.provider === 'google_calendar' && <p className="theme-muted self-center text-xs">Google OAuth is required before this provider can be installed.</p>}

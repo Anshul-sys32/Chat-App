@@ -18,7 +18,7 @@ const hasPermission = (group, permission, platformAdmin) => {
   return permissions?.[permission] === true;
 };
 
-export default function GroupList({ search = '', onSelectGroup, isAdmin = false }) {
+export default function GroupList({ search = '', onSelectGroup, selectedChat, isAdmin = false }) {
   const [groups, setGroups] = useState([]);
   const [activeGroup, setActiveGroup] = useState(null);
   const [members, setMembers] = useState([]);
@@ -443,7 +443,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
   const visibleGroups = groups.filter((group) => group.name.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="text-white">
+    <div className="theme-text">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-300">Your groups</h3>
         <button type="button" onClick={() => setIsCreateOpen(true)} className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 text-gray-300 transition hover:border-accent-border hover:bg-white/10 hover:text-accent-text" title="Create a new group" aria-label="Create a new group">
@@ -453,7 +453,7 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
       <ul className="space-y-1.5">
         {!loading && visibleGroups.length === 0 && <li className="rounded-md border border-dashed border-gray-700 px-3 py-4 text-center text-xs text-gray-400">No groups found</li>}
         {visibleGroups.map((group) => (
-          <li key={group._id} className={`relative rounded-xl border transition ${activeGroup?._id === group._id ? 'border-accent-border bg-accent-soft' : 'border-white/[0.07] bg-white/[0.045] hover:border-accent-border hover:bg-accent-soft'}`}>
+          <li key={group._id} className={`community-group-card theme-border relative rounded-lg border transition ${activeGroup?._id === group._id ? 'is-expanded' : ''}`}>
             <div className="flex items-center gap-2 px-2.5 py-2">
               <button type="button" onClick={() => showManagement(group)} className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-accent-border" aria-label={`Manage ${group.name}`}>
                 <Avatar src={group.avatarUrl} name={group.name} group className="h-9 w-9 text-sm" />
@@ -470,18 +470,21 @@ export default function GroupList({ search = '', onSelectGroup, isAdmin = false 
                 aria-expanded={group.groupType === 'community' ? String(activeGroup?._id === group._id) : undefined}
               >
                 <span className="block truncate text-sm font-semibold">{group.name}</span>
-                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-white/55">
+                <span className="theme-muted mt-0.5 flex items-center gap-1 text-[11px]">
                   <FaUsers size={10} /> {group.members} · {group.role} {group.isActive === 0 && <span className="text-rose-300">· inactive</span>}
                 </span>
               </button>
-              {group.groupType === 'community' && <button type="button" onClick={() => toggleChannels(group)} className="grid h-7 w-7 shrink-0 place-items-center rounded text-gray-300 transition hover:bg-white/10 hover:text-white" aria-label={`${activeGroup?._id === group._id ? 'Hide' : 'Show'} channels of ${group.name}`}>{activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}</button>}
+              {group.groupType === 'community' && <button type="button" onClick={() => toggleChannels(group)} className="theme-muted grid h-8 w-8 shrink-0 place-items-center rounded transition hover:bg-accent-soft hover:text-accent-text" aria-label={`${activeGroup?._id === group._id ? 'Hide' : 'Show'} channels of ${group.name}`}>{activeGroup?._id === group._id ? <FaChevronUp size={11} /> : <FaChevronDown size={11} />}</button>}
             </div>
             {group.groupType === 'community' && activeGroup?._id === group._id && !isManagementOpen && (
-              <div className="border-t border-white/10 px-2.5 py-2.5">
-                <div className="mb-2 flex items-center justify-between"><span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-gray-300"><FaHashtag size={10} /> Channels</span><span className="text-[10px] text-gray-400">{channels.length}</span></div>
+              <div className="community-channel-section theme-border border-t px-2.5 py-2.5">
+                <div className="mb-2 flex items-center justify-between"><span className="theme-muted flex items-center gap-1.5 text-[11px] font-semibold uppercase"><FaHashtag size={10} /> Channels</span><span className="theme-muted text-[10px]">{channels.length}</span></div>
                 {channels.length > 0
-                  ? <ul className="space-y-1">{channels.map((channel) => <li key={channel._id}><button type="button" title={channel.postingMode === 'admins' && !channel.canPost ? `${channel.name}: leaders can post` : channel.name} onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name, channelType: channel.channelType || 'text', channelPostingMode: channel.postingMode, channelCanPost: channel.canPost })} className="flex w-full items-center gap-2 rounded-lg bg-gray-900/60 px-2 py-2 text-left text-xs hover:bg-accent-soft hover:text-accent-text">{channel.channelType === 'audio' ? <FaMicrophone className="text-[10px] text-white/40" /> : channel.channelType === 'video' ? <FaVideo className="text-[10px] text-white/40" /> : <FaHashtag className="text-[10px] text-white/40" />}<span className="truncate">{channel.name}</span>{channel.postingMode === 'admins' && !channel.canPost && <FaLock className="ml-auto shrink-0 text-[9px] text-amber-200/70" aria-label="Leaders only" />}</button></li>)}</ul>
-                  : <p className="text-xs text-white/45">No channels yet.</p>}
+                  ? <ul className="space-y-1">{channels.map((channel) => {
+                    const isSelected = String(selectedChat?._id) === String(group._id) && String(selectedChat?.channelId || '') === String(channel._id);
+                    return <li key={channel._id}><button type="button" aria-current={isSelected ? 'page' : undefined} title={channel.postingMode === 'admins' && !channel.canPost ? `${channel.name}: leaders can post` : channel.name} onClick={() => onSelectGroup?.({ ...group, type: 'group', channelId: channel._id, channelName: channel.name, channelType: channel.channelType || 'text', channelPostingMode: channel.postingMode, channelCanPost: channel.canPost })} className={`community-channel-button flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs ${isSelected ? 'is-selected' : ''}`}>{channel.channelType === 'audio' ? <FaMicrophone className="theme-muted text-[10px]" /> : channel.channelType === 'video' ? <FaVideo className="theme-muted text-[10px]" /> : <FaHashtag className="theme-muted text-[10px]" />}<span className="truncate">{channel.name}</span>{channel.postingMode === 'admins' && !channel.canPost && <FaLock className="theme-status-warning ml-auto shrink-0 text-[9px]" aria-label="Leaders only" />}</button></li>;
+                  })}</ul>
+                  : <p className="theme-muted text-xs">No channels yet.</p>}
               </div>
             )}
             {/* Group actions live in the avatar menu so the list stays scannable. */}
