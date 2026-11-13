@@ -129,6 +129,25 @@ test("bot migration creates community installations, commands, message identity,
   assert.ok(statements.some((sql) => sql.includes("DROP TABLE IF EXISTS community_bot_commands")));
 });
 
+test("bot command scope migration adds and backfills group_id for existing tables", async () => {
+  const migration = require("../migrations/202611130001_community_bot_command_group_scope");
+  const statements = [];
+  const connection = {
+    query: async (sql) => statements.push(sql),
+    execute: async (sql) => {
+      statements.push(sql);
+      return [[], []];
+    },
+  };
+
+  await migration.up(connection);
+
+  assert.ok(statements.some((sql) => sql.includes("ADD COLUMN group_id INT UNSIGNED NULL")));
+  assert.ok(statements.some((sql) => sql.includes("SET command.group_id = bot.group_id")));
+  assert.ok(statements.some((sql) => sql.includes("MODIFY COLUMN group_id INT UNSIGNED NOT NULL")));
+  assert.ok(statements.some((sql) => sql.includes("ADD INDEX community_bot_commands_group_key")));
+});
+
 test("authenticated bot installation and command management routes are registered", () => {
   const routes = authRoutes.stack.filter((layer) => layer.route)
     .flatMap((layer) => Object.entries(layer.route.methods)

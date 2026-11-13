@@ -83,7 +83,11 @@ const {
 	listChannels,
 	createChannel,
 	updateChannel,
+	reorderChannels,
 	archiveChannel,
+	listArchivedChannels,
+	restoreChannel,
+	permanentlyDeleteChannel,
 	listChannelRolePermissions,
 	updateChannelRolePermission,
 } = require("../controllers/groupChannelController");
@@ -1581,8 +1585,12 @@ router.delete("/groups/:groupId", protect, async (req, res) => {
 
 router.get("/groups/:groupId/channels", protect, listChannels);
 router.post("/groups/:groupId/channels", protect, createChannel);
+router.put("/groups/:groupId/channels/order", protect, reorderChannels);
 router.patch("/groups/:groupId/channels/:channelId", protect, updateChannel);
 router.delete("/groups/:groupId/channels/:channelId", protect, archiveChannel);
+router.get("/groups/:groupId/channels/archived", protect, listArchivedChannels);
+router.post("/groups/:groupId/channels/:channelId/restore", protect, restoreChannel);
+router.delete("/groups/:groupId/channels/:channelId/permanent", protect, permanentlyDeleteChannel);
 router.get("/groups/:groupId/channels/:channelId/role-permissions", protect, listChannelRolePermissions);
 router.put("/groups/:groupId/channels/:channelId/role-permissions", protect, updateChannelRolePermission);
 router.get("/groups/:groupId/roles", protect, listGroupRoles);

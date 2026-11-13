@@ -160,6 +160,51 @@ const updateChannel = async (req, res) => {
   }
 };
 
+const reorderChannels = async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const channelIds = req.body?.channelIds;
+  if (!validId(groupId) || !Array.isArray(channelIds) || channelIds.length > 100
+    || channelIds.some((id) => !validId(id))
+    || new Set(channelIds.map(Number)).size !== channelIds.length) {
+    return res.status(400).json({ message: "Provide a valid ordered list of channel ids." });
+  }
+  try {
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
+    if (error) return sendAccessError(res, error);
+    const [activeChannels] = await pool.execute(
+      "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE",
+      [groupId]
+    );
+    const activeIds = activeChannels.map((channel) => Number(channel.id));
+    const requestedIds = channelIds.map(Number);
+    if (activeIds.length !== requestedIds.length
+      || activeIds.some((id) => !requestedIds.includes(id))) {
+      return res.status(409).json({ message: "The channel list changed. Refresh and try again." });
+    }
+    if (requestedIds.length) {
+      const cases = requestedIds.map(() => "WHEN ? THEN ?").join(" ");
+      const values = requestedIds.flatMap((id, sortOrder) => [id, sortOrder]);
+      await pool.execute(
+        `UPDATE group_channels SET sort_order = CASE id ${cases} END
+         WHERE group_id = ? AND is_archived = FALSE`,
+        [...values, groupId]
+      );
+    }
+    const [channels] = await pool.execute(
+      `SELECT id AS _id, group_id AS groupId, name, slug, description,
+              channel_type AS channelType, posting_mode AS postingMode, sort_order AS sortOrder
+       FROM group_channels WHERE group_id = ? AND is_archived = FALSE
+       ORDER BY sort_order, id`,
+      [groupId]
+    );
+    req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-order-updated", { groupId, channels });
+    return res.json({ channels });
+  } catch (error) {
+    console.error("Reorder community channels error:", error);
+    return res.status(500).json({ message: "Could not reorder channels." });
+  }
+};
+
 const archiveChannel = async (req, res) => {
   const groupId = Number(req.params.groupId);
   const channelId = Number(req.params.channelId);
@@ -199,6 +244,84 @@ const archiveChannel = async (req, res) => {
   } catch (error) {
     console.error("Archive community channel error:", error);
     return res.status(500).json({ message: "Could not archive this channel." });
+  }
+};
+
+const listArchivedChannels = async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  if (!validId(groupId)) return res.status(400).json({ message: "Invalid group id." });
+  try {
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
+    if (error) return sendAccessError(res, error);
+    const [channels] = await pool.execute(
+      `SELECT id AS _id, group_id AS groupId, name, slug, description,
+              channel_type AS channelType, posting_mode AS postingMode, sort_order AS sortOrder
+       FROM group_channels WHERE group_id = ? AND is_archived = TRUE
+       ORDER BY sort_order, id`,
+      [groupId]
+    );
+    return res.json({ channels });
+  } catch (error) {
+    console.error("List archived community channels error:", error);
+    return res.status(500).json({ message: "Could not load archived channels." });
+  }
+};
+
+const restoreChannel = async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const channelId = Number(req.params.channelId);
+  if (!validId(groupId) || !validId(channelId)) return res.status(400).json({ message: "Invalid group or channel id." });
+  try {
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
+    if (error) return sendAccessError(res, error);
+    const [channels] = await pool.execute(
+      `SELECT id AS _id, group_id AS groupId, name, slug, description,
+              channel_type AS channelType, posting_mode AS postingMode, sort_order AS sortOrder
+       FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = TRUE LIMIT 1`,
+      [channelId, groupId]
+    );
+    if (!channels.length) return res.status(404).json({ message: "Archived channel not found." });
+    const [[{ channelCount }]] = await pool.execute(
+      "SELECT COUNT(*) AS channelCount FROM group_channels WHERE group_id = ? AND is_archived = FALSE",
+      [groupId]
+    );
+    if (Number(channelCount) >= 100) return res.status(409).json({ message: "Communities are limited to 100 active channels." });
+    await pool.execute(
+      "UPDATE group_channels SET is_archived = FALSE WHERE id = ? AND group_id = ? AND is_archived = TRUE",
+      [channelId, groupId]
+    );
+    const channel = { ...channels[0], isArchived: false };
+    req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-restored", channel);
+    return res.json(channel);
+  } catch (error) {
+    if (error.code === "ER_DUP_ENTRY") return res.status(409).json({ message: "An active channel with that name already exists." });
+    console.error("Restore community channel error:", error);
+    return res.status(500).json({ message: "Could not restore this channel." });
+  }
+};
+
+const permanentlyDeleteChannel = async (req, res) => {
+  const groupId = Number(req.params.groupId);
+  const channelId = Number(req.params.channelId);
+  if (!validId(groupId) || !validId(channelId)) return res.status(400).json({ message: "Invalid group or channel id." });
+  try {
+    const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
+    if (error) return sendAccessError(res, error);
+    const [channels] = await pool.execute(
+      "SELECT id, slug FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = TRUE LIMIT 1",
+      [channelId, groupId]
+    );
+    if (!channels.length) return res.status(404).json({ message: "Archived channel not found." });
+    if (channels[0].slug === "general") return res.status(409).json({ message: "The general channel cannot be permanently deleted." });
+    await pool.execute(
+      "DELETE FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = TRUE",
+      [channelId, groupId]
+    );
+    req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-removed", { groupId, channelId });
+    return res.status(204).end();
+  } catch (error) {
+    console.error("Permanently delete community channel error:", error);
+    return res.status(500).json({ message: "Could not permanently delete this channel." });
   }
 };
 
@@ -270,7 +393,11 @@ module.exports = {
   listChannels,
   createChannel,
   updateChannel,
+  reorderChannels,
   archiveChannel,
+  listArchivedChannels,
+  restoreChannel,
+  permanentlyDeleteChannel,
   listChannelRolePermissions,
   updateChannelRolePermission,
 };

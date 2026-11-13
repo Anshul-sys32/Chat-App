@@ -47,7 +47,14 @@ const { canAccessGroup, canManageGroup, canPostInChannel, validateGroupMessageTa
 const { hasGroupPermission } = require("../services/groupRoles");
 const { isSupportedReaction, loadCommunityEngagement, validateCommunityPost } = require("../services/communityPosts");
 const { nextScheduledAt } = require("../services/scheduledCommunityPosts");
-const { listChannels, createChannel } = require("../controllers/groupChannelController");
+const {
+  listChannels,
+  createChannel,
+  listArchivedChannels,
+  restoreChannel,
+  permanentlyDeleteChannel,
+  reorderChannels,
+} = require("../controllers/groupChannelController");
 const { normalizeSearchRequest, searchMessages } = require("../controllers/messageSearchController");
 const { listScheduledMessages, parseScheduledMessage } = require("../controllers/scheduledMessagesController");
 const { loadDirectMessageReactions, toggleReactionState } = require("../services/messageReactions");
@@ -189,6 +196,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010022_community_bots",
     "202611010023_community_integrations",
     "202611010024_community_collab_sessions",
+    "202611130001_community_bot_command_group_scope",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -259,6 +267,10 @@ test("saved-message and scheduled-announcement routes register during router ini
     "delete:/groups/:groupId/whiteboard/:itemId",
     "get:/groups/:groupId/channels/:channelId/collab-sessions",
     "post:/groups/:groupId/channels/:channelId/collab-sessions",
+    "get:/groups/:groupId/channels/archived",
+    "put:/groups/:groupId/channels/order",
+    "post:/groups/:groupId/channels/:channelId/restore",
+    "delete:/groups/:groupId/channels/:channelId/permanent",
     "get:/collab-sessions/:sessionId",
     "patch:/collab-sessions/:sessionId",
     "post:/collab-sessions/:sessionId/close",
@@ -1019,4 +1031,103 @@ test("community leaders can create typed call channels and invalid types are rej
   assert.equal(response.statusCode, 201);
   assert.equal(response.body.channelType, "audio");
   assert.equal(inserts[0].values[4], "audio");
+});
+
+test("channel managers can list and restore archived channels", async () => {
+  const statements = [];
+  const events = [];
+  mock.method(pool, "execute", async (sql) => {
+    statements.push(sql);
+    if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
+    if (sql.includes("FROM group_channels") && sql.includes("is_archived = TRUE")) return [[{ _id: 14, groupId: 8, name: "Hangout", slug: "hangout" }], []];
+    if (sql.includes("COUNT(*) AS channelCount")) return [[{ channelCount: 1 }], []];
+    if (sql.startsWith("UPDATE group_channels SET is_archived = FALSE")) return [{ affectedRows: 1 }, []];
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+
+  const listResponse = createResponse();
+  await listArchivedChannels({ user: { id: 5, role: "user" }, params: { groupId: "8" } }, listResponse);
+  assert.equal(listResponse.statusCode, 200);
+  assert.match(statements[1], /is_archived = TRUE/);
+
+  const restoreResponse = createResponse();
+  await restoreChannel({
+    user: { id: 5, role: "user" },
+    params: { groupId: "8", channelId: "14" },
+    app: { get: () => ({ to: () => ({ emit: (name, value) => events.push({ name, value }) }) }) },
+  }, restoreResponse);
+  assert.equal(restoreResponse.statusCode, 200);
+  assert.equal(restoreResponse.body.isArchived, false);
+  assert.equal(events[0].name, "group-channel-restored");
+  assert.ok(statements.some((sql) => sql.includes("SET is_archived = FALSE")));
+});
+
+test("permanent channel deletion only accepts archived non-general channels", async () => {
+  const statements = [];
+  mock.method(pool, "execute", async (sql) => {
+    statements.push(sql);
+    if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
+    if (sql.includes("SELECT id, slug FROM group_channels")) return [[{ id: 14, slug: "hangout" }], []];
+    return [{ affectedRows: 1 }, []];
+  });
+  const response = { ...createResponse(), end() { return this; } };
+  await permanentlyDeleteChannel({
+    user: { id: 5, role: "user" },
+    params: { groupId: "8", channelId: "14" },
+    app: { get: () => null },
+  }, response);
+  assert.equal(response.statusCode, 204);
+  assert.match(statements[1], /is_archived = TRUE/);
+  assert.match(statements[2], /DELETE FROM group_channels.*is_archived = TRUE/s);
+});
+
+test("channel managers persist the requested channel order and broadcast it", async () => {
+  const statements = [];
+  const events = [];
+  mock.method(pool, "execute", async (sql, values) => {
+    statements.push({ sql, values });
+    if (sql.includes("FROM chat_groups group_record")) {
+      return [[{ id: 8, groupType: "community", groupRole: "moderator", rolePermissions: { manageChannels: true } }], []];
+    }
+    if (sql === "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE") {
+      return [[{ id: 12 }, { id: 14 }], []];
+    }
+    if (sql.includes("UPDATE group_channels SET sort_order = CASE id")) return [{ affectedRows: 2 }, []];
+    if (sql.includes("ORDER BY sort_order, id")) {
+      return [[
+        { _id: 14, groupId: 8, name: "Hangout", sortOrder: 0 },
+        { _id: 12, groupId: 8, name: "General", sortOrder: 1 },
+      ], []];
+    }
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+  const response = createResponse();
+  await reorderChannels({
+    user: { id: 5, role: "user" },
+    params: { groupId: "8" },
+    body: { channelIds: [14, 12] },
+    app: { get: () => ({ to: () => ({ emit: (name, value) => events.push({ name, value }) }) }) },
+  }, response);
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body.channels.map((channel) => channel._id), [14, 12]);
+  assert.match(statements[2].sql, /CASE id WHEN \? THEN \? WHEN \? THEN \? END/);
+  assert.deepEqual(statements[2].values, [14, 0, 12, 1, 8]);
+  assert.equal(events[0].name, "group-channel-order-updated");
+});
+
+test("channel reorder rejects an incomplete or stale channel list", async () => {
+  mock.method(pool, "execute", async (sql) => {
+    if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
+    if (sql === "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE") return [[{ id: 12 }, { id: 14 }], []];
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+  const response = createResponse();
+  await reorderChannels({
+    user: { id: 5, role: "user" },
+    params: { groupId: "8" },
+    body: { channelIds: [12] },
+  }, response);
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.message, /list changed/);
 });

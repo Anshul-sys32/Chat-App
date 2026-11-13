@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { createPortal } from 'react-dom';
-import { FaArchive, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaHashtag, FaLock, FaMicrophone, FaPlus, FaTimes, FaUserMinus, FaUserPlus, FaUsers, FaVideo } from 'react-icons/fa';
+import { FaArchive, FaArrowDown, FaArrowUp, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaGripVertical, FaHashtag, FaLock, FaMicrophone, FaPlus, FaTimes, FaTrash, FaUndo, FaUserMinus, FaUserPlus, FaUsers, FaVideo } from 'react-icons/fa';
 import Socket from '../Socket';
 import Avatar from './Avatar';
 
@@ -26,6 +26,10 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
   const [name, setName] = useState('');
   const [groupType, setGroupType] = useState('standard');
   const [channels, setChannels] = useState([]);
+  const [draggedChannelId, setDraggedChannelId] = useState(null);
+  const [isSavingChannelOrder, setIsSavingChannelOrder] = useState(false);
+  const [archivedChannels, setArchivedChannels] = useState([]);
+  const [showArchivedChannels, setShowArchivedChannels] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
     const [newChannelType, setNewChannelType] = useState('text');
   const [channelPostingMode, setChannelPostingMode] = useState('members');
@@ -152,8 +156,29 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
     const handleChannelUpdated = (channel) => {
       setChannels((previous) => previous.map((item) => String(item._id) === String(channel._id) ? channel : item));
     };
-    const handleChannelArchived = ({ channelId }) => {
+    const handleChannelArchived = ({ groupId, channelId }) => {
       setChannels((previous) => previous.filter((item) => String(item._id) !== String(channelId)));
+      if (String(activeGroup?._id) === String(groupId)
+        && hasPermission(activeGroup, 'manageChannels', isAdmin)) {
+        axios.get(`${apiUrl}/api/groups/${groupId}/channels/archived`, authConfig())
+          .then(({ data }) => setArchivedChannels(data.channels || []))
+          .catch(() => setError('Could not refresh archived channels.'));
+      }
+    };
+    const handleChannelRestored = (channel) => {
+      if (String(activeGroup?._id) !== String(channel.groupId)) return;
+      setChannels((previous) => previous.some((item) => String(item._id) === String(channel._id))
+        ? previous
+        : [...previous, channel].sort((a, b) => a.sortOrder - b.sortOrder));
+      setArchivedChannels((previous) => previous.filter((item) => String(item._id) !== String(channel._id)));
+    };
+    const handleChannelRemoved = ({ channelId }) => {
+      setArchivedChannels((previous) => previous.filter((item) => String(item._id) !== String(channelId)));
+    };
+    const handleChannelOrderUpdated = ({ groupId, channels: updatedChannels }) => {
+      if (String(activeGroup?._id) === String(groupId) && Array.isArray(updatedChannels)) {
+        setChannels(updatedChannels);
+      }
     };
     Socket.on('group-member-removed', handleRemoved);
     Socket.on('group-deactivated', handleDeactivated);
@@ -168,6 +193,9 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
     Socket.on('group-channel-created', handleChannelCreated);
     Socket.on('group-channel-updated', handleChannelUpdated);
     Socket.on('group-channel-archived', handleChannelArchived);
+    Socket.on('group-channel-restored', handleChannelRestored);
+    Socket.on('group-channel-removed', handleChannelRemoved);
+    Socket.on('group-channel-order-updated', handleChannelOrderUpdated);
     return () => {
       Socket.off('group-member-removed', handleRemoved);
       Socket.off('group-deactivated', handleDeactivated);
@@ -182,21 +210,29 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
       Socket.off('group-channel-created', handleChannelCreated);
       Socket.off('group-channel-updated', handleChannelUpdated);
       Socket.off('group-channel-archived', handleChannelArchived);
+      Socket.off('group-channel-restored', handleChannelRestored);
+      Socket.off('group-channel-removed', handleChannelRemoved);
+      Socket.off('group-channel-order-updated', handleChannelOrderUpdated);
     };
   }, [currentUser?._id, activeGroup, groups, isAdmin]);
 
   const refreshMembers = async (group) => {
     setError('');
     try {
-      const [memberResponse, channelResponse, roleResponse] = await Promise.all([
+      const canManageChannels = group.groupType === 'community' && hasPermission(group, 'manageChannels', isAdmin);
+      const [memberResponse, channelResponse, roleResponse, archivedResponse] = await Promise.all([
         axios.get(`${apiUrl}/api/groups/${group._id}/members`, authConfig()),
         group.groupType === 'community' && group.isActive !== 0
           ? axios.get(`${apiUrl}/api/groups/${group._id}/channels`, authConfig())
           : Promise.resolve({ data: { channels: [] } }),
         axios.get(`${apiUrl}/api/groups/${group._id}/roles`, authConfig()),
+        canManageChannels
+          ? axios.get(`${apiUrl}/api/groups/${group._id}/channels/archived`, authConfig())
+          : Promise.resolve({ data: { channels: [] } }),
       ]);
       setMembers(memberResponse.data);
       setChannels(channelResponse.data.channels || []);
+      setArchivedChannels(archivedResponse.data.channels || []);
       setGroupRoles(roleResponse.data.roles || []);
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not load group members.');
@@ -339,7 +375,9 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
         { name: newChannelName, channelType: newChannelType, postingMode: channelPostingMode },
         authConfig()
       );
-      setChannels((previous) => [...previous, data].sort((a, b) => a.sortOrder - b.sortOrder));
+      setChannels((previous) => previous.some((channel) => String(channel._id) === String(data._id))
+        ? previous
+        : [...previous, data].sort((a, b) => a.sortOrder - b.sortOrder));
       setNewChannelName('');
       setNewChannelType('text');
       setChannelPostingMode('members');
@@ -361,13 +399,85 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
     }
   };
 
+  const saveChannelOrder = async (orderedChannels) => {
+    if (!activeGroup || isSavingChannelOrder) return;
+    const previousChannels = channels;
+    const normalizedChannels = orderedChannels.map((channel, sortOrder) => ({ ...channel, sortOrder }));
+    setChannels(normalizedChannels);
+    setIsSavingChannelOrder(true);
+    try {
+      const { data } = await axios.put(
+        `${apiUrl}/api/groups/${activeGroup._id}/channels/order`,
+        { channelIds: normalizedChannels.map((channel) => channel._id) },
+        authConfig()
+      );
+      setChannels(data.channels || normalizedChannels);
+    } catch (requestError) {
+      setChannels(previousChannels);
+      setError(requestError.response?.data?.message || 'Could not reorder channels.');
+    } finally {
+      setIsSavingChannelOrder(false);
+    }
+  };
+
+  const moveChannel = (sourceId, targetId) => {
+    if (String(sourceId) === String(targetId) || isSavingChannelOrder) return;
+    const sourceIndex = channels.findIndex((channel) => String(channel._id) === String(sourceId));
+    const targetIndex = channels.findIndex((channel) => String(channel._id) === String(targetId));
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const reordered = [...channels];
+    const [moved] = reordered.splice(sourceIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    void saveChannelOrder(reordered);
+  };
+
+  const moveChannelByOffset = (channelId, offset) => {
+    const index = channels.findIndex((channel) => String(channel._id) === String(channelId));
+    const targetIndex = index + offset;
+    if (index < 0 || targetIndex < 0 || targetIndex >= channels.length || isSavingChannelOrder) return;
+    const reordered = [...channels];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(targetIndex, 0, moved);
+    void saveChannelOrder(reordered);
+  };
+
   const archiveChannel = async (channel) => {
     if (!activeGroup || !window.confirm(`Archive #${channel.slug}? Its messages will be retained.`)) return;
     try {
       await axios.delete(`${apiUrl}/api/groups/${activeGroup._id}/channels/${channel._id}`, authConfig());
       setChannels((previous) => previous.filter((item) => String(item._id) !== String(channel._id)));
+      setArchivedChannels((previous) => previous.some((item) => String(item._id) === String(channel._id))
+        ? previous
+        : [...previous, channel].sort((a, b) => a.sortOrder - b.sortOrder));
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Could not archive channel.');
+    }
+  };
+
+  const restoreArchivedChannel = async (channel) => {
+    if (!activeGroup) return;
+    try {
+      const { data } = await axios.post(
+        `${apiUrl}/api/groups/${activeGroup._id}/channels/${channel._id}/restore`,
+        {},
+        authConfig()
+      );
+      setChannels((previous) => previous.some((item) => String(item._id) === String(data._id))
+        ? previous
+        : [...previous, data].sort((a, b) => a.sortOrder - b.sortOrder));
+      setArchivedChannels((previous) => previous.filter((item) => String(item._id) !== String(data._id)));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not enable channel.');
+    }
+  };
+
+  const permanentlyDeleteArchivedChannel = async (channel) => {
+    if (!activeGroup || !window.confirm(`Permanently delete #${channel.slug}? Existing messages will remain, but channel-specific scheduled items and sessions may be removed.`)) return;
+    try {
+      await axios.delete(`${apiUrl}/api/groups/${activeGroup._id}/channels/${channel._id}/permanent`, authConfig());
+      setArchivedChannels((previous) => previous.filter((item) => String(item._id) !== String(channel._id)));
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not permanently delete channel.');
     }
   };
 
@@ -669,7 +779,72 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
             )}
             {activeGroup.groupType === 'community' && hasPermission(activeGroup, 'manageChannels', isAdmin) && (
               <section className="mb-4 rounded-xl border theme-border p-3">
-                <h3 className="text-sm font-semibold">Channel posting access</h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold">Channel management</h3>
+                  <button type="button" onClick={() => setShowArchivedChannels((shown) => !shown)} aria-expanded={showArchivedChannels} className="rounded-lg border theme-border px-2.5 py-1.5 text-xs hover:bg-white/10">
+                    Archived channels ({archivedChannels.length})
+                  </button>
+                </div>
+                <div className="mt-3">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-medium">Display order</span>
+                    {isSavingChannelOrder && <span className="theme-muted text-[10px]">Saving...</span>}
+                  </div>
+                  <ol className="space-y-1">
+                    {channels.map((channel, index) => (
+                      <li
+                        key={channel._id}
+                        draggable={!isSavingChannelOrder}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', String(channel._id));
+                          setDraggedChannelId(channel._id);
+                        }}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const sourceId = draggedChannelId || event.dataTransfer.getData('text/plain');
+                          if (sourceId) moveChannel(sourceId, channel._id);
+                          setDraggedChannelId(null);
+                        }}
+                        onDragEnd={() => setDraggedChannelId(null)}
+                        className={`flex items-center gap-2 rounded-lg border theme-border px-2 py-1.5 ${String(draggedChannelId) === String(channel._id) ? 'opacity-50' : ''}`}
+                      >
+                        <span aria-hidden="true" title="Drag to reorder" className="theme-muted cursor-grab touch-none active:cursor-grabbing">
+                          <FaGripVertical size={12} />
+                        </span>
+                        <span className="theme-muted w-5 text-right text-[11px] tabular-nums">{index + 1}</span>
+                        <span className="min-w-0 flex-1 truncate text-xs">{channel.name}</span>
+                        <button type="button" disabled={index === 0 || isSavingChannelOrder} onClick={() => moveChannelByOffset(channel._id, -1)} aria-label={`Move ${channel.name} up`} title="Move up" className="theme-muted rounded p-1 hover:bg-white/10 disabled:opacity-30">
+                          <FaArrowUp size={10} />
+                        </button>
+                        <button type="button" disabled={index === channels.length - 1 || isSavingChannelOrder} onClick={() => moveChannelByOffset(channel._id, 1)} aria-label={`Move ${channel.name} down`} title="Move down" className="theme-muted rounded p-1 hover:bg-white/10 disabled:opacity-30">
+                          <FaArrowDown size={10} />
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                {showArchivedChannels && (
+                  <div className="mt-3 border-t theme-border pt-3">
+                    <p className="theme-muted mb-2 text-[11px]">Archived channels are hidden from members. Their names stay reserved until permanent deletion.</p>
+                    {archivedChannels.length ? (
+                      <ul className="space-y-1">
+                        {archivedChannels.map((channel) => (
+                          <li key={channel._id} className="flex items-center gap-2 rounded-lg bg-white/5 px-2 py-2">
+                            <span className="min-w-0 flex-1 truncate text-sm">{channel.name}</span>
+                            <button type="button" onClick={() => restoreArchivedChannel(channel)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-emerald-200 hover:bg-emerald-500/10" aria-label={`Enable ${channel.name}`} title="Enable channel">
+                              <FaUndo size={10} /> Enable
+                            </button>
+                            <button type="button" onClick={() => permanentlyDeleteArchivedChannel(channel)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-rose-200 hover:bg-rose-500/10" aria-label={`Permanently delete ${channel.name}`} title="Permanently delete channel">
+                              <FaTrash size={10} /> Delete
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : <p className="theme-muted text-xs">No archived channels.</p>}
+                  </div>
+                )}
                 <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                   <select value={permissionChannelId} onChange={(event) => loadChannelRolePermissions(event.target.value)} aria-label="Channel for posting permissions" className="min-w-0 rounded-lg border theme-border theme-control px-2 py-2 text-xs"><option value="">Choose channel</option>{channels.filter((channel) => channel.channelType === 'text').map((channel) => <option key={channel._id} value={channel._id}>#{channel.name}</option>)}</select>
                   <select value={permissionRoleKey} onChange={(event) => setPermissionRoleKey(event.target.value)} aria-label="Role for channel posting permissions" disabled={!permissionChannelId} className="min-w-0 rounded-lg border theme-border theme-control px-2 py-2 text-xs"><option value="">Choose role</option>{groupRoles.filter((role) => role.roleKey !== 'admin').map((role) => <option key={role.roleKey} value={role.roleKey}>{role.name}</option>)}</select>
