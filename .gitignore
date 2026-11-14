@@ -1,0 +1,48 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Tailwind CSS output (if generated separately, usually not needed)
+*.css.d.ts
+graphify-out/
+ss/
+tasks.md
+node_modules/
+dist
+dist-ssr
+*.local
+build/
+chatserver/uploads/
+
+# Vite cache
+.vite/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# dotenv environment variables
+*.env
+**/.env
+.env.*.local
+client_secret*.json
+
+# Optional: ignore local development config
+*.local
+
+# Optional: Linux/Mac swap files
+*.swp
+*.swo
+Caddyfile

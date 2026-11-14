@@ -1,0 +1,8 @@
+{
+  "appId": "com.nfang.chatapp",
+  "appName": "NFaNG",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

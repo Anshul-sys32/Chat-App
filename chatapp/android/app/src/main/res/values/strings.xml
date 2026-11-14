@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NFaNG</string>
+    <string name="title_activity_main">NFaNG</string>
+    <string name="package_name">com.nfang.chatapp</string>
+    <string name="custom_url_scheme">com.nfang.chatapp</string>
+</resources>
