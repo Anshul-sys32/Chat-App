@@ -135,6 +135,9 @@ const updateChannel = async (req, res) => {
       [channelId, groupId]
     );
     if (!channels.length) return res.status(404).json({ message: "Channel not found." });
+    if (channels[0].slug === "general" && name !== undefined && makeSlug(name) !== "general") {
+      return res.status(409).json({ message: "The general channel name is protected." });
+    }
     const nextName = name === undefined ? null : name;
     await pool.execute(
       `UPDATE group_channels SET
@@ -168,40 +171,52 @@ const reorderChannels = async (req, res) => {
     || new Set(channelIds.map(Number)).size !== channelIds.length) {
     return res.status(400).json({ message: "Provide a valid ordered list of channel ids." });
   }
+  let connection;
+  let transactionStarted = false;
   try {
     const { error } = await resolveCommunityGroup(groupId, req.user, "manageChannels");
     if (error) return sendAccessError(res, error);
-    const [activeChannels] = await pool.execute(
-      "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE",
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
+    const [activeChannels] = await connection.execute(
+      "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE FOR UPDATE",
       [groupId]
     );
     const activeIds = activeChannels.map((channel) => Number(channel.id));
     const requestedIds = channelIds.map(Number);
     if (activeIds.length !== requestedIds.length
       || activeIds.some((id) => !requestedIds.includes(id))) {
+      await connection.rollback();
+      transactionStarted = false;
       return res.status(409).json({ message: "The channel list changed. Refresh and try again." });
     }
     if (requestedIds.length) {
       const cases = requestedIds.map(() => "WHEN ? THEN ?").join(" ");
       const values = requestedIds.flatMap((id, sortOrder) => [id, sortOrder]);
-      await pool.execute(
+      await connection.execute(
         `UPDATE group_channels SET sort_order = CASE id ${cases} END
          WHERE group_id = ? AND is_archived = FALSE`,
         [...values, groupId]
       );
     }
-    const [channels] = await pool.execute(
+    const [channels] = await connection.execute(
       `SELECT id AS _id, group_id AS groupId, name, slug, description,
               channel_type AS channelType, posting_mode AS postingMode, sort_order AS sortOrder
        FROM group_channels WHERE group_id = ? AND is_archived = FALSE
        ORDER BY sort_order, id`,
       [groupId]
     );
+    await connection.commit();
+    transactionStarted = false;
     req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-order-updated", { groupId, channels });
     return res.json({ channels });
   } catch (error) {
+    if (transactionStarted) await connection.rollback();
     console.error("Reorder community channels error:", error);
     return res.status(500).json({ message: "Could not reorder channels." });
+  } finally {
+    connection?.release();
   }
 };
 
@@ -313,6 +328,13 @@ const permanentlyDeleteChannel = async (req, res) => {
     );
     if (!channels.length) return res.status(404).json({ message: "Archived channel not found." });
     if (channels[0].slug === "general") return res.status(409).json({ message: "The general channel cannot be permanently deleted." });
+    const [[{ sessionCount }]] = await pool.execute(
+      "SELECT COUNT(*) AS sessionCount FROM community_collab_sessions WHERE group_id = ? AND channel_id = ?",
+      [groupId, channelId]
+    );
+    if (Number(sessionCount) > 0) {
+      return res.status(409).json({ message: "This channel has collaborative session history and cannot be permanently deleted." });
+    }
     await pool.execute(
       "DELETE FROM group_channels WHERE id = ? AND group_id = ? AND is_archived = TRUE",
       [channelId, groupId]
@@ -320,6 +342,9 @@ const permanentlyDeleteChannel = async (req, res) => {
     req.app.get("io")?.to(`group:${groupId}`).emit("group-channel-removed", { groupId, channelId });
     return res.status(204).end();
   } catch (error) {
+    if (error.code === "ER_ROW_IS_REFERENCED_2") {
+      return res.status(409).json({ message: "This channel still contains retained history and cannot be permanently deleted." });
+    }
     console.error("Permanently delete community channel error:", error);
     return res.status(500).json({ message: "Could not permanently delete this channel." });
   }

@@ -10,12 +10,17 @@ const getSession = async (sessionId) => {
   const [rows] = await pool.execute(
         `SELECT session.id, session.group_id AS groupId, session.channel_id AS channelId,
           channel.name AS channelName,
-            session.creator_id AS creatorId, creator.username AS creatorName,
+            session.creator_id AS creatorId, COALESCE(creator.username, 'Former member') AS creatorName,
+            EXISTS (
+              SELECT 1 FROM group_members creator_membership
+              WHERE creator_membership.group_id = session.group_id
+                AND creator_membership.user_id = session.creator_id
+            ) AS creatorIsMember,
             session.session_type AS sessionType, session.name, session.summary,
             session.status, session.created_at AS createdAt,
             session.updated_at AS updatedAt, session.closed_at AS closedAt
      FROM community_collab_sessions session
-    JOIN users creator ON creator.id = session.creator_id
+    LEFT JOIN users creator ON creator.id = session.creator_id
     JOIN group_channels channel ON channel.id = session.channel_id
      WHERE session.id = ? LIMIT 1`,
     [sessionId]

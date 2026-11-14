@@ -197,6 +197,7 @@ test("migration runner serializes, records, skips applied versions, and releases
     "202611010023_community_integrations",
     "202611010024_community_collab_sessions",
     "202611130001_community_bot_command_group_scope",
+    "202611140001_collaboration_retention",
   ]);
   assert.equal(statements.filter((sql) => sql.includes("CREATE TABLE IF NOT EXISTS user_notification_preferences")).length, 1);
   assert.equal(statements.filter((sql) => sql.includes("GET_LOCK")).length, 2);
@@ -1068,6 +1069,7 @@ test("permanent channel deletion only accepts archived non-general channels", as
     statements.push(sql);
     if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
     if (sql.includes("SELECT id, slug FROM group_channels")) return [[{ id: 14, slug: "hangout" }], []];
+    if (sql.includes("SELECT COUNT(*) AS sessionCount")) return [[{ sessionCount: 0 }], []];
     return [{ affectedRows: 1 }, []];
   });
   const response = { ...createResponse(), end() { return this; } };
@@ -1078,29 +1080,55 @@ test("permanent channel deletion only accepts archived non-general channels", as
   }, response);
   assert.equal(response.statusCode, 204);
   assert.match(statements[1], /is_archived = TRUE/);
-  assert.match(statements[2], /DELETE FROM group_channels.*is_archived = TRUE/s);
+  assert.match(statements[3], /DELETE FROM group_channels.*is_archived = TRUE/s);
+});
+
+test("permanent channel deletion preserves channels with collaborative session history", async () => {
+  const statements = [];
+  mock.method(pool, "execute", async (sql) => {
+    statements.push(sql);
+    if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
+    if (sql.includes("SELECT id, slug FROM group_channels")) return [[{ id: 14, slug: "hangout" }], []];
+    if (sql.includes("SELECT COUNT(*) AS sessionCount")) return [[{ sessionCount: 1 }], []];
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+  const response = createResponse();
+  await permanentlyDeleteChannel({
+    user: { id: 5, role: "user" },
+    params: { groupId: "8", channelId: "14" },
+  }, response);
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body.message, /collaborative session history/);
+  assert.equal(statements.some((sql) => sql.startsWith("DELETE FROM group_channels")), false);
 });
 
 test("channel managers persist the requested channel order and broadcast it", async () => {
   const statements = [];
   const events = [];
+  let committed = false;
   mock.method(pool, "execute", async (sql, values) => {
     statements.push({ sql, values });
     if (sql.includes("FROM chat_groups group_record")) {
       return [[{ id: 8, groupType: "community", groupRole: "moderator", rolePermissions: { manageChannels: true } }], []];
     }
-    if (sql === "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE") {
-      return [[{ id: 12 }, { id: 14 }], []];
-    }
-    if (sql.includes("UPDATE group_channels SET sort_order = CASE id")) return [{ affectedRows: 2 }, []];
-    if (sql.includes("ORDER BY sort_order, id")) {
-      return [[
+    throw new Error(`Unexpected query: ${sql}`);
+  });
+  mock.method(pool, "getConnection", async () => ({
+    beginTransaction: async () => {},
+    execute: async (sql, values) => {
+      statements.push({ sql, values });
+      if (sql.startsWith("SELECT id FROM group_channels")) return [[{ id: 12 }, { id: 14 }], []];
+      if (sql.includes("UPDATE group_channels SET sort_order = CASE id")) return [{ affectedRows: 2 }, []];
+      if (sql.includes("ORDER BY sort_order, id")) return [[
         { _id: 14, groupId: 8, name: "Hangout", sortOrder: 0 },
         { _id: 12, groupId: 8, name: "General", sortOrder: 1 },
       ], []];
-    }
-    throw new Error(`Unexpected query: ${sql}`);
-  });
+      throw new Error(`Unexpected connection query: ${sql}`);
+    },
+    commit: async () => { committed = true; },
+    rollback: async () => {},
+    release: () => {},
+  }));
   const response = createResponse();
   await reorderChannels({
     user: { id: 5, role: "user" },
@@ -1110,7 +1138,9 @@ test("channel managers persist the requested channel order and broadcast it", as
   }, response);
 
   assert.equal(response.statusCode, 200);
+  assert.equal(committed, true);
   assert.deepEqual(response.body.channels.map((channel) => channel._id), [14, 12]);
+  assert.match(statements[1].sql, /FOR UPDATE/);
   assert.match(statements[2].sql, /CASE id WHEN \? THEN \? WHEN \? THEN \? END/);
   assert.deepEqual(statements[2].values, [14, 0, 12, 1, 8]);
   assert.equal(events[0].name, "group-channel-order-updated");
@@ -1119,9 +1149,19 @@ test("channel managers persist the requested channel order and broadcast it", as
 test("channel reorder rejects an incomplete or stale channel list", async () => {
   mock.method(pool, "execute", async (sql) => {
     if (sql.includes("FROM chat_groups group_record")) return [[{ id: 8, groupType: "community", groupRole: "admin" }], []];
-    if (sql === "SELECT id FROM group_channels WHERE group_id = ? AND is_archived = FALSE") return [[{ id: 12 }, { id: 14 }], []];
     throw new Error(`Unexpected query: ${sql}`);
   });
+  let rolledBack = false;
+  mock.method(pool, "getConnection", async () => ({
+    beginTransaction: async () => {},
+    execute: async (sql) => {
+      if (sql.startsWith("SELECT id FROM group_channels")) return [[{ id: 12 }, { id: 14 }], []];
+      throw new Error(`Unexpected connection query: ${sql}`);
+    },
+    commit: async () => {},
+    rollback: async () => { rolledBack = true; },
+    release: () => {},
+  }));
   const response = createResponse();
   await reorderChannels({
     user: { id: 5, role: "user" },
@@ -1129,5 +1169,6 @@ test("channel reorder rejects an incomplete or stale channel list", async () => 
     body: { channelIds: [12] },
   }, response);
   assert.equal(response.statusCode, 409);
+  assert.equal(rolledBack, true);
   assert.match(response.body.message, /list changed/);
 });

@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { afterEach, mock, test } = require("node:test");
 const { pool } = require("../config/db");
 const migration = require("../migrations/202611010024_community_collab_sessions");
+const retentionMigration = require("../migrations/202611140001_collaboration_retention");
 const {
   closeCommunitySession,
   createCommunitySession,
@@ -65,6 +66,60 @@ test("collaborative session migration adds independent session snapshots and whi
   assert.ok(statements.some((sql) => sql.includes("community_whiteboard_session_fk")));
   await migration.down(connection);
   assert.match(statements.at(-1), /DROP TABLE IF EXISTS community_collab_sessions/);
+});
+
+test("collaboration retention migration protects session history from channel and user deletion", async () => {
+  const statements = [];
+  const foreignKeys = [
+    { table: "community_collab_sessions", column: "channel_id", constraintName: "community_collab_channel_retention_fk", deleteRule: "RESTRICT" },
+    { table: "community_collab_sessions", column: "creator_id", constraintName: "community_collab_creator_retention_fk", deleteRule: "SET NULL" },
+    { table: "community_collab_code_states", column: "updated_by", constraintName: "community_collab_code_user_retention_fk", deleteRule: "SET NULL" },
+    { table: "community_code_rooms", column: "updated_by", constraintName: "community_code_room_snapshot_user_fk", deleteRule: "CASCADE" },
+    { table: "community_whiteboard_items", column: "created_by", constraintName: "community_whiteboard_creator_fk", deleteRule: "CASCADE" },
+    { table: "community_whiteboard_items", column: "updated_by", constraintName: "community_whiteboard_updater_fk", deleteRule: "CASCADE" },
+  ];
+  const nullableColumns = new Set([
+    "community_collab_sessions:creator_id",
+    "community_collab_code_states:updated_by",
+  ]);
+  const connection = {
+    execute: async (sql, values) => {
+      if (sql.includes("information_schema.columns")) {
+        return [[{ isNullable: nullableColumns.has(`${values[0]}:${values[1]}`) ? "YES" : "NO" }], []];
+      }
+      return [foreignKeys.filter((foreignKey) => foreignKey.table === values[0]
+        && foreignKey.column === values[1]), []];
+    },
+    query: async (sql) => {
+      statements.push(sql);
+      const table = sql.match(/ALTER TABLE `([^`]+)`/)?.[1];
+      const dropName = sql.match(/DROP FOREIGN KEY `([^`]+)`/)?.[1];
+      if (dropName) {
+        const index = foreignKeys.findIndex((foreignKey) => foreignKey.table === table
+          && foreignKey.constraintName === dropName);
+        if (index >= 0) foreignKeys.splice(index, 1);
+      }
+      const nullableColumn = sql.match(/MODIFY `([^`]+)` INT UNSIGNED NULL/)?.[1];
+      if (nullableColumn) nullableColumns.add(`${table}:${nullableColumn}`);
+      const addedForeignKey = sql.match(/ADD CONSTRAINT `([^`]+)`\s+FOREIGN KEY \(`([^`]+)`\).*?ON DELETE (RESTRICT|SET NULL|CASCADE)/s);
+      if (addedForeignKey) foreignKeys.push({
+        table,
+        column: addedForeignKey[2],
+        constraintName: addedForeignKey[1],
+        deleteRule: addedForeignKey[3],
+      });
+    },
+  };
+  await retentionMigration.up(connection);
+  assert.ok(foreignKeys.some((foreignKey) => foreignKey.constraintName === "community_collab_channel_retention_fk"
+    && foreignKey.deleteRule === "RESTRICT"));
+  assert.ok(foreignKeys.some((foreignKey) => foreignKey.constraintName === "community_code_room_user_retention_fk"
+    && foreignKey.deleteRule === "SET NULL"));
+  assert.ok(nullableColumns.has("community_whiteboard_items:created_by"));
+  await retentionMigration.down(connection);
+  assert.ok(foreignKeys.some((foreignKey) => foreignKey.constraintName === "community_collab_channel_fk"
+    && foreignKey.deleteRule === "CASCADE"));
+  assert.ok(statements.some((sql) => sql.includes("community_code_room_snapshot_user_fk")));
 });
 
 test("members can create multiple simultaneous sessions of the same or different type", async () => {
@@ -133,6 +188,66 @@ test("non-creators cannot close sessions, even when they are community managers"
   }, response);
   assert.equal(response.statusCode, 403);
   assert.equal(statements.some(({ sql }) => sql.includes("UPDATE community_collab_sessions")), false);
+});
+
+test("community managers can close active sessions after the creator account is removed", async () => {
+  const statements = [];
+  mockCommunityAccess(async (sql, values) => {
+    statements.push({ sql, values });
+    if (sql.includes("FROM community_collab_sessions session")) return [[{
+      id: "f15b2fcf-f8fa-4f20-a9df-123456789abc",
+      groupId: 8,
+      channelId: 21,
+      creatorId: null,
+      creatorName: "Former member",
+      sessionType: "code_room",
+      name: "API review",
+      summary: "Plan API",
+      status: "active",
+    }], []];
+    if (sql.startsWith("UPDATE community_collab_sessions")) return [{ affectedRows: 1 }, []];
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const response = createResponse();
+  await closeCommunitySession({
+    params: { sessionId: "f15b2fcf-f8fa-4f20-a9df-123456789abc" },
+    user: { id: 8, role: "admin" },
+    app: { get: () => ({ to: () => ({ emit: () => {} }), in: () => ({ socketsLeave: () => {} }) }) },
+  }, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.session.creatorId, null);
+  assert.equal(response.body.session.creatorName, "Former member");
+  assert.ok(statements.some(({ sql }) => sql.startsWith("UPDATE community_collab_sessions")));
+});
+
+test("community managers can close active sessions after the creator leaves the community", async () => {
+  const statements = [];
+  mockCommunityAccess(async (sql, values) => {
+    statements.push({ sql, values });
+    if (sql.includes("FROM community_collab_sessions session")) return [[{
+      id: "f15b2fcf-f8fa-4f20-a9df-123456789abc",
+      groupId: 8,
+      channelId: 21,
+      creatorId: 5,
+      creatorIsMember: 0,
+      creatorName: "Ada",
+      sessionType: "code_room",
+      name: "API review",
+      summary: "Plan API",
+      status: "active",
+    }], []];
+    if (sql.startsWith("UPDATE community_collab_sessions")) return [{ affectedRows: 1 }, []];
+    throw new Error(`Unexpected SQL: ${sql}`);
+  });
+  const response = createResponse();
+  await closeCommunitySession({
+    params: { sessionId: "f15b2fcf-f8fa-4f20-a9df-123456789abc" },
+    user: { id: 8, role: "admin" },
+    app: { get: () => ({ to: () => ({ emit: () => {} }), in: () => ({ socketsLeave: () => {} }) }) },
+  }, response);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.session.creatorId, 5);
+  assert.ok(statements.some(({ sql }) => sql.startsWith("UPDATE community_collab_sessions")));
 });
 
 test("closed sessions allow authorized reads but reject collaborative writes", async () => {

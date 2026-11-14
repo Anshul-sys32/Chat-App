@@ -51,9 +51,9 @@ const listWhiteboardItems = async (req, res) => {
     if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
     const [items] = await pool.execute(
       `SELECT item.id, item.item_type AS itemType, item.data,
-              item.created_by AS createdBy, creator.username AS creatorName,
+              item.created_by AS createdBy, COALESCE(creator.username, 'Former member') AS creatorName,
               item.updated_at AS updatedAt
-       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+      FROM community_whiteboard_items item LEFT JOIN users creator ON creator.id = item.created_by
       WHERE item.group_id = ? AND item.session_id IS NULL ORDER BY item.id LIMIT 2000`,
       [groupId]
     );
@@ -83,9 +83,9 @@ const createWhiteboardItem = async (req, res) => {
     );
     const [rows] = await pool.execute(
       `SELECT item.id, item.item_type AS itemType, item.data,
-              item.created_by AS createdBy, creator.username AS creatorName,
+              item.created_by AS createdBy, COALESCE(creator.username, 'Former member') AS creatorName,
               item.updated_at AS updatedAt
-       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+      FROM community_whiteboard_items item LEFT JOIN users creator ON creator.id = item.created_by
        WHERE item.id = ?`,
       [result.insertId]
     );
@@ -126,9 +126,9 @@ const updateWhiteboardItem = async (req, res) => {
     );
     const [rows] = await pool.execute(
       `SELECT item.id, item.item_type AS itemType, item.data,
-              item.created_by AS createdBy, creator.username AS creatorName,
+              item.created_by AS createdBy, COALESCE(creator.username, 'Former member') AS creatorName,
               item.updated_at AS updatedAt
-       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+      FROM community_whiteboard_items item LEFT JOIN users creator ON creator.id = item.created_by
        WHERE item.id = ?`,
       [itemId]
     );
@@ -187,9 +187,9 @@ const listSessionWhiteboardItems = async (req, res) => {
     if (!authorized) return;
     const [items] = await pool.execute(
       `SELECT item.id, item.item_type AS itemType, item.data,
-              item.created_by AS createdBy, creator.username AS creatorName,
+              item.created_by AS createdBy, COALESCE(creator.username, 'Former member') AS creatorName,
               item.updated_at AS updatedAt
-       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+      FROM community_whiteboard_items item LEFT JOIN users creator ON creator.id = item.created_by
        WHERE item.group_id = ? AND item.session_id = ? ORDER BY item.id LIMIT 2000`,
       [authorized.session.groupId, authorized.session.id]
     );
@@ -219,9 +219,9 @@ const createSessionWhiteboardItem = async (req, res) => {
     );
     const [rows] = await pool.execute(
       `SELECT item.id, item.item_type AS itemType, item.data,
-              item.created_by AS createdBy, creator.username AS creatorName,
+              item.created_by AS createdBy, COALESCE(creator.username, 'Former member') AS creatorName,
               item.updated_at AS updatedAt
-       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+      FROM community_whiteboard_items item LEFT JOIN users creator ON creator.id = item.created_by
        WHERE item.id = ? AND item.session_id = ? LIMIT 1`,
       [result.insertId, authorized.session.id]
     );
@@ -263,9 +263,9 @@ const updateSessionWhiteboardItem = async (req, res) => {
     );
     const [rows] = await pool.execute(
       `SELECT item.id, item.item_type AS itemType, item.data,
-              item.created_by AS createdBy, creator.username AS creatorName,
+              item.created_by AS createdBy, COALESCE(creator.username, 'Former member') AS creatorName,
               item.updated_at AS updatedAt
-       FROM community_whiteboard_items item JOIN users creator ON creator.id = item.created_by
+      FROM community_whiteboard_items item LEFT JOIN users creator ON creator.id = item.created_by
        WHERE item.id = ? AND item.session_id = ? LIMIT 1`,
       [itemId, authorized.session.id]
     );

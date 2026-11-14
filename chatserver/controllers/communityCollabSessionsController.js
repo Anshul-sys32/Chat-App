@@ -1,15 +1,23 @@
 const { randomUUID } = require("node:crypto");
 const { pool } = require("../config/db");
+const { canManageGroup } = require("../services/groupAccess");
 const { authorizeChannel, authorizeSession, SESSION_TYPES } = require("../services/communityCollabSessions");
 
 const sessionRoomForChannel = (groupId, channelId) => `group:${groupId}:channel:${channelId}`;
 const toSession = (row) => ({
   ...row,
-  creatorId: Number(row.creatorId),
+  creatorId: row.creatorId == null ? null : Number(row.creatorId),
   groupId: Number(row.groupId),
   channelId: Number(row.channelId),
   closedAt: row.closedAt || null,
 });
+const canManageSession = (session, group, user) => {
+  if (session.creatorId != null && Number(session.creatorId) === Number(user.id)) return true;
+  const creatorUnavailable = session.creatorId == null
+    || session.creatorIsMember === 0
+    || session.creatorIsMember === false;
+  return creatorUnavailable && canManageGroup(group, "manageChannels", user.role);
+};
 
 const listCommunitySessions = async (req, res) => {
   const groupId = Number(req.params.groupId);
@@ -23,12 +31,12 @@ const listCommunitySessions = async (req, res) => {
     const [rows] = await pool.execute(
             `SELECT session.id, session.group_id AS groupId, session.channel_id AS channelId,
               channel.name AS channelName,
-              session.creator_id AS creatorId, creator.username AS creatorName,
+              session.creator_id AS creatorId, COALESCE(creator.username, 'Former member') AS creatorName,
               session.session_type AS sessionType, session.name, session.summary,
               session.status, session.created_at AS createdAt,
               session.updated_at AS updatedAt, session.closed_at AS closedAt
        FROM community_collab_sessions session
-      JOIN users creator ON creator.id = session.creator_id
+      LEFT JOIN users creator ON creator.id = session.creator_id
       JOIN group_channels channel ON channel.id = session.channel_id
        WHERE session.group_id = ? AND session.channel_id = ?
        ORDER BY session.created_at ASC, session.id ASC`,
@@ -110,7 +118,7 @@ const updateCommunitySession = async (req, res) => {
   try {
     const authorized = await authorizeSession(req.params.sessionId, req.user, { write: true });
     if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
-    if (Number(authorized.session.creatorId) !== Number(req.user.id)) {
+    if (!canManageSession(authorized.session, authorized.group, req.user)) {
       return res.status(403).json({ message: "Only the session creator can update its details." });
     }
     await pool.execute(
@@ -120,11 +128,11 @@ const updateCommunitySession = async (req, res) => {
     const [rows] = await pool.execute(
             `SELECT session.id, session.group_id AS groupId, session.channel_id AS channelId,
               channel.name AS channelName,
-              session.creator_id AS creatorId, creator.username AS creatorName,
+              session.creator_id AS creatorId, COALESCE(creator.username, 'Former member') AS creatorName,
               session.session_type AS sessionType, session.name, session.summary,
               session.status, session.created_at AS createdAt,
               session.updated_at AS updatedAt, session.closed_at AS closedAt
-      FROM community_collab_sessions session JOIN users creator ON creator.id = session.creator_id
+      FROM community_collab_sessions session LEFT JOIN users creator ON creator.id = session.creator_id
       JOIN group_channels channel ON channel.id = session.channel_id
        WHERE session.id = ? LIMIT 1`,
       [authorized.session.id]
@@ -142,7 +150,7 @@ const closeCommunitySession = async (req, res) => {
   try {
     const authorized = await authorizeSession(req.params.sessionId, req.user);
     if (authorized.status) return res.status(authorized.status).json({ message: authorized.message });
-    if (Number(authorized.session.creatorId) !== Number(req.user.id)) {
+    if (!canManageSession(authorized.session, authorized.group, req.user)) {
       return res.status(403).json({ message: "Only the user who started this session can close it." });
     }
     let newlyClosed = false;
@@ -156,11 +164,11 @@ const closeCommunitySession = async (req, res) => {
     const [rows] = await pool.execute(
             `SELECT session.id, session.group_id AS groupId, session.channel_id AS channelId,
               channel.name AS channelName,
-              session.creator_id AS creatorId, creator.username AS creatorName,
+              session.creator_id AS creatorId, COALESCE(creator.username, 'Former member') AS creatorName,
               session.session_type AS sessionType, session.name, session.summary,
               session.status, session.created_at AS createdAt,
               session.updated_at AS updatedAt, session.closed_at AS closedAt
-      FROM community_collab_sessions session JOIN users creator ON creator.id = session.creator_id
+      FROM community_collab_sessions session LEFT JOIN users creator ON creator.id = session.creator_id
       JOIN group_channels channel ON channel.id = session.channel_id
        WHERE session.id = ? LIMIT 1`,
       [authorized.session.id]

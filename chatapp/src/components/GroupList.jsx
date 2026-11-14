@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { createPortal } from 'react-dom';
 import { FaArchive, FaArrowDown, FaArrowUp, FaCamera, FaChevronDown, FaChevronUp, FaCrown, FaExchangeAlt, FaGripVertical, FaHashtag, FaLock, FaMicrophone, FaPlus, FaTimes, FaTrash, FaUndo, FaUserMinus, FaUserPlus, FaUsers, FaVideo } from 'react-icons/fa';
@@ -44,6 +44,8 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isManagementOpen, setIsManagementOpen] = useState(false);
   const [chatAreaOverlay, setChatAreaOverlay] = useState(null);
+  const refreshMembersRef = useRef(null);
+  const refreshSequence = useRef(0);
   let currentUser = null;
   try {
     currentUser = JSON.parse(localStorage.getItem('user') || 'null');
@@ -69,10 +71,12 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
 
   useEffect(() => {
     const handleRemoved = ({ groupId }) => {
+      if (String(activeGroup?._id) === String(groupId)) refreshSequence.current += 1;
       setGroups((previous) => previous.filter((group) => String(group._id) !== String(groupId)));
       setActiveGroup((previous) => previous && String(previous._id) === String(groupId) ? null : previous);
     };
     const handleDeactivated = ({ groupId }) => {
+      if (String(activeGroup?._id) === String(groupId)) refreshSequence.current += 1;
       if (isAdmin) {
         setGroups((previous) => previous.map((group) => String(group._id) === String(groupId) ? { ...group, isActive: 0 } : group));
       } else {
@@ -102,7 +106,7 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
       setMembers((previous) => previous.map((member) => String(member._id) === String(userId) ? { ...member, role, roleName } : member));
     };
     const handleRolesUpdated = ({ groupId }) => {
-      if (String(activeGroup?._id) === String(groupId) && activeGroup) refreshMembers(activeGroup);
+      if (String(activeGroup?._id) === String(groupId) && activeGroup) refreshMembersRef.current?.(activeGroup);
     };
     const handleMemberAdded = (event) => {
       const { groupId, member, groupName, members: memberCount } = event;
@@ -217,6 +221,7 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
   }, [currentUser?._id, activeGroup, groups, isAdmin]);
 
   const refreshMembers = async (group) => {
+    const requestId = ++refreshSequence.current;
     setError('');
     try {
       const canManageChannels = group.groupType === 'community' && hasPermission(group, 'manageChannels', isAdmin);
@@ -230,14 +235,18 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
           ? axios.get(`${apiUrl}/api/groups/${group._id}/channels/archived`, authConfig())
           : Promise.resolve({ data: { channels: [] } }),
       ]);
+      if (requestId !== refreshSequence.current) return;
       setMembers(memberResponse.data);
       setChannels(channelResponse.data.channels || []);
       setArchivedChannels(archivedResponse.data.channels || []);
       setGroupRoles(roleResponse.data.roles || []);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || 'Could not load group members.');
+      if (requestId === refreshSequence.current) {
+        setError(requestError.response?.data?.message || 'Could not load group members.');
+      }
     }
   };
+  refreshMembersRef.current = refreshMembers;
 
   const createRole = async (event) => {
     event.preventDefault();
@@ -340,6 +349,7 @@ export default function GroupList({ search = '', onSelectGroup, selectedChat, is
 
   const toggleChannels = async (group) => {
     if (String(activeGroup?._id) === String(group._id)) {
+      refreshSequence.current += 1;
       setActiveGroup(null);
       setChannels([]);
       return;
